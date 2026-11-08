@@ -28,6 +28,10 @@
 #include "rtcp_lubanlite.h"
 #include "rtcp_rtthread.h"
 
+#if defined(RTCARPLAY_VIDEO)
+#include "video_sink_lubanlite.h"
+#endif
+
 #define APP_LOG(fmt, ...) rt_kprintf("[carplay] " fmt "\n", ##__VA_ARGS__)
 
 #ifndef CARPLAY_APP_DEFAULT_WIDTH
@@ -118,6 +122,9 @@ typedef struct {
     volatile bool shutting_down;
     bool ap_started;
     bool store_initialized;
+#if defined(RTCARPLAY_VIDEO)
+    bool video_started;
+#endif
 } app_state_t;
 
 static app_state_t s_app;
@@ -379,6 +386,12 @@ static void drain_touch(app_state_t *app)
 static void shutdown_stack(app_state_t *app)
 {
     app->shutting_down = true;
+#if defined(RTCARPLAY_VIDEO)
+    if (app->video_started) {
+        carplay_video_sink_stop();
+        app->video_started = false;
+    }
+#endif
     if (app->bridge != NULL) {
         input_bridge_release_all(app->bridge);
         input_bridge_destroy(app->bridge);
@@ -725,6 +738,21 @@ int carplay_app_start(const carplay_app_config_t *config)
         shutdown_stack(app);
         return RTCP_ENOMEM;
     }
+
+#if defined(RTCARPLAY_VIDEO)
+    /* A caller-supplied sink wins; otherwise drive the on-board decoder. */
+    if (app->on_screen == NULL) {
+        result = carplay_video_sink_start(app->width, app->height);
+        if (result != RTCP_OK) {
+            APP_LOG("video sink start failed rc=%d", result);
+            shutdown_stack(app);
+            return result;
+        }
+        app->video_started = true;
+        app->on_screen = carplay_video_sink_frame;
+        app->screen_context = NULL;
+    }
+#endif
 
     app->lock = rt_mutex_create("capp", RT_IPC_FLAG_FIFO);
     if (app->lock == NULL) {

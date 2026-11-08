@@ -69,9 +69,27 @@ carplay_stop
 ## Screen output
 
 `on_screen` receives Annex-B H.264 (SPS/PPS first, then access units) with the
-sender timestamp.  There is no video sink yet: this application only counts
-frames unless a sink is supplied.  Wiring the D21x video decoder and display
-is the next milestone.
+sender timestamp.  With `CONFIG_RTCARPLAY_VIDEO=y` (default when the VE and DE
+drivers are available) the application installs `video_sink_lubanlite.c`:
+
+- the Annex-B data is split into NAL units on a queue (one decoder packet per
+  NAL, matching the SDK H.264 decoder);
+- the sink's own thread decodes with `mpp_decoder` and presents NV12 frames
+  through the `aicfb` video layer, letterboxed into the configured display
+  size;
+- a configuration message (SPS/PPS) that arrives after frames were shown
+  marks a new stream (reconnect or resolution change) and recreates the
+  decoder before feeding it;
+- the UI layer alpha is saved, dimmed to 0 while running, and restored on
+  stop.
+
+Passing `config.on_screen` yourself bypasses the on-board sink.  Without
+`CONFIG_RTCARPLAY_VIDEO` (or when `aicfb` is missing) the receiver stays
+headless and only counts frames.
+
+Known bring-up notes: video memory comes from the VE/DE pools, so the frame
+count in use depends on the controller's H.264 profile; the first hardware
+run should watch `[carplay-vid]` messages for decoder resets and errors.
 
 ## Verification status
 
@@ -86,6 +104,10 @@ is the next milestone.
   `airplay_rtsp_server_start`, `rtcp_lubanlite_random`, `wifi_start_ap`,
   `wext_add_custom_ie`, `dhcpd_start`, plus mbedTLS ChaCha20-Poly1305 and
   HKDF.  Build-only, not executed.
+- **Video sink**: the MPP H.264 + DE path is build-verified with the API of
+  the pinned SDK (`mpp_decoder`, `AICFB_UPDATE_LAYER_CONFIG`).  It has not
+  decoded or displayed anything yet; the first board run with a real
+  controller is the validation.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input and the CE TRNG unit assignment all need the
   hardware run.  Treat the first boot as a bring-up session and watch the

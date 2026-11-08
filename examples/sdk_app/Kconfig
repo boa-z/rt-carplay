@@ -35,6 +35,19 @@ config RTCARPLAY_ROTATION
     int "Display rotation (0, 90, 180 or 270)"
     default 0
 
+config RTCARPLAY_VIDEO
+    bool "Decode and display the AirPlay screen stream"
+    default y
+    depends on LPKG_MPP && AIC_MPP_H264_DEC_ENABLE && AIC_DE_DRV
+    help
+      Feed the Screen stream to the SDK MPP H.264 decoder (VE) and present
+      the frames through the "aicfb" video layer.  This takes over the video
+      layer and dims the UI layer while the receiver runs.
+
+      Disable to keep the receiver headless (the application then only
+      counts screen frames).  Requires the VE (video engine) and DE (display
+      engine) drivers.
+
 # Library switches consumed by the rt-carplay SConscript.  Defined here only
 # for app mode; package mode defines them in the package Kconfig.
 

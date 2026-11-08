@@ -1,0 +1,4 @@
+build/
+*.o
+*.a
+test_mfi2c

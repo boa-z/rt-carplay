@@ -1,0 +1,37 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef RTCP_NET_H
+#define RTCP_NET_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct rtcp_addr {
+    uint8_t  family;   /* RTCP_AF_INET / RTCP_AF_INET6 */
+    uint8_t  addr[16];
+    uint16_t port;
+} rtcp_addr_t;
+
+#define RTCP_AF_INET   4
+#define RTCP_AF_INET6  6
+
+#define RTCP_POLLIN    0x01
+#define RTCP_POLLOUT   0x02
+#define RTCP_POLLERR   0x04
+
+struct rtcp_pollfd {
+    int fd;
+    int events;
+    int revents;
+};
+
+struct rtcp_net {
+    int  (*listen)(uint16_t port);
+    int  (*accept)(int lfd, rtcp_addr_t *peer);
+    int  (*connect)(const rtcp_addr_t *addr);
+    int  (*send)(int fd, const void *buf, size_t len);
+    int  (*recv)(int fd, void *buf, size_t len);
+    int  (*poll)(struct rtcp_pollfd *fds, int n, int timeout_ms);
+    void (*close)(int fd);
+};
+
+#endif /* RTCP_NET_H */

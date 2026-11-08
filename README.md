@@ -46,7 +46,10 @@ this repo yet.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
   Screen dump) described under “Linux simulator”.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
-  ASan/UBSan.
+  ASan/UBSan.  The end-to-end test runs a real controller implementation
+  against `airplay_rtsp_server` on loopback: SRP-6a Pair-Setup, X25519
+  Pair-Verify, the ControlCipher transition, SETUP/RECORD and encrypted
+  Screen DataStream frames.
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.
 
 ## Build and test

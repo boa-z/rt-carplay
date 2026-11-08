@@ -84,7 +84,7 @@ carplay_bt status             # enable state, SDP/RFCOMM channel, link state
 carplay_bt stop               # drop the link and stop accepting
 
 carplay_iap2 start            # real iAP2 session over RFCOMM (needs carplay_start)
-carplay_iap2 status           # serving/link/identification/MFi counters
+carplay_iap2 status           # serving/link/coprocessor/identification/MFi counters
 carplay_iap2 stop             # stop the session and disconnect the phone
 
 carplay_video status          # decoder counters, queue depth
@@ -150,16 +150,27 @@ retires the iAP2 service.
 The iAP2 session builds 5 GHz channels (the SoftAP default is 36), not just
 the 2.4 GHz 1-14 range the original relay accepted.
 
-**MFi is the current wall.**  No MFi coprocessor provider is built in, so
-`iap2` is started with `mfi = NULL`: the phone's MFi certificate request and
-challenge are ignored and the session stops after IdentificationInformation.
-`core/mfi/mfi2c.c` already implements the 2.0C register state machine over
-an injected I2C bus, but the board port and the SDP/identification result on
-real hardware need the board.  Without a 2.0C signature the session cannot
-reach Wi-Fi configuration or `CarPlayStartSession`, so hands-free wireless
-CarPlay needs the coprocessor; the AirPlay receiver path is independent of
-it.  Security level, link-key reporting and the H5 firmware/baud path remain
-board-verification items (see `port/luban-lite/README.md`).
+`RTCARPLAY_MFI` (default on, needs `AIC_I2C_DRV`) adds the 2.0C
+authentication coprocessor from `port/luban-lite/rtcp_mfi_lubanlite.c`.
+The board wires it to `i2c0` at `0x6A` (ZABlue's
+`HW_SECRUITY_I2C_ID`/`HW_SECRUITY_I2C_ADDR`); both are Kconfig values
+(`RTCARPLAY_MFI_I2C_BUS`, `RTCARPLAY_MFI_I2C_ADDR`).  The session is created
+with the provider (`config.mfi = rtcp_mfi_lubanlite()`), so the phone's
+certificate/challenge exchange runs and the flow can reach Wi-Fi
+configuration and `CarPlayStartSession`.  The probe happens when the iAP2
+service starts; if the coprocessor does not answer, the log says so and the
+session falls back to identify-only (`mfi = NULL`) instead of failing the
+transport path.  `carplay_iap2 status` reports the coprocessor as
+`ready`/`absent`.  The private key never leaves the coprocessor; only its
+certificate and signatures are used.
+
+The register engine and transaction shape were verified on the board in the
+PoC (`core/mfi/mfi2c.c`: probe at 0x4E, sign at 0x20, certificate at 0x31,
+ID `0x00000200`).  The RJGT204's compatibility with the Apple 2.0C register
+set and the full MFi exchange with a real phone remain board-verification
+items, as do the security level, link-key reporting and the H5
+firmware/baud path (see `port/luban-lite/README.md`).  The AirPlay receiver
+path is independent of MFi.
 
 ## Verification status
 
@@ -190,12 +201,25 @@ board-verification items (see `port/luban-lite/README.md`).
   `carplay_iap2`, `carplay_iap2_start`, `iap2_session_create/feed/advance`,
   `iap2_identity_build_wireless_omitting`,
   `iap2_carplay_build_start_session`, `rtcp_bt_lubanlite_recv_timeout` and
-  `rtcp_bt_lubanlite_local_bdaddr`; the image is 4,008,448 bytes.  The host
-  suite (including a new 5 GHz channel case) passes under ASan/UBSan.
+  `rtcp_bt_lubanlite_local_bdaddr`.  The host suite (including a new 5 GHz
+  channel case) passes under ASan/UBSan.
   Build-only: on the board, watch for `[iap2] link up` and
-  `identification accepted`; MFi will then stop the flow until a 2.0C
-  provider exists.
+  `identification accepted`.
+- **MFi 2.0C provider (2026-11-08)**: `rtcp_mfi_lubanlite` adapts
+  `core/mfi/mfi2c` to the RT-Thread I2C API (`rt_i2c_master_send` for the
+  one-transfer register write, `rt_i2c_read_reg` for write-register-then-read,
+  `aicos_msleep` for the poll delay).  The ELF contains
+  `rtcp_mfi_lubanlite_start`, `rtcp_mfi_lubanlite_ready`,
+  `rtcp_mfi2c_probe/sign/read_cert` and `rt_i2c_read_reg`; the image is
+  4,012,544 bytes with zero build warnings.  The transaction shape, the
+  register addresses and the 2.0C ID were verified on the board in the PoC;
+  the I2C bus/address defaults come from ZABlue's properties (i2c0/0x6A).
+  Build-only for the provider itself: the first `carplay_iap2 start` on the
+  board should log `I/mfi: 2.0C at i2c0 0x6a: id=0x00000200 ...` and
+  `MFi certificate sent`, followed by `MFi authenticated` when a phone
+  connects.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input, the CE TRNG unit assignment, the Bluetooth
-  H5/RFCOMM path and the iAP2 session all need the hardware run.  Treat the
-  first boot as a bring-up session and watch the console log.
+  H5/RFCOMM path, the MFi exchange with a real phone and the iAP2 session all
+  need the hardware run.  Treat the first boot as a bring-up session and
+  watch the console log.

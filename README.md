@@ -43,10 +43,12 @@ this repo yet.
   BT seam stays an explicit `RTCP_ENOTSUP` stub (the SDK-specific Zephyr
   transport lives in `port/luban-lite/`).
 - `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam, the
-  CE TRNG entropy provider, and `rtcp_bt_lubanlite`: Zephyr Classic BR/EDR +
-  RFCOMM (RTL8733 H5) with SDP records, an iAP2 byte stream and the
-  timed-receive/local-BD-address helpers the iAP2 pump uses, for the
-  ArtInChip SDK.
+  CE TRNG entropy provider, `rtcp_bt_lubanlite` (Zephyr Classic BR/EDR +
+  RFCOMM over RTL8733 H5, with SDP records, an iAP2 byte stream and the
+  timed-receive/local-BD-address helpers the iAP2 pump uses), and
+  `rtcp_mfi_lubanlite`: the 2.0C authentication coprocessor over the
+  RT-Thread I2C bus (i2c0/0x6A on demo128-nand-carplay), which removes the
+  MFi wall for the wireless iAP2 flow.
 - `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
   Screen dump) described under “Linux simulator”.

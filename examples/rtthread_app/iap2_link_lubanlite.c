@@ -8,9 +8,11 @@
  * receiver (carplay_app) must be running; the session borrows its SSID,
  * AirPlay endpoint and Ed25519 identity.
  *
- * No MFi provider is installed, so the phone's certificate/challenge
- * exchange is ignored and the session stops after IdentificationInformation.
- * Wiring the 2.0C coprocessor is the next step; see core/mfi/mfi2c.h.
+ * With RTCARPLAY_MFI the session also gets the 2.0C coprocessor on the I2C
+ * bus, so the MFi certificate/challenge exchange runs and the session can
+ * reach Wi-Fi configuration and CarPlayStartSession.  When the probe fails
+ * the session is created without MFi and stops after IdentificationInformation
+ * (the transport path is still testable).
  */
 #include "iap2_link_lubanlite.h"
 
@@ -168,6 +170,27 @@ static void link_event(iap2_session_event_t event, void *context)
     }
 }
 
+/*
+ * The coprocessor is optional at runtime: a board with the part absent (or
+ * wired to another bus/address) must still run the identify-only flow so the
+ * transport can be tested.  The probe touches I2C once, when the session is
+ * created.
+ */
+static const struct rtcp_mfi *link_mfi(void)
+{
+#if defined(RTCARPLAY_MFI)
+    int result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
+                                          RTCARPLAY_MFI_I2C_ADDR);
+    if (result == RTCP_OK) return rtcp_mfi_lubanlite();
+    IAP2_LOG("MFi coprocessor unavailable rc=%d; the session will stop after "
+             "identification", result);
+#else
+    IAP2_LOG("MFi support not built in; the session will stop after "
+             "identification");
+#endif
+    return NULL;
+}
+
 static int link_session_create(iap2_link_t *link)
 {
     carplay_app_iap2_info_t info;
@@ -197,9 +220,7 @@ static int link_session_create(iap2_link_t *link)
     iap2_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.identity = identity;
-    /* No 2.0C provider yet: the session ignores the phone's MFi request and
-     * cannot reach CarPlayStartSession.  See the file header. */
-    config.mfi = NULL;
+    config.mfi = link_mfi();
     config.tx = link_tx;
     config.get_wifi = link_get_wifi;
     config.get_airplay = link_get_airplay;
@@ -412,11 +433,16 @@ static int cmd_carplay_iap2(int argc, char **argv)
         return 0;
     }
     if (strcmp(sub, "status") == 0) {
+        const char *coproc = "not built in";
+#if defined(RTCARPLAY_MFI)
+        coproc = rtcp_mfi_lubanlite_ready() ? "ready" : "absent";
+#endif
         rt_kprintf("carplay_iap2: %s, link %s, BT channel %u, "
-                   "identification %s, MFi %s, rx %u tx %u, events %u\n",
+                   "coprocessor %s, identification %s, MFi %s, "
+                   "rx %u tx %u, events %u\n",
                    s_link.running ? "serving" : "off",
                    s_link.link_up ? "up" : "down",
-                   (unsigned)rtcp_bt_lubanlite_channel(),
+                   (unsigned)rtcp_bt_lubanlite_channel(), coproc,
                    carplay_iap2_identification_accepted() ? "accepted"
                                                          : "pending",
                    carplay_iap2_authenticated() ? "authenticated"

@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "rtcp/bt.h"
+#include "rtcp/mfi.h"
 #include "rtcp/wifi.h"
 
 /*
@@ -88,6 +89,28 @@ unsigned rtcp_bt_lubanlite_rx_dropped(void);
  * enable(); returns RTCP_ESTATE before that.
  */
 int rtcp_bt_lubanlite_local_bdaddr(uint8_t address[6]);
+
+/*
+ * MFi 2.0C authentication coprocessor on the RT-Thread I2C bus.
+ *
+ * The Apple 2.0C and pin-compatible parts (RJGT204 on this board) expose a
+ * register interface: a write is ONE I2C transfer of [register, data...]
+ * and a read is a register write followed by a read, both ending in STOP
+ * (the part does not answer a repeated-start combined transfer).  The
+ * register engine lives in core/mfi/mfi2c.c; this seam only supplies I2C
+ * transactions.  It can read the certificate and request signatures for a
+ * 20-byte challenge; the private key never leaves the coprocessor.
+ *
+ * The demo128-nand-carplay board has the part on i2c0 at 0x6A (ZABlue's
+ * HW_SECRUITY_I2C_ID=0 / HW_SECRUITY_I2C_ADDR=0x6A; i2c0 runs at 100 kHz).
+ * start() is idempotent and probes once; it returns RTCP_ENOENT when the
+ * bus does not exist and the probe error otherwise.  On failure the iAP2
+ * session must be created with .mfi = NULL (it then stops after
+ * IdentificationInformation).
+ */
+int rtcp_mfi_lubanlite_start(const char *i2c_bus_name, uint8_t address);
+bool rtcp_mfi_lubanlite_ready(void);
+const struct rtcp_mfi *rtcp_mfi_lubanlite(void);
 
 /*
  * Fills output with bytes from the ArtInChip CE true random number generator.

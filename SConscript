@@ -45,10 +45,11 @@ if GetDepend('LPKG_RT_CARPLAY_ED25519'):
 src += Glob('port/rtthread/*.c')
 cpppath.append(cwd + '/port/rtthread/include')
 
-# Luban-Lite board seams.  The include directory is shared by the Wi-Fi and
-# Bluetooth sources (rtcp_lubanlite.h declares both interfaces).
+# Luban-Lite board seams.  The include directory is shared by the Wi-Fi,
+# Bluetooth and MFi sources (rtcp_lubanlite.h declares all three interfaces).
 if (GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI') or
-        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT')):
+        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT') or
+        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI')):
     cpppath.append(cwd + '/port/luban-lite/include')
 
 # Luban-Lite Wi-Fi seam (Realtek RTL8733BS SoftAP + vendor IE).
@@ -76,6 +77,10 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT'):
                               'zephyr-bluetooth')
         cpppath.append(os.path.join(zephyr, 'include'))
         cpppath.append(os.path.join(zephyr, 'porting'))
+
+# Luban-Lite MFi seam: 2.0C authentication coprocessor on the I2C bus.
+if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI'):
+    src += Glob('port/luban-lite/rtcp_mfi_lubanlite.c')
 
 group = DefineGroup('rt-carplay', src, depend=['LPKG_USING_RT_CARPLAY'],
                     CPPPATH=cpppath, LOCAL_CCFLAGS=ccflags)

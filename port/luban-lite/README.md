@@ -8,7 +8,8 @@ RT-Thread port:
 | `rtcp_wifi_lubanlite.c` | `rtcp_wifi` backed by the Realtek RTL8733BS SoftAP API |
 | `rtcp_random_lubanlite.c` | `rtcp_os.random` backed by the ArtInChip CE TRNG |
 | `rtcp_bt_lubanlite.c` | `rtcp_bt` backed by the SDK Zephyr Classic/RFCOMM host (iAP2 transport) |
-| `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite`, `rtcp_bt_lubanlite`, interface setter and `rtcp_lubanlite_random` |
+| `rtcp_mfi_lubanlite.c` | `rtcp_mfi` backed by the 2.0C authentication coprocessor on I2C |
+| `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite`, `rtcp_bt_lubanlite`, `rtcp_mfi_lubanlite`, interface setter and `rtcp_lubanlite_random` |
 
 The first hardware target is an ArtInChip D213 with an RTL8733BS (SDIO Wi-Fi +
 HCI H5 Bluetooth).
@@ -176,6 +177,52 @@ same path.
   idempotent while the listener is registered, and the SDP record cannot be
   unregistered with this Zephyr version.
 
+## MFi 2.0C coprocessor (I2C)
+
+`rtcp_mfi_lubanlite.c` binds `struct rtcp_mfi` to a 2.0C-compatible
+authentication coprocessor on the RT-Thread I2C bus.  Enable it with:
+
+```
+CONFIG_LPKG_RT_CARPLAY_LUBANLITE_MFI=y   # package mode
+CONFIG_RTCARPLAY_MFI=y                   # app mode (sdk_app Kconfig)
+CONFIG_RTCARPLAY_MFI_I2C_BUS="i2c0"
+CONFIG_RTCARPLAY_MFI_I2C_ADDR=0x6A
+```
+
+The bus/address defaults are the board evidence, not a guess: ZABlue's
+`config/rtl8733bs/zablue.properties` sets `HW_SECRUITY_I2C_ID=0` and
+`HW_SECRUITY_I2C_ADDR=0x6A`, and its comment records that probing `0x68`
+fails and makes the vendor library report "HW Security Init Error".  The
+board enables `i2c0` at 100 kHz (PD.6/PD.7 pinmux).
+
+Transaction shape matters and is implemented as the part requires:
+
+- write: one `rt_i2c_master_send()` transfer of `[register, data...]`, STOP.
+  The sign payload (`{0x00, len}` + 20-byte challenge = 22 bytes) exceeds
+  `rt_i2c_write_reg()`'s fixed command buffer (`AIC_I2C_CMD_BUF_LEN` is 8,
+  so at most 7 data bytes), hence the direct send.
+- read: `rt_i2c_read_reg()` — register write (STOP), then a separate read
+  (STOP), retried with an `aicos_msleep()` delay.  The part does not answer a
+  repeated-start combined transfer.
+- the register engine is `core/mfi/mfi2c.c` (probe `0x4E`, version
+  `0x00..0x03`, ID at `0x04` BE, sign at `0x20`, status `0x10`, signature at
+  `0x12`, certificate at `0x31`).  Challenges must be exactly 20 bytes.
+
+`rtcp_mfi_lubanlite_start()` probes once and is idempotent; the iAP2 glue
+calls it when the service starts.  On failure the session is created with
+`mfi = NULL`, so a board without the part still exercises the transport and
+stops after IdentificationInformation.  `rtcp_mfi_lubanlite_ready()` reports
+the probe result (the `carplay_iap2 status` command prints it).
+
+**Verification status**: the 2.0C register engine and the transaction shape
+were verified on this board during the PoC (ID `0x00000200`, 31-byte probe,
+certificate read, 20-byte challenge signature).  The peripheral wrapper is
+build-only until `carplay_iap2 start` runs on the board; watch for
+`I/mfi: 2.0C at i2c0 0x6a: id=0x...`.  The RJGT204 clone's 2.0C
+compatibility and the full MFi exchange with a real phone are unverified.
+The private key never leaves the coprocessor: this port reads the
+certificate and requests signatures only.
+
 ## mbedTLS configuration
 
 Luban-Lite copies `packages/third-party/mbedtls/ports/inc/tls_config.h` over
@@ -212,6 +259,7 @@ config file needs to change; no source patching is involved.
    CONFIG_LPKG_USING_RT_CARPLAY=y
    CONFIG_LPKG_RT_CARPLAY_LOG=y
    CONFIG_LPKG_RT_CARPLAY_LUBANLITE_WIFI=y
+   CONFIG_LPKG_RT_CARPLAY_LUBANLITE_MFI=y
    ```
 
 4. Include the build script from the application (or package) SConscript:
@@ -221,8 +269,8 @@ config file needs to change; no source patching is involved.
    ```
 
 The group is named `rt-carplay`; it adds `include/`, every `core/*/include`,
-`port/rtthread/include` and (with the Wi-Fi option) `port/luban-lite/include`
-to the include path.
+`port/rtthread/include` and (with any Luban-Lite option)
+`port/luban-lite/include` to the include path.
 
 ## Board verification (pending hardware)
 
@@ -240,9 +288,13 @@ independent.
    `_raop._tcp`, then `avahi-browse -rt _airplay._tcp` on the host. The TXT
    record is produced by `airplay_txt_build()` (`deviceid`, `features`,
    `flags`, `model`, `srcvers`, `protovers`, `pi`, `pk`).
-3. **MFi oracle** — start the 2.0C TCP oracle and verify `GET_CERT` returns
-   the 908-byte certificate and `SIGN` returns a 128-byte signature. The
-   private key never leaves the 2.0C and is never written to flash or logs.
+3. **MFi 2.0C** — run `carplay_iap2 start`; the probe must log
+   `I/mfi: 2.0C at i2c0 0x6a: id=0x...` (otherwise `carplay_iap2 status`
+   reports `coprocessor absent` and the session stops after identification).
+   With a phone connected, `[iap2] MFi certificate sent` followed by
+   `[iap2] MFi authenticated` confirms the exchange. The certificate is
+   public; the private key never leaves the 2.0C and is never written to
+   flash or logs.
 4. **BT H5/RFCOMM** — with the Zephyr BT options enabled, run
    `carplay_bt start`: the H5 vendor setup must download the firmware and
    reach ready, `RFCOMM listening on channel N` must appear, and a phone

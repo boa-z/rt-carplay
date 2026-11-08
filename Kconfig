@@ -45,4 +45,16 @@ config LPKG_RT_CARPLAY_LUBANLITE_BT
         RFCOMM host, for the wireless iAP2 path.  Needs the RTL8733BS H5
         HCI transport selected in the zephyr-bluetooth package.
 
+config LPKG_RT_CARPLAY_LUBANLITE_MFI
+    bool "Use the Luban-Lite I2C MFi 2.0C provider"
+    default y if AIC_I2C_DRV
+    depends on AIC_I2C_DRV
+    help
+        Bind struct rtcp_mfi to a 2.0C authentication coprocessor on the
+        RT-Thread I2C bus, so the wireless iAP2 session can run the MFi
+        certificate/challenge exchange.  The bus name and address are
+        board parameters (i2c0/0x6A on demo128-nand-carplay); the register
+        engine is core/mfi/mfi2c.c.  Without a working coprocessor the
+        session stops after IdentificationInformation.
+
 endif

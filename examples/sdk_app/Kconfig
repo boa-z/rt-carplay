@@ -68,4 +68,19 @@ config LPKG_RT_CARPLAY_LUBANLITE_WIFI
     default y
     depends on AIC_WLAN_REALTEK
 
+config LPKG_RT_CARPLAY_LUBANLITE_BT
+    bool
+    default y
+    depends on LPKG_USING_ZEPHYR_BLUETOOTH && LPKG_BT_CLASSIC && LPKG_BT_RFCOMM
+
+config RTCARPLAY_BT
+    bool "Bluetooth RFCOMM bring-up command"
+    default y
+    depends on LPKG_RT_CARPLAY_LUBANLITE_BT
+    help
+      Add the carplay_bt shell command: enable the Zephyr Classic host, open
+      the iAP2 RFCOMM service with an SDP record, accept a phone connection
+      and echo bytes.  This is the board bring-up path for the wireless iAP2
+      transport; it does not start iAP2 or CarPlay by itself.
+
 endmenu

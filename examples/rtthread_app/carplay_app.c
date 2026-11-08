@@ -936,6 +936,124 @@ static int cmd_carplay_randtest(int argc, char **argv)
     return 0;
 }
 
+#if defined(RTCARPLAY_BT)
+/*
+ * Bluetooth RFCOMM bring-up.  This is a transport check, not CarPlay: it
+ * advertises the iAP2 service class UUID over SDP, accepts one phone
+ * connection and echoes bytes back.  A Bluetooth serial terminal that
+ * browses SDP for the iAP2 UUID (or an iAP2 probe) exercises the path.
+ *
+ * The UUID is the Apple iAP2 service class; the same 16-byte value appears
+ * in the vendor ZABlue library shipped with the SDK (read-only reference),
+ * so it is confirmed rather than guessed.
+ */
+#define BT_BRINGUP_UUID "00000000-deca-fade-deca-deafdecacafe"
+#define BT_BRINGUP_STACK (8U * 1024U)
+#define BT_BRINGUP_PRIORITY 20U
+#define BT_BRINGUP_TICK 20U
+
+static volatile bool s_bt_serve;
+static volatile bool s_bt_thread_running;
+static rt_thread_t s_bt_thread;
+
+static void bt_event_cb(int ev, void *user)
+{
+    (void)user;
+    APP_LOG("bt event: %s", ev == RTCP_BT_EV_CONNECTED ? "connected"
+                              : ev == RTCP_BT_EV_DISCONNECTED ? "disconnected"
+                                                              : "other");
+}
+
+static void bt_serve_thread(void *parameter)
+{
+    (void)parameter;
+    s_bt_thread_running = true;
+
+    int result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
+    if (result != RTCP_OK) {
+        APP_LOG("bt enable failed rc=%d", result);
+        goto done;
+    }
+
+    uint8_t channel = 0U;
+    result = rtcp_bt_lubanlite.rfcomm_listen(0U, "rt-carplay",
+                                             BT_BRINGUP_UUID, &channel);
+    if (result != RTCP_OK) {
+        APP_LOG("bt listen failed rc=%d", result);
+        goto done;
+    }
+    APP_LOG("bt RFCOMM listening on channel %u", (unsigned)channel);
+
+    while (s_bt_serve) {
+        int fd = -1;
+        result = rtcp_bt_lubanlite_rfcomm_accept(1, &fd);
+        if (result != RTCP_OK) {
+            APP_LOG("bt accept stopped rc=%d", result);
+            break;
+        }
+        APP_LOG("bt link up (fd %d)", fd);
+        while (s_bt_serve) {
+            uint8_t buffer[256];
+            int received = rtcp_bt_lubanlite_recv(fd, buffer, sizeof(buffer));
+            if (received == RTCP_ETIMEDOUT) continue;
+            if (received <= 0) break;
+            APP_LOG("bt rx %d byte(s)", received);
+            if (rtcp_bt_lubanlite_send(fd, buffer, (size_t)received) < 0) {
+                break;
+            }
+        }
+        APP_LOG("bt link down");
+    }
+
+done:
+    s_bt_thread_running = false;
+}
+
+static int cmd_carplay_bt(int argc, char **argv)
+{
+    const char *sub = argc >= 2 ? argv[1] : "status";
+    if (strcmp(sub, "start") == 0) {
+        if (s_bt_thread_running) {
+            rt_kprintf("carplay_bt already running\n");
+            return 0;
+        }
+        rtcp_bt_lubanlite_set_event_cb(bt_event_cb, NULL);
+        s_bt_serve = true;
+        s_bt_thread = rt_thread_create("carplay-bt", bt_serve_thread, NULL,
+                                       BT_BRINGUP_STACK, BT_BRINGUP_PRIORITY,
+                                       BT_BRINGUP_TICK);
+        if (s_bt_thread == NULL) {
+            s_bt_serve = false;
+            rt_kprintf("carplay_bt: cannot create thread\n");
+            return 0;
+        }
+        (void)rt_thread_startup(s_bt_thread);
+        return 0;
+    }
+    if (strcmp(sub, "stop") == 0) {
+        s_bt_serve = false;
+        rtcp_bt_lubanlite_disconnect();
+        while (s_bt_thread_running) {
+            rt_thread_mdelay(10);
+        }
+        rt_kprintf("carplay_bt stopped\n");
+        return 0;
+    }
+    if (strcmp(sub, "status") == 0) {
+        rt_kprintf("carplay_bt: %s, channel %u, link %s, rx drops %u\n",
+                   !rtcp_bt_lubanlite_is_up()
+                       ? "off"
+                       : (s_bt_thread_running ? "serving" : "idle"),
+                   (unsigned)rtcp_bt_lubanlite_channel(),
+                   rtcp_bt_lubanlite_link_up() ? "up" : "down",
+                   rtcp_bt_lubanlite_rx_dropped());
+        return 0;
+    }
+    rt_kprintf("usage: carplay_bt start|stop|status\n");
+    return 0;
+}
+#endif /* RTCARPLAY_BT */
+
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_start, carplay_start,
                      Start the rt-carplay receiver);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_stop, carplay_stop,
@@ -946,3 +1064,7 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_touch, carplay_touch,
                      Inject a touch: carplay_touch down|move|up X Y [pointer]);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_randtest, carplay_randtest,
                      Verify the CE TRNG: two calls must differ);
+#if defined(RTCARPLAY_BT)
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_bt, carplay_bt,
+                     Bluetooth RFCOMM bring-up: start|stop|status);
+#endif

@@ -45,10 +45,16 @@ if GetDepend('LPKG_RT_CARPLAY_ED25519'):
 src += Glob('port/rtthread/*.c')
 cpppath.append(cwd + '/port/rtthread/include')
 
+# Luban-Lite board seams.  The include directory is shared by the Wi-Fi and
+# Bluetooth sources (rtcp_lubanlite.h declares both interfaces).
+if (GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI') or
+        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT')):
+    cpppath.append(cwd + '/port/luban-lite/include')
+
 # Luban-Lite Wi-Fi seam (Realtek RTL8733BS SoftAP + vendor IE).
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI'):
-    src += Glob('port/luban-lite/*.c')
-    cpppath.append(cwd + '/port/luban-lite/include')
+    src += Glob('port/luban-lite/rtcp_wifi_lubanlite.c')
+    src += Glob('port/luban-lite/rtcp_random_lubanlite.c')
 
     # The Realtek API headers live outside the SDK's global include path;
     # the driver SConscript adds them only to its own group.
@@ -59,6 +65,17 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI'):
         for sub in ('api/wifi', 'api', 'include', 'os/os_dep/include',
                     'platform/include', 'platform/rtwlan_bsp'):
             cpppath.append(os.path.join(realtek, sub))
+
+# Luban-Lite Bluetooth seam: Zephyr Classic BR/EDR + RFCOMM for iAP2.
+if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT'):
+    src += Glob('port/luban-lite/rtcp_bt_lubanlite.c')
+
+    aic_root = os.environ.get('AIC_ROOT', '')
+    if aic_root:
+        zephyr = os.path.join(aic_root, 'packages', 'third-party',
+                              'zephyr-bluetooth')
+        cpppath.append(os.path.join(zephyr, 'include'))
+        cpppath.append(os.path.join(zephyr, 'porting'))
 
 group = DefineGroup('rt-carplay', src, depend=['LPKG_USING_RT_CARPLAY'],
                     CPPPATH=cpppath, LOCAL_CCFLAGS=ccflags)

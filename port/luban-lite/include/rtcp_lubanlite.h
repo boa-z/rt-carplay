@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rtcp/bt.h"
 #include "rtcp/wifi.h"
 
 /*
@@ -27,6 +28,45 @@ void rtcp_wifi_lubanlite_set_interface(const char *name);
 int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6]);
 int rtcp_wifi_lubanlite_get_ipv4(uint8_t address[4]);
 int rtcp_wifi_lubanlite_start_dhcpd(void);
+
+/*
+ * Classic BR/EDR + RFCOMM transport backed by the SDK Zephyr host
+ * (packages/third-party/zephyr-bluetooth, RTL8733BS over H5).  This is the
+ * transport the wireless iAP2 path needs:
+ *
+ *   rtcp_bt_lubanlite.enable(name, NULL)        BT on, connectable+discoverable
+ *   rtcp_bt_lubanlite.rfcomm_listen(0, name, uuid128, &channel)
+ *                                               RFCOMM server + SDP record
+ *   rtcp_bt_lubanlite.rfcomm_accept(1, &fd)     blocks for one DLC
+ *   rtcp_bt_lubanlite.send/recv(fd, ...)        byte stream (recv returns 0
+ *                                               when the link closed and
+ *                                               RTCP_ETIMEDOUT on idle)
+ *
+ * The UUID is the 128-bit service class advertised in SDP; pass NULL to
+ * advertise the Serial Port profile (bring-up without a phone app).
+ * rfcomm_listen() is idempotent while the listener is registered.  The seam
+ * supports one link; callers must serialize accept/send/recv on one thread.
+ *
+ * The transport is build-verified only.  The Zephyr H5 transport, the
+ * Realtek firmware download and the discoverable/pairing behavior all need
+ * the first board run; see port/luban-lite/README.md.
+ */
+extern const struct rtcp_bt rtcp_bt_lubanlite;
+
+int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6]);
+int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
+                                    const char *uuid128, uint8_t *out_channel);
+int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd);
+int rtcp_bt_lubanlite_send(int fd, const void *buf, size_t len);
+int rtcp_bt_lubanlite_recv(int fd, void *buf, size_t len);
+void rtcp_bt_lubanlite_set_event_cb(void (*cb)(int ev, void *user), void *user);
+
+/* Drops the current DLC (if any) and unblocks a waiting accept()/recv(). */
+void rtcp_bt_lubanlite_disconnect(void);
+bool rtcp_bt_lubanlite_is_up(void);
+bool rtcp_bt_lubanlite_link_up(void);
+uint8_t rtcp_bt_lubanlite_channel(void);
+unsigned rtcp_bt_lubanlite_rx_dropped(void);
 
 /*
  * Fills output with bytes from the ArtInChip CE true random number generator.

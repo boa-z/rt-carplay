@@ -49,6 +49,19 @@ CONFIG_RT_USING_WIFI=y
 CONFIG_RT_USING_NETDEV=y
 ```
 
+Bluetooth (wireless iAP2 transport, optional for the AirPlay receiver):
+
+```
+CONFIG_LPKG_USING_ZEPHYR_BLUETOOTH=y
+CONFIG_LPKG_ZEPHYR_BLUETOOTH_CHIPSET_RTL8733=y
+CONFIG_LPKG_BT_UART="uart7"
+CONFIG_LPKG_BT_H5=y            # H4 must stay off
+CONFIG_LPKG_BT_CLASSIC=y
+CONFIG_LPKG_BT_RFCOMM=y
+CONFIG_LPKG_RT_CARPLAY_LUBANLITE_BT=y
+# CONFIG_LPKG_BT_ASSERT is not set   # see port/luban-lite/README.md
+```
+
 Package mode (repo under `packages/third-party`, package Kconfig sourced) is
 also supported: the SDK auto-builds the library, and the app SConscript skips
 the duplicate include.
@@ -64,6 +77,10 @@ carplay_touch up 700 260
 carplay_stop
 
 carplay_randtest              # CE TRNG self-test (two distinct 32-byte reads)
+
+carplay_bt start              # Zephyr Classic RFCOMM bring-up (iAP2 UUID, echo)
+carplay_bt status             # enable state, SDP/RFCOMM channel, link state
+carplay_bt stop               # drop the link and stop accepting
 
 carplay_video status          # decoder counters, queue depth
 carplay_video start 1280 480  # exercise MPP + DE without a controller
@@ -104,6 +121,17 @@ Known bring-up notes: video memory comes from the VE/DE pools, so the frame
 count in use depends on the controller's H.264 profile; the first hardware
 run should watch `[carplay-vid]` messages for decoder resets and errors.
 
+## Bluetooth transport
+
+`RTCARPLAY_BT` builds the `carplay_bt` command on top of
+`rtcp_bt_lubanlite` (`port/luban-lite/`).  `carplay_bt start` enables the
+Zephyr Classic host, advertises the iAP2 service class UUID over SDP and
+echoes received RFCOMM bytes.  This is a transport check for the wireless
+CarPlay path, not iAP2 or CarPlay itself; the iAP2 session is not wired into
+the application yet.  Security level, link-key reporting and the H5
+firmware/baud path are board-verification items (see
+`port/luban-lite/README.md`).
+
 ## Verification status
 
 - Host protocol tests (including the socket-level Pair-Setup/Pair-Verify and
@@ -121,7 +149,14 @@ run should watch `[carplay-vid]` messages for decoder resets and errors.
   the pinned SDK (`mpp_decoder`, `AICFB_UPDATE_LAYER_CONFIG`).  It has not
   decoded or displayed anything yet; the first board run with a real
   controller is the validation.
+- **Bluetooth iAP2 transport (2026-11-08)**: `rtcp_bt_lubanlite` is
+  build-verified with the SDK Zephyr Classic + RFCOMM host and the RTL8733
+  H5 driver.  The ELF contains `bt_rfcomm_server_register`,
+  `bt_sdp_register_service`, `h5_hci_init`, `bt_h5_vnd_update_controller_firmware`
+  and the registered `carplay_bt` command; the image is 3,990,016 bytes.
+  Build-only: `carplay_bt start` on the board is the first validation of the
+  H5 firmware download, SDP record and data path.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
-  controller, touch input and the CE TRNG unit assignment all need the
-  hardware run.  Treat the first boot as a bring-up session and watch the
-  console log.
+  controller, touch input, the CE TRNG unit assignment, and the Bluetooth
+  H5/RFCOMM path all need the hardware run.  Treat the first boot as a
+  bring-up session and watch the console log.

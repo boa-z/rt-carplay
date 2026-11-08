@@ -36,4 +36,13 @@ config LPKG_RT_CARPLAY_LUBANLITE_WIFI
         Bind rtcp_wifi to the Realtek RTL8733BS SoftAP API.  Vendor IE
         injection additionally needs CONFIG_REALTEK_FULL_FNC_MODE.
 
+config LPKG_RT_CARPLAY_LUBANLITE_BT
+    bool "Use the Luban-Lite Zephyr Bluetooth RFCOMM transport"
+    default y if LPKG_USING_ZEPHYR_BLUETOOTH && LPKG_BT_CLASSIC && LPKG_BT_RFCOMM
+    depends on LPKG_USING_ZEPHYR_BLUETOOTH && LPKG_BT_CLASSIC && LPKG_BT_RFCOMM
+    help
+        Bind the rtcp_bt transport to the SDK Zephyr Classic BR/EDR +
+        RFCOMM host, for the wireless iAP2 path.  Needs the RTL8733BS H5
+        HCI transport selected in the zephyr-bluetooth package.
+
 endif

@@ -7,7 +7,8 @@ RT-Thread port:
 |------|---------|
 | `rtcp_wifi_lubanlite.c` | `rtcp_wifi` backed by the Realtek RTL8733BS SoftAP API |
 | `rtcp_random_lubanlite.c` | `rtcp_os.random` backed by the ArtInChip CE TRNG |
-| `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite`, interface setter and `rtcp_lubanlite_random` |
+| `rtcp_bt_lubanlite.c` | `rtcp_bt` backed by the SDK Zephyr Classic/RFCOMM host (iAP2 transport) |
+| `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite`, `rtcp_bt_lubanlite`, interface setter and `rtcp_lubanlite_random` |
 
 The first hardware target is an ArtInChip D213 with an RTL8733BS (SDIO Wi-Fi +
 HCI H5 Bluetooth).
@@ -89,6 +90,82 @@ Two caveats, both **[unknown until board-verified]**:
   active. On the reference configuration mbedTLS is software-only, so the
   TRNG is the sole CE user.
 
+## Bluetooth RFCOMM seam
+
+`rtcp_bt_lubanlite` backs the `rtcp_bt` transport with the Zephyr Classic
+BR/EDR + RFCOMM host shipped in `packages/third-party/zephyr-bluetooth`.  The
+wireless CarPlay path needs it for iAP2 over RFCOMM; the AirPlay mirroring
+receiver does not.
+
+| `rtcp_bt` call | Zephyr call |
+|----------------|-------------|
+| `enable(name, NULL)` | `bt_enable(NULL)`, `bt_br_set_connectable(true, NULL)`, `bt_br_set_discoverable(true, false)`, optional `bt_set_name()` |
+| `rfcomm_listen(channel, name, uuid, &chan)` | `bt_rfcomm_server_register()` plus a runtime SDP record registered with `bt_sdp_register_service()` |
+| `rfcomm_accept(1, &fd)` | blocks until the DLC `connected` callback; one link is supported |
+| `send(fd, buf, len)` | `bt_rfcomm_dlc_send()` chunked at the negotiated DLC MTU |
+| `recv(fd, buf, len)` | byte ring fed by the DLC `recv` callback; `0` means the link closed, `RTCP_ETIMEDOUT` means idle |
+
+The SDP record advertises one 128-bit service class UUID (pass the iAP2 UUID;
+`NULL` advertises the Serial Port profile for bring-up), the dynamically
+allocated RFCOMM channel and a service name.  Zephyr's SDP encoder byte-swaps
+UUID128 values, so the port stores the reverse of the canonical form.
+
+### Required Kconfig
+
+```
+CONFIG_LPKG_USING_ZEPHYR_BLUETOOTH=y
+CONFIG_LPKG_ZEPHYR_BLUETOOTH_CHIPSET_RTL8733=y
+CONFIG_LPKG_BT_UART="uart7"
+CONFIG_LPKG_BT_H5=y
+# CONFIG_LPKG_BT_H4 is not set
+CONFIG_LPKG_BT_CLASSIC=y
+CONFIG_LPKG_BT_RFCOMM=y
+CONFIG_LPKG_BT_BUF_ACL_RX_SIZE=1024
+CONFIG_LPKG_BT_RFCOMM_L2CAP_MTU=1011
+CONFIG_LPKG_BT_DEVICE_NAME_DYNAMIC=y
+CONFIG_LPKG_RT_CARPLAY_LUBANLITE_BT=y
+```
+
+- `LPKG_BT_H4` must stay off: H4 and H5 both default to on, both register an
+  `"hci"` device, and `bt_uart.c` configures the UART for H5 (even parity)
+  when H5 is enabled.  Mixing them leaves an H4 host on an H5-configured
+  line.
+- `bt_uart_init()` opens `LPKG_BT_UART` at 115200/8E1; the Realtek vendor
+  setup then raises the controller and host rate and downloads the firmware
+  from `drivers/bluetooth/hci/realtek/`.  The board `uart7` pinmux and the
+  `AIC_WIRELESS_BT_PWR_GPIO` power pin must be enabled.
+- `LPKG_BT_ASSERT` must be off with this SDK revision.  `BT_ASSERT` expands
+  to `k_oops()`, whose `K_ERR_KERNEL_OOPS` enum is not visible from
+  `kernel.h` without `zephyr/fatal_types.h`; the Classic SDP source then
+  fails to compile.  Disabling the custom assert falls back to the kernel
+  `__ASSERT_NO_MSG` macro.
+- The ACL/RFCOMM values set the RFCOMM frame size.  The SDK defaults are
+  smaller; 1011 matches common iAP2 implementations.
+
+### Board verification
+
+`carplay_bt start` (examples/rtthread_app) enables the host, registers the
+iAP2 UUID and echoes received bytes.  Expected console output: the Zephyr H5
+setup (baudrate, firmware download), `RFCOMM listening on channel N`, then
+`bt link up` when a phone connects.  A Bluetooth serial terminal that browses
+SDP for the iAP2 UUID exercises the same path.
+
+**[unknown until board-verified]**
+
+- The H5 handshake, firmware download and baud switch on this RTL8733BS
+  module.  The vendor ZABlue library uses its own H5 implementation; this
+  Zephyr path has never run on the board.
+- The phone's security requirements for the iAP2 link.  The DLC is left at
+  the stack default security level and SSP I/O capabilities are not
+  configured; application-level authentication is still the iAP2 MFi
+  exchange.
+- `RTCP_BT_EV_LINK_KEY` is never emitted: the host exposes no public API to
+  read the BR/EDR link key.  Only connected/disconnected events are
+  reported.
+- Only one RFCOMM link and one listener are supported; `rfcomm_listen()` is
+  idempotent while the listener is registered, and the SDP record cannot be
+  unregistered with this Zephyr version.
+
 ## mbedTLS configuration
 
 Luban-Lite copies `packages/third-party/mbedtls/ports/inc/tls_config.h` over
@@ -156,9 +233,12 @@ independent.
 3. **MFi oracle** — start the 2.0C TCP oracle and verify `GET_CERT` returns
    the 908-byte certificate and `SIGN` returns a 128-byte signature. The
    private key never leaves the 2.0C and is never written to flash or logs.
-4. **BT H5/HCI** — `hci_h5` must reach `HCI_READY`; Classic inquiry and SDP
-   must find and serve `_iap2._tcp` / CarPlay UUIDs. The RFCOMM data path
-   remains stubbed until this passes.
+4. **BT H5/RFCOMM** — with the Zephyr BT options enabled, run
+   `carplay_bt start`: the H5 vendor setup must download the firmware and
+   reach ready, `RFCOMM listening on channel N` must appear, and a phone
+   (or the Zephyr `bt` shell) must find the iAP2 UUID in SDP, connect and
+   see echoed bytes. This is the first validation of the
+   `rtcp_bt_lubanlite` seam; the earlier "stub" status no longer applies.
 5. **CE TRNG** — with `CONFIG_AIC_CE_DRV=y`, run `carplay_randtest` (it calls
    `rtcp_lubanlite_random()` twice): both calls must succeed, the two hex
    dumps must differ, and no poll timeout may appear in the log. This

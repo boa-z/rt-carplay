@@ -39,18 +39,22 @@ this repo yet.
   net seam), and the Apple CarPlay SoftAP vendor IE.
 - `port/linux/` — POSIX OS and TCP implementations; the BT and Wi-Fi seams
   are explicit stubs there because a desktop host has no accessory stack.
-- `port/rtthread/` — RT-Thread OS and BSD-socket seams; the BT/RFCOMM seam is
-  an explicit `RTCP_ENOTSUP` stub until the Zephyr host is board-validated.
-- `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam, and
-  the CE TRNG entropy provider for the ArtInChip SDK.
+- `port/rtthread/` — RT-Thread OS and BSD-socket seams; the plain RT-Thread
+  BT seam stays an explicit `RTCP_ENOTSUP` stub (the SDK-specific Zephyr
+  transport lives in `port/luban-lite/`).
+- `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam, the
+  CE TRNG entropy provider, and `rtcp_bt_lubanlite`: Zephyr Classic BR/EDR +
+  RFCOMM (RTL8733 H5) with SDP records and an iAP2 byte stream for the
+  ArtInChip SDK.
 - `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
   Screen dump) described under “Linux simulator”.
 - `examples/rtthread_app/` — the RT-Thread/Luban-Lite receiver application
   (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch), with an
-  on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), and its
-  MSH commands; `examples/sdk_app/` holds the SDK app glue, Kconfig and the
-  build-verified d21x defconfig.
+  on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), the
+  `carplay_bt` RFCOMM bring-up command, and its MSH commands;
+  `examples/sdk_app/` holds the SDK app glue, Kconfig and the build-verified
+  d21x defconfig.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
   ASan/UBSan.  The end-to-end test runs a real controller implementation
   against `airplay_rtsp_server` on loopback: SRP-6a Pair-Setup, X25519

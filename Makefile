@@ -4,7 +4,7 @@ AR       ?= ar
 CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
 CPPFLAGS += -Iinclude -Icore -Icore/mfi \
             -Icore/iap2/include -Icore/airplay/include \
-            -Icore/media/include -Icore/input/include
+            -Icore/media/include -Icore/input/include -Itests/support
 LDLIBS   += -lm
 BUILD    := build
 
@@ -27,8 +27,10 @@ TESTS := test_mfi2c \
          test_airplay_bplist test_airplay_rtsp_codec test_airplay_tlv8 \
          test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist \
          test_airplay_control_stream test_airplay_screen_stream \
+         test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify \
          test_input_bridge test_media_timestamp
 BINS := $(addprefix $(BUILD)/,$(TESTS))
+TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 
 all: $(BINS)
 
@@ -50,8 +52,8 @@ $(LIB): $(CORE_OBJS)
 $(BUILD)/test_mfi2c: tests/test_mfi2c.c $(LIB) $(MBEDTLS_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS)
 
-$(BUILD)/test_%: tests/unit/test_%.c $(LIB) $(MBEDTLS_LIB)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS)
+$(BUILD)/test_%: tests/unit/test_%.c $(LIB) $(MBEDTLS_LIB) $(TEST_SUPPORT_OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(TEST_SUPPORT_OBJ) $(MBEDTLS_LIB) $(LDLIBS)
 
 check: all
 	@for t in $(BINS); do echo "== $$t =="; ./$$t; done

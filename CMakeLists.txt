@@ -38,6 +38,7 @@ target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/input/include
     ${RTCP_MBEDTLS_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/support
 )
 
 target_compile_definitions(rtcp_core PUBLIC
@@ -54,6 +55,7 @@ if(RTCP_BUILD_TESTS)
         test_airplay_bplist test_airplay_rtsp_codec test_airplay_tlv8
         test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist
         test_airplay_control_stream test_airplay_screen_stream
+        test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify
         test_input_bridge test_media_timestamp
     )
 

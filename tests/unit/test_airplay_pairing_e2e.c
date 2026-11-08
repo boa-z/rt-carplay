@@ -71,6 +71,16 @@ typedef struct {
     rng_t rng;
 } fixture_t;
 
+static bool event_connected;
+static unsigned event_transitions;
+
+static void capture_event_state(bool connected, void *context)
+{
+    (void)context;
+    event_connected = connected;
+    ++event_transitions;
+}
+
 static unsigned screen_messages;
 static unsigned screen_frames;
 static uint8_t screen_frame[256];
@@ -957,6 +967,22 @@ static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
     return bplist_finish(output, at, offsets, 8U, 2U);
 }
 
+static uint16_t response_port(const response_t *response, const char *key)
+{
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    airplay_bplist_object_t object;
+    uint64_t value = 0U;
+    assert(airplay_bplist_open(response->body, response->body_len, &doc) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, key, &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, object, &value) == AIRPLAY_BPLIST_OK);
+    assert(value != 0U && value <= UINT16_MAX);
+    return (uint16_t)value;
+}
+
 static uint16_t response_data_port(const response_t *response)
 {
     airplay_bplist_doc_t doc;
@@ -979,6 +1005,116 @@ static uint16_t response_data_port(const response_t *response)
     return (uint16_t)port;
 }
 
+static uint16_t run_initial_setup(airplay_rtsp_server_t *server,
+                                  client_t *client, uint32_t *cseq)
+{
+    uint8_t request[192];
+    uint8_t body[64];
+    response_t response;
+    size_t body_len = build_bplist_empty_dict(body, sizeof(body));
+    size_t request_len = build_request(request, sizeof(request), "SETUP",
+                                       "/stream", PLIST_TYPE, (*cseq)++, body,
+                                       body_len);
+    client_exchange(server, client, request, request_len, &response);
+    return response_port(&response, "eventPort");
+}
+
+static size_t receive_decrypted(airplay_rtsp_server_t *server, int fd,
+                                airplay_control_cipher_t *cipher,
+                                uint8_t *plain, size_t capacity)
+{
+    size_t plain_len = 0U;
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (plain_len == 0U && rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        airplay_rtsp_server_poll(server, 10);
+        if (!client_has_data(fd)) continue;
+        uint8_t raw[4096];
+        int received = rtcp_net_linux.recv(fd, raw, sizeof(raw));
+        assert(received > 0);
+        size_t offset = 0U;
+        while (offset < (size_t)received) {
+            size_t consumed = 0U;
+            size_t produced = 0U;
+            airplay_control_cipher_result_t result =
+                airplay_control_cipher_decrypt(
+                    cipher, raw + offset, (size_t)received - offset, &consumed,
+                    plain + plain_len, capacity - plain_len, &produced);
+            offset += consumed;
+            plain_len += produced;
+            if (result == AIRPLAY_CONTROL_CIPHER_INCOMPLETE) break;
+            assert(result == AIRPLAY_CONTROL_CIPHER_OK);
+            if (consumed == 0U && produced == 0U) break;
+        }
+    }
+    return plain_len;
+}
+
+static void run_event_channel(airplay_rtsp_server_t *server,
+                              const uint8_t shared_secret[KEY_BYTES],
+                              uint16_t event_port)
+{
+    static const uint8_t hid_report[12] = {
+        0xde, 0xad, 0xbe, 0xef, 0x01, 0x02,
+        0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    };
+    /* Before the controller attaches there is no event channel to write. */
+    assert(!airplay_rtsp_server_send_hid_report(server, 0x2a2a2a2aU,
+                                                hid_report,
+                                                sizeof(hid_report)));
+    assert(!airplay_rtsp_server_send_hid_report(NULL, 0x2a2a2a2aU, hid_report,
+                                                sizeof(hid_report)));
+
+    rtcp_addr_t address = {0};
+    address.family = RTCP_AF_INET;
+    address.addr[0] = 127U;
+    address.addr[3] = 1U;
+    address.port = event_port;
+    int event_fd = rtcp_net_linux.connect(&address);
+    assert(event_fd >= 0);
+
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (!event_connected &&
+           rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        airplay_rtsp_server_poll(server, 10);
+    }
+    assert(event_connected);
+
+    /* The peer reads what the accessory writes (Events-Write) and writes
+     * with Events-Read. */
+    uint8_t peer_read_key[KEY_BYTES];
+    uint8_t peer_write_key[KEY_BYTES];
+    hkdf_key(shared_secret, KEY_BYTES, "Events-Salt",
+             "Events-Write-Encryption-Key", peer_read_key);
+    hkdf_key(shared_secret, KEY_BYTES, "Events-Salt",
+             "Events-Read-Encryption-Key", peer_write_key);
+    airplay_control_cipher_t *peer = NULL;
+    assert(airplay_control_cipher_create(peer_read_key, peer_write_key,
+                                         &peer) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+
+    assert(airplay_rtsp_server_send_hid_report(server, 0x2a2a2a2aU, hid_report,
+                                               sizeof(hid_report)));
+
+    uint8_t plain[2048];
+    size_t plain_len = receive_decrypted(server, event_fd, peer, plain,
+                                         sizeof(plain));
+    assert(plain_len > 0U);
+    assert(contains(plain, plain_len, "POST /command"));
+    assert(contains(plain, plain_len, "hidSendReport"));
+    assert(contains(plain, plain_len, "hidReport"));
+
+    rtcp_net_linux.close(event_fd);
+    start = rtcp_os_linux.now_ms();
+    while (event_connected && rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        airplay_rtsp_server_poll(server, 10);
+    }
+    assert(!event_connected);
+
+    airplay_control_cipher_destroy(peer);
+    mbedtls_platform_zeroize(peer_read_key, sizeof(peer_read_key));
+    mbedtls_platform_zeroize(peer_write_key, sizeof(peer_write_key));
+}
+
 static void run_screen_stream(airplay_rtsp_server_t *server, client_t *client,
                               const uint8_t shared_secret[KEY_BYTES],
                               uint32_t *cseq)
@@ -986,13 +1122,8 @@ static void run_screen_stream(airplay_rtsp_server_t *server, client_t *client,
     uint8_t request[512];
     uint8_t body[256];
     response_t response;
-
-    /* Initial SETUP: starts the timing and event endpoints. */
-    size_t body_len = build_bplist_empty_dict(body, sizeof(body));
-    size_t request_len = build_request(request, sizeof(request), "SETUP",
-                                       "/stream", PLIST_TYPE, (*cseq)++, body,
-                                       body_len);
-    client_exchange(server, client, request, request_len, &response);
+    size_t request_len;
+    size_t body_len;
 
     static const uint64_t connection_id = UINT64_C(0x1122334455667788);
     body_len = build_bplist_screen_setup(body, sizeof(body), connection_id);
@@ -1102,6 +1233,7 @@ int main(void)
     config.info_plist = info_plist;
     config.info_plist_len = info_len;
     config.on_screen_message = capture_screen;
+    config.on_event_state = capture_event_state;
 
     airplay_rtsp_server_t *server = NULL;
     assert(airplay_rtsp_server_start(&config, &server) == RTCP_OK);
@@ -1114,6 +1246,8 @@ int main(void)
     run_pair_verify(server, &client, &fixture, shared_secret);
     run_encrypted_info(server, &client, info_plist, info_len);
     uint32_t cseq = 30U;
+    uint16_t event_port = run_initial_setup(server, &client, &cseq);
+    run_event_channel(server, shared_secret, event_port);
     run_screen_stream(server, &client, shared_secret, &cseq);
     mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
     run_tampered_frame(server, &client);
@@ -1126,6 +1260,7 @@ int main(void)
     mbedtls_platform_zeroize(&fixture, sizeof(fixture));
 
     assert(screen_messages == 2U);
+    assert(event_transitions == 2U);
     puts("airplay pairing end-to-end host test passed");
     return 0;
 }

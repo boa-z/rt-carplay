@@ -626,6 +626,18 @@ bool airplay_rtsp_server_is_encrypted(const airplay_rtsp_server_t *server)
     return server != NULL && server->connection.cipher != NULL;
 }
 
+bool airplay_rtsp_server_send_hid_report(airplay_rtsp_server_t *server,
+                                         uint32_t hid_uid,
+                                         const uint8_t *report,
+                                         size_t report_len)
+{
+    if (server == NULL || server->stopping || !server->event_connected) {
+        return false;
+    }
+    return airplay_event_port_send_hid_report(server->event_port, hid_uid,
+                                              report, report_len);
+}
+
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
 {
     if (server == NULL) return RTCP_EINVAL;

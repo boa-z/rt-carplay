@@ -36,3 +36,11 @@ int airplay_event_port_get_fd(const airplay_event_port_t *port);
 void airplay_event_port_poll(airplay_event_port_t *port);
 void airplay_event_port_stop(airplay_event_port_t *port,
                              const struct rtcp_net *net);
+
+/* Sends one encrypted HID report to the connected controller.  Returns false
+ * before the controller attaches or after a channel failure; the caller may
+ * call it from its input thread. */
+bool airplay_event_port_send_hid_report(airplay_event_port_t *port,
+                                        uint32_t hid_uid,
+                                        const uint8_t *report,
+                                        size_t report_len);

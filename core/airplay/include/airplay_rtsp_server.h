@@ -60,6 +60,14 @@ bool airplay_rtsp_server_is_encrypted(const airplay_rtsp_server_t *server);
  * the wait for socket activity; 0 polls and returns immediately. */
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms);
 
+/* Sends one encrypted HID report over the event channel.  Returns false when
+ * the controller has not attached or the channel has failed.  Like the rest
+ * of the API, call it from the poll thread. */
+bool airplay_rtsp_server_send_hid_report(airplay_rtsp_server_t *server,
+                                         uint32_t hid_uid,
+                                         const uint8_t *report,
+                                         size_t report_len);
+
 /* Stops the connection and all endpoints.  Must be called from the poll
  * thread; no callback is invoked afterwards. */
 void airplay_rtsp_server_stop(airplay_rtsp_server_t *server);

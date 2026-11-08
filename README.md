@@ -27,8 +27,9 @@ this repo yet.
   persistent pairing storage.  On top of those sit the poll-driven
   endpoints — ControlCipher event channel, UDP timing, Screen DataStream —
   and `airplay_rtsp_server`, a single-controller RTSP server that owns the
-  listener, the ControlCipher transition after Pair-Verify and the media
-  endpoints the session asks for.
+  listener, the ControlCipher transition after Pair-Verify, the media
+  endpoints the session asks for and HID report output over the event
+  channel (the touch-input path).
 - `core/crypto/` — Ed25519 key/sign/verify wrapper over the vendored
   orlp/ed25519 (zlib), the software identity for Pair-Setup/Pair-Verify.
 - `third_party/ed25519/` — unmodified orlp/ed25519 sources and its LICENSE.

@@ -55,6 +55,14 @@ int main(void)
     assert(shared.value == 42);
     rtcp_os_linux.mutex_destroy(shared.mutex);
 
+    /* CSPRNG. */
+    assert(rtcp_os_linux.random != NULL);
+    uint8_t random_a[32] = {0};
+    uint8_t random_b[32] = {0};
+    assert(rtcp_os_linux.random(random_a, sizeof(random_a)));
+    assert(rtcp_os_linux.random(random_b, sizeof(random_b)));
+    assert(memcmp(random_a, random_b, sizeof(random_a)) != 0);
+
     /* TCP loopback. */
     int listener = rtcp_net_linux.listen(0);
     assert(listener >= 0);

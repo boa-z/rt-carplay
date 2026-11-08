@@ -2,6 +2,7 @@
 #ifndef RTCP_OS_H
 #define RTCP_OS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -25,6 +26,11 @@ struct rtcp_os {
     void          (*mutex_lock)(rtcp_mutex_t m);
     void          (*mutex_unlock)(rtcp_mutex_t m);
     void          (*mutex_destroy)(rtcp_mutex_t m);
+
+    /* Cryptographically secure random bytes.  NULL when the port has no
+     * entropy source; Pair-Setup/Pair-Verify must then refuse to run rather
+     * than substitute a weak generator. */
+    bool          (*random)(uint8_t *output, size_t len);
 };
 
 #endif /* RTCP_OS_H */

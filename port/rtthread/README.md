@@ -19,14 +19,27 @@ Pass the seams down from the application layer; the core never looks them up
 by name:
 
 ```c
+#include "airplay_rtsp_server.h"
 #include "rtcp_rtthread.h"
 
-airplay_rtsp_pairing_config_t pairing = {
+airplay_rtsp_server_config_t config = {
     .os = &rtcp_os_rtthread,
     .net = &rtcp_net_rtthread,
-    /* ... */
+    .pairing = { /* Pair-Setup / Pair-Verify identity providers */ },
+    .info_plist = info_plist,
+    .info_plist_len = info_plist_len,
+    .on_screen_message = on_screen_message,
 };
+airplay_rtsp_server_t *server = NULL;
+airplay_rtsp_server_start(&config, &server);
+
+for (;;) {
+    airplay_rtsp_server_poll(server, 100); /* or interleave with your loop */
+}
 ```
+
+The RTSP server drives its own endpoints (listener, event channel, timing,
+Screen DataStream) from that single poll call.
 
 `rtcp_os_rtthread.thread_create` starts the thread before returning and uses a
 stack size in bytes / priority in RT-Thread units. Threads created this way are
@@ -34,6 +47,14 @@ detached: returning from the entry function must not free the handle.
 
 The socket seam uses a fixed `poll()` array of 8 descriptors. Enlarge
 `RTCP_NET_POLL_MAX` in `rtcp_net_rtthread.c` if a session needs more.
+
+## Randomness
+
+`rtcp_os_rtthread.random` is `NULL`: RT-Thread has no portable CSPRNG, and
+Pair-Setup must not fall back to `rand()`.  The board port has to install a
+real source before pairing is enabled — the ArtInChip CE TRNG
+(`ALG_TRNG` in `hal_ce.h`) is the intended one.  Until then the application
+must check `rtcp_os.random` and decline to advertise the AirPlay service.
 
 ## Requirements
 

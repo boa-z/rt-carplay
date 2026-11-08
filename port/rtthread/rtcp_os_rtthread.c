@@ -86,4 +86,6 @@ const struct rtcp_os rtcp_os_rtthread = {
     .mutex_lock = mutex_lock,
     .mutex_unlock = mutex_unlock,
     .mutex_destroy = mutex_destroy,
+    /* .random stays NULL: RT-Thread has no portable CSPRNG.  The board port
+     * must install one (e.g. the ArtInChip CE TRNG) before Pair-Setup. */
 };

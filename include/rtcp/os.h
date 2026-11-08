@@ -10,6 +10,10 @@ typedef struct rtcp_mutex  *rtcp_mutex_t;
 
 struct rtcp_os {
     uint64_t (*now_ms)(void);
+    /* Monotonic microseconds; used by the AirPlay timing exchange.  May be
+     * NULL on ports with only millisecond resolution, in which case callers
+     * fall back to now_ms() * 1000. */
+    uint64_t (*now_us)(void);
     void     (*sleep_ms)(uint32_t ms);
     void    *(*alloc)(size_t size);
     void     (*free)(void *p);

@@ -31,6 +31,8 @@ struct rtcp_net {
     int  (*connect)(const rtcp_addr_t *addr);
     int  (*send)(int fd, const void *buf, size_t len);
     int  (*recv)(int fd, void *buf, size_t len);
+    /* Local port of a bound TCP or UDP socket; 0 when unknown. */
+    uint16_t (*local_port)(int fd);
     int  (*poll)(struct rtcp_pollfd *fds, int n, int timeout_ms);
     void (*close)(int fd);
 

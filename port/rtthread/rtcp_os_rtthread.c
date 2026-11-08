@@ -16,6 +16,13 @@ static uint64_t now_ms(void)
     return (uint64_t)rt_tick_get_millisecond();
 }
 
+static uint64_t now_us(void)
+{
+    /* RT-Thread ticks are millisecond-scale; expand them rather than inventing
+     * sub-tick precision. */
+    return (uint64_t)rt_tick_get_millisecond() * 1000U;
+}
+
 static void sleep_ms(uint32_t ms)
 {
     rt_thread_mdelay((rt_int32_t)ms);
@@ -70,6 +77,7 @@ static void mutex_destroy(rtcp_mutex_t mutex)
 
 const struct rtcp_os rtcp_os_rtthread = {
     .now_ms = now_ms,
+    .now_us = now_us,
     .sleep_ms = sleep_ms,
     .alloc = os_alloc,
     .free = os_free,

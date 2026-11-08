@@ -24,6 +24,13 @@ static uint64_t now_ms(void)
     return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
 }
 
+static uint64_t now_us(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0U;
+    return (uint64_t)ts.tv_sec * 1000000U + (uint64_t)ts.tv_nsec / 1000U;
+}
+
 static void sleep_ms(uint32_t ms)
 {
     struct timespec req = {
@@ -106,6 +113,7 @@ static void mutex_destroy(rtcp_mutex_t mutex)
 
 const struct rtcp_os rtcp_os_linux = {
     .now_ms = now_ms,
+    .now_us = now_us,
     .sleep_ms = sleep_ms,
     .alloc = malloc,
     .free = free,

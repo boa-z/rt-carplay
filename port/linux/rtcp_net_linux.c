@@ -230,6 +230,7 @@ const struct rtcp_net rtcp_net_linux = {
     .connect = connect_socket,
     .send = send_bytes,
     .recv = recv_bytes,
+    .local_port = rtcp_net_linux_local_port,
     .poll = poll_fds,
     .close = close_fd,
     .udp_open = udp_open,

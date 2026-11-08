@@ -110,6 +110,16 @@ int main(void)
     config.airplay_port = 7000;
     config.channel = 15;
     assert(!iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len));
+    /* 5 GHz channels are valid for the SoftAP (the reference board runs 36). */
+    config.channel = 36;
+    assert(iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len));
+    assert(find_parameter(body, body_len, 1, &wireless, &wireless_len));
+    assert(find_parameter(wireless, wireless_len, 2, &field, &field_len));
+    assert(field_len == 1 && field[0] == 36);
+    wifi.channel = 149;
+    assert(iap2_carplay_build_wifi_configuration(&wifi, body, sizeof(body), &body_len));
+    assert(find_parameter(body, body_len, 4, &field, &field_len));
+    assert(field_len == 1 && field[0] == 149);
     config.channel = 6;
     config.ip_address_count = 0;
     assert(!iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len));

@@ -23,6 +23,19 @@ static void write_be32(uint8_t *out, uint32_t value)
     out[3] = (uint8_t)value;
 }
 
+/*
+ * iAP2 carries the SoftAP channel in one byte.  The original relay code
+ * accepted only 2.4 GHz (1-14) because its ESP32 AP could not do more; the
+ * reference board runs the CarPlay SoftAP on 5 GHz channel 36, so accept the
+ * full 2.4 GHz and 5 GHz plan (32-196, including the 4.9 GHz JP channels).
+ * 15-31 are not 802.11 channel numbers and stay rejected.
+ */
+static bool channel_is_valid(uint8_t channel)
+{
+    return (channel >= 1U && channel <= 14U) ||
+           (channel >= 32U && channel <= 196U);
+}
+
 static bool append_parameter(uint8_t *out, size_t capacity, size_t *used,
                              uint16_t id, const uint8_t *payload, size_t payload_len)
 {
@@ -68,7 +81,7 @@ bool iap2_carplay_build_wifi_configuration(
     }
     if (config == NULL || output == NULL || output_len == NULL ||
         config->ssid == NULL || config->passphrase == NULL ||
-        config->ssid[0] == '\0' || config->channel == 0 || config->channel > 14 ||
+        config->ssid[0] == '\0' || !channel_is_valid(config->channel) ||
         config->security_type > 4 ||
         (config->security_type != 0 && config->passphrase[0] == '\0')) {
         return false;
@@ -109,8 +122,8 @@ bool iap2_carplay_build_start_session(
         config->device_identifier == NULL || config->public_key == NULL ||
         config->source_version == NULL || config->ssid[0] == '\0' ||
         config->public_key[0] == '\0' || config->source_version[0] == '\0' ||
-        config->device_identifier[0] == '\0' || config->channel == 0 ||
-        config->channel > 14 || config->security_type > 4 ||
+        config->device_identifier[0] == '\0' || !channel_is_valid(config->channel) ||
+        config->security_type > 4 ||
         (config->security_type != 0 && config->passphrase[0] == '\0')) {
         return false;
     }

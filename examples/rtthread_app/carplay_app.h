@@ -58,6 +58,51 @@ void carplay_app_display_size(uint16_t *width, uint16_t *height);
 const char *carplay_app_pairing_code(void);
 
 /*
+ * Snapshot of the live wireless configuration for the iAP2 session.  The
+ * strings are borrowed from the running receiver and stay valid until
+ * carplay_app_stop() tears it down, so the caller must stop before that.
+ * Returns RTCP_ESTATE when the receiver is not running (or is stopping).
+ * ipv4 is four bytes in network order; public_key_hex is the Ed25519 public
+ * key exactly as announced in the mDNS TXT record.  airplay_connected is a
+ * snapshot; poll it to pace CarPlay re-invites.
+ */
+typedef struct {
+    const char *name;
+    const char *model;
+    const char *ssid;
+    const char *passphrase;
+    uint8_t channel;
+    uint8_t security_type; /* 0 = open, 2 = WPA/WPA2 PSK */
+    uint16_t airplay_port;
+    uint8_t ipv4[4];
+    uint8_t bssid[6];
+    bool bssid_valid;
+    const char *device_id;
+    const char *public_key_hex;
+    const char *source_version;
+    bool mdns_ready;
+    bool airplay_connected;
+} carplay_app_iap2_info_t;
+
+int carplay_app_iap2_info(carplay_app_iap2_info_t *info);
+
+/*
+ * One owner for the single Bluetooth link: the echo bring-up (carplay_bt)
+ * and the iAP2 session (carplay_iap2) register the same RFCOMM server, so
+ * running both would split accepts and corrupt the stream.  Claim before
+ * enabling the Bluetooth host; release on teardown.
+ */
+typedef enum {
+    CARPLAY_BT_OWNER_NONE = 0,
+    CARPLAY_BT_OWNER_ECHO,
+    CARPLAY_BT_OWNER_IAP2,
+} carplay_bt_owner_t;
+
+bool carplay_bt_claim(carplay_bt_owner_t owner);
+void carplay_bt_release(carplay_bt_owner_t owner);
+carplay_bt_owner_t carplay_bt_owner(void);
+
+/*
  * Input injection in display pixels (phase: RTCP_TOUCH_DOWN/MOVE/UP).  Safe
  * from any thread: events are queued and delivered by the poll thread, which
  * is the only thread allowed to write the event channel.

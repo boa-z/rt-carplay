@@ -59,7 +59,20 @@ int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
 int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd);
 int rtcp_bt_lubanlite_send(int fd, const void *buf, size_t len);
 int rtcp_bt_lubanlite_recv(int fd, void *buf, size_t len);
+
+/*
+ * As recv(), but with an explicit idle timeout.  A protocol pump that must
+ * run periodic work (iAP2 retransmits/invite pacing) uses a short timeout
+ * (50-100 ms) instead of the 500 ms default, so recv() time doubles as the
+ * pump tick.  timeout_ms <= 0 polls without blocking.
+ */
+int rtcp_bt_lubanlite_recv_timeout(int fd, void *buf, size_t len,
+                                   int timeout_ms);
 void rtcp_bt_lubanlite_set_event_cb(void (*cb)(int ev, void *user), void *user);
+
+/* Drops one accepted link but keeps the listener; the slot is recycled after
+ * the disconnect callback runs. */
+void rtcp_bt_lubanlite_drop_link(int fd);
 
 /* Drops the current DLC (if any) and unblocks a waiting accept()/recv(). */
 void rtcp_bt_lubanlite_disconnect(void);
@@ -67,6 +80,14 @@ bool rtcp_bt_lubanlite_is_up(void);
 bool rtcp_bt_lubanlite_link_up(void);
 uint8_t rtcp_bt_lubanlite_channel(void);
 unsigned rtcp_bt_lubanlite_rx_dropped(void);
+
+/*
+ * Local controller BR/EDR address in display order (aa:bb:cc:dd:ee:ff, the
+ * first byte is the most significant octet).  This is the value iAP2 puts in
+ * the BluetoothTransportComponent, not the Wi-Fi MAC.  Requires a successful
+ * enable(); returns RTCP_ESTATE before that.
+ */
+int rtcp_bt_lubanlite_local_bdaddr(uint8_t address[6]);
 
 /*
  * Fills output with bytes from the ArtInChip CE true random number generator.

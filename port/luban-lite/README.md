@@ -105,6 +105,14 @@ receiver does not.
 | `send(fd, buf, len)` | `bt_rfcomm_dlc_send()` chunked at the negotiated DLC MTU |
 | `recv(fd, buf, len)` | byte ring fed by the DLC `recv` callback; `0` means the link closed, `RTCP_ETIMEDOUT` means idle |
 
+Besides the seam, the port exports the pieces the iAP2 pump needs:
+`rtcp_bt_lubanlite_recv_timeout()` (explicit idle timeout so `advance()` runs
+on a 100 ms tick), `rtcp_bt_lubanlite_local_bdaddr()` (the controller BR/EDR
+address in display order for iAP2's BluetoothTransportComponent; Zephyr
+stores `bt_addr_t` little-endian) and `rtcp_bt_lubanlite_drop_link()` (drop
+one accepted link without stopping the listener).  A stop followed by a
+start re-arms the listener: `rfcomm_listen()` clears the internal stop flag.
+
 The SDP record advertises one 128-bit service class UUID (pass the iAP2 UUID;
 `NULL` advertises the Serial Port profile for bring-up), the dynamically
 allocated RFCOMM channel and a service name.  Zephyr's SDP encoder byte-swaps
@@ -145,10 +153,12 @@ CONFIG_LPKG_RT_CARPLAY_LUBANLITE_BT=y
 ### Board verification
 
 `carplay_bt start` (examples/rtthread_app) enables the host, registers the
-iAP2 UUID and echoes received bytes.  Expected console output: the Zephyr H5
-setup (baudrate, firmware download), `RFCOMM listening on channel N`, then
-`bt link up` when a phone connects.  A Bluetooth serial terminal that browses
-SDP for the iAP2 UUID exercises the same path.
+iAP2 UUID and echoes received bytes; `carplay_iap2 start` replaces the echo
+with the real iAP2 session (`core/iap2/iap2_session`).  Expected console
+output: the Zephyr H5 setup (baudrate, firmware download), `RFCOMM iAP2
+service on channel N`, then `[iap2] link up` when a phone connects.  A
+Bluetooth serial terminal that browses SDP for the iAP2 UUID exercises the
+same path.
 
 **[unknown until board-verified]**
 

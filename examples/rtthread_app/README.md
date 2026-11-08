@@ -59,6 +59,7 @@ CONFIG_LPKG_BT_H5=y            # H4 must stay off
 CONFIG_LPKG_BT_CLASSIC=y
 CONFIG_LPKG_BT_RFCOMM=y
 CONFIG_LPKG_RT_CARPLAY_LUBANLITE_BT=y
+CONFIG_RTCARPLAY_IAP2=y         # carplay_iap2 (requires RTCARPLAY_BT)
 # CONFIG_LPKG_BT_ASSERT is not set   # see port/luban-lite/README.md
 ```
 
@@ -81,6 +82,10 @@ carplay_randtest              # CE TRNG self-test (two distinct 32-byte reads)
 carplay_bt start              # Zephyr Classic RFCOMM bring-up (iAP2 UUID, echo)
 carplay_bt status             # enable state, SDP/RFCOMM channel, link state
 carplay_bt stop               # drop the link and stop accepting
+
+carplay_iap2 start            # real iAP2 session over RFCOMM (needs carplay_start)
+carplay_iap2 status           # serving/link/identification/MFi counters
+carplay_iap2 stop             # stop the session and disconnect the phone
 
 carplay_video status          # decoder counters, queue depth
 carplay_video start 1280 480  # exercise MPP + DE without a controller
@@ -121,16 +126,40 @@ Known bring-up notes: video memory comes from the VE/DE pools, so the frame
 count in use depends on the controller's H.264 profile; the first hardware
 run should watch `[carplay-vid]` messages for decoder resets and errors.
 
-## Bluetooth transport
+## Bluetooth transport and wireless iAP2
 
-`RTCARPLAY_BT` builds the `carplay_bt` command on top of
-`rtcp_bt_lubanlite` (`port/luban-lite/`).  `carplay_bt start` enables the
-Zephyr Classic host, advertises the iAP2 service class UUID over SDP and
-echoes received RFCOMM bytes.  This is a transport check for the wireless
-CarPlay path, not iAP2 or CarPlay itself; the iAP2 session is not wired into
-the application yet.  Security level, link-key reporting and the H5
-firmware/baud path are board-verification items (see
-`port/luban-lite/README.md`).
+`RTCARPLAY_BT` builds `carplay_bt`, a transport-only check: enable the Zephyr
+Classic host, advertise the iAP2 service class UUID over SDP and echo
+received RFCOMM bytes.
+
+`RTCARPLAY_IAP2` (default on, needs `RTCARPLAY_BT`) builds `carplay_iap2`,
+which runs the real session from `core/iap2/` on the same RFCOMM transport:
+
+| Step | What happens |
+|------|--------------|
+| 1 | `carplay_iap2 start` requires the receiver to be running (`carplay_start`) and claims the single Bluetooth link |
+| 2 | Enables the host, reads the local BR/EDR address for IdentificationInformation, registers the iAP2 SDP record |
+| 3 | Accepts one phone, calls `iap2_session_link_up()` and pumps bytes both ways on a 100 ms tick (`iap2_session_feed`, `iap2_session_advance`) |
+| 4 | Logs identification, MFi, subscription, Wi-Fi-configuration and CarPlay-invite events as `[iap2] ...` |
+| 5 | Watches the AirPlay event channel state and reports transitions to the session (re-invite pacing) |
+
+`carplay_bt` and `carplay_iap2` are mutually exclusive; the link owner is
+tracked in the application.  Stopping the receiver (`carplay_stop`) also
+retires the iAP2 service.
+
+The iAP2 session builds 5 GHz channels (the SoftAP default is 36), not just
+the 2.4 GHz 1-14 range the original relay accepted.
+
+**MFi is the current wall.**  No MFi coprocessor provider is built in, so
+`iap2` is started with `mfi = NULL`: the phone's MFi certificate request and
+challenge are ignored and the session stops after IdentificationInformation.
+`core/mfi/mfi2c.c` already implements the 2.0C register state machine over
+an injected I2C bus, but the board port and the SDP/identification result on
+real hardware need the board.  Without a 2.0C signature the session cannot
+reach Wi-Fi configuration or `CarPlayStartSession`, so hands-free wireless
+CarPlay needs the coprocessor; the AirPlay receiver path is independent of
+it.  Security level, link-key reporting and the H5 firmware/baud path remain
+board-verification items (see `port/luban-lite/README.md`).
 
 ## Verification status
 
@@ -140,8 +169,8 @@ firmware/baud path are board-verification items (see
   project compiles and links into
   `output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x.elf` and the
   full image `d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img`
-  (3.6 MB), built in an isolated worktree of the SDK.  Verified in the ELF:
-  `carplay_app_start`, all four `carplay_*` MSH commands,
+  (4.0 MB), built in an isolated worktree of the SDK.  Verified in the ELF:
+  `carplay_app_start`, the `carplay_*` MSH commands,
   `airplay_rtsp_server_start`, `rtcp_lubanlite_random`, `wifi_start_ap`,
   `wext_add_custom_ie`, `dhcpd_start`, plus mbedTLS ChaCha20-Poly1305 and
   HKDF.  Build-only, not executed.
@@ -153,10 +182,20 @@ firmware/baud path are board-verification items (see
   build-verified with the SDK Zephyr Classic + RFCOMM host and the RTL8733
   H5 driver.  The ELF contains `bt_rfcomm_server_register`,
   `bt_sdp_register_service`, `h5_hci_init`, `bt_h5_vnd_update_controller_firmware`
-  and the registered `carplay_bt` command; the image is 3,990,016 bytes.
-  Build-only: `carplay_bt start` on the board is the first validation of the
-  H5 firmware download, SDP record and data path.
+  and the registered `carplay_bt` command.  Build-only: `carplay_bt start` on
+  the board is the first validation of the H5 firmware download, SDP record
+  and data path.
+- **Wireless iAP2 session (2026-11-08)**: `iap2_link_lubanlite.c` wires
+  `iap2_session_t` to the RFCOMM transport.  The d21x ELF contains
+  `carplay_iap2`, `carplay_iap2_start`, `iap2_session_create/feed/advance`,
+  `iap2_identity_build_wireless_omitting`,
+  `iap2_carplay_build_start_session`, `rtcp_bt_lubanlite_recv_timeout` and
+  `rtcp_bt_lubanlite_local_bdaddr`; the image is 4,008,448 bytes.  The host
+  suite (including a new 5 GHz channel case) passes under ASan/UBSan.
+  Build-only: on the board, watch for `[iap2] link up` and
+  `identification accepted`; MFi will then stop the flow until a 2.0C
+  provider exists.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
-  controller, touch input, the CE TRNG unit assignment, and the Bluetooth
-  H5/RFCOMM path all need the hardware run.  Treat the first boot as a
-  bring-up session and watch the console log.
+  controller, touch input, the CE TRNG unit assignment, the Bluetooth
+  H5/RFCOMM path and the iAP2 session all need the hardware run.  Treat the
+  first boot as a bring-up session and watch the console log.

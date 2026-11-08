@@ -44,7 +44,8 @@ this repo yet.
   transport lives in `port/luban-lite/`).
 - `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam, the
   CE TRNG entropy provider, and `rtcp_bt_lubanlite`: Zephyr Classic BR/EDR +
-  RFCOMM (RTL8733 H5) with SDP records and an iAP2 byte stream for the
+  RFCOMM (RTL8733 H5) with SDP records, an iAP2 byte stream and the
+  timed-receive/local-BD-address helpers the iAP2 pump uses, for the
   ArtInChip SDK.
 - `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
@@ -52,7 +53,9 @@ this repo yet.
 - `examples/rtthread_app/` — the RT-Thread/Luban-Lite receiver application
   (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch), with an
   on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), the
-  `carplay_bt` RFCOMM bring-up command, and its MSH commands;
+  `carplay_bt` RFCOMM bring-up command, the `carplay_iap2` wireless iAP2
+  session pump (`iap2_link_lubanlite.c`: identification, Wi-Fi config,
+  CarPlay invite over the same transport) and its MSH commands;
   `examples/sdk_app/` holds the SDK app glue, Kconfig and the build-verified
   d21x defconfig.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with

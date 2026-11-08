@@ -83,4 +83,16 @@ config RTCARPLAY_BT
       and echo bytes.  This is the board bring-up path for the wireless iAP2
       transport; it does not start iAP2 or CarPlay by itself.
 
+config RTCARPLAY_IAP2
+    bool "Wireless iAP2 session command"
+    default y
+    depends on RTCARPLAY_BT
+    help
+      Add the carplay_iap2 shell command: drive core/iap2/iap2_session over
+      the RFCOMM transport (SDP iAP2 service, iAP2 link framing,
+      IdentificationInformation, Wi-Fi configuration, CarPlay invite).  The
+      receiver must be running (carplay_start).  Without an MFi 2.0C provider
+      the session stops after identification and cannot reach
+      CarPlayStartSession.
+
 endmenu

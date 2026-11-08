@@ -24,6 +24,10 @@ src = Glob('carplay_app.c')
 if GetDepend('RTCARPLAY_VIDEO'):
     src += Glob('video_sink_lubanlite.c')
 
+# Wireless iAP2 over the Zephyr RFCOMM transport (carplay_iap2 command).
+if GetDepend('RTCARPLAY_IAP2'):
+    src += Glob('iap2_link_lubanlite.c')
+
 group = DefineGroup('rt-carplay-app', src,
                     depend=['LPKG_USING_RT_CARPLAY',
                             'LPKG_RT_CARPLAY_LUBANLITE_WIFI'],

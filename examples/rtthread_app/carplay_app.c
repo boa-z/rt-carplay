@@ -33,6 +33,10 @@
 #include "video_sink_lubanlite.h"
 #endif
 
+#if defined(RTCARPLAY_IAP2)
+#include "iap2_link_lubanlite.h"
+#endif
+
 #define APP_LOG(fmt, ...) rt_kprintf("[carplay] " fmt "\n", ##__VA_ARGS__)
 
 #ifndef CARPLAY_APP_DEFAULT_WIDTH
@@ -86,6 +90,10 @@ typedef struct {
     char host_name[32];
     char seed_path[64];
     char store_path[80];
+    char public_key_hex[AIRPLAY_ED25519_PUBLIC_KEY_BYTES * 2U + 1U];
+
+    uint8_t wifi_mac[6];
+    bool wifi_mac_valid;
 
     uint8_t accessory_identifier[64];
     size_t accessory_identifier_len;
@@ -106,6 +114,9 @@ typedef struct {
     input_bridge_t *bridge;
     rt_mutex_t lock;
     rt_thread_t thread;
+
+    uint16_t airplay_port;
+    volatile bool airplay_connected;
 
     carplay_app_screen_cb_t on_screen;
     void *screen_context;
@@ -310,6 +321,7 @@ static void on_event_state(bool connected, void *context)
 {
     app_state_t *app = context;
     if (app->shutting_down) return;
+    app->airplay_connected = connected;
     APP_LOG("event channel %s", connected ? "connected" : "closed");
     if (!connected && app->bridge != NULL) {
         /* The controller is gone; drop any held contacts so a reconnect does
@@ -485,6 +497,8 @@ static bool format_device_id_from_mac(app_state_t *app)
 {
     uint8_t mac[6];
     if (rtcp_wifi_lubanlite_get_mac(mac) != RTCP_OK) return false;
+    memcpy(app->wifi_mac, mac, sizeof(mac));
+    app->wifi_mac_valid = true;
     rt_snprintf(app->device_id, sizeof(app->device_id),
                 "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2],
                 mac[3], mac[4], mac[5]);
@@ -600,9 +614,8 @@ static int build_announcement_data(app_state_t *app)
         return RTCP_EIO;
     }
 
-    char public_key_hex[AIRPLAY_ED25519_PUBLIC_KEY_BYTES * 2U + 1U];
     hex_encode(app->keypair.public_key, AIRPLAY_ED25519_PUBLIC_KEY_BYTES,
-               public_key_hex);
+               app->public_key_hex);
     airplay_txt_record_t records[AIRPLAY_TXT_MAX_RECORDS];
     airplay_txt_config_t txt;
     memset(&txt, 0, sizeof(txt));
@@ -611,7 +624,7 @@ static int build_announcement_data(app_state_t *app)
     txt.source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION;
     txt.protocol_version = "1.1";
     txt.pairing_id = app->device_id;
-    txt.public_key = public_key_hex;
+    txt.public_key = app->public_key_hex;
     size_t record_count = airplay_txt_build(&txt, records,
                                             AIRPLAY_TXT_MAX_RECORDS);
     app->txt_len = airplay_txt_encode(records, record_count, app->txt,
@@ -714,12 +727,14 @@ int carplay_app_start(const carplay_app_config_t *config)
         shutdown_stack(app);
         return result;
     }
+    /* Cache the port for the iAP2 session; it must not touch the server. */
+    app->airplay_port = airplay_rtsp_server_get_port(app->server);
 
     mdns_responder_config_t mdns_config;
     memset(&mdns_config, 0, sizeof(mdns_config));
     mdns_config.host_name = app->host_name;
     mdns_config.instance_name = app->name;
-    mdns_config.port = airplay_rtsp_server_get_port(app->server);
+    mdns_config.port = app->airplay_port;
     mdns_config.txt = app->txt;
     mdns_config.txt_len = app->txt_len;
     memcpy(mdns_config.ipv4, app->ipv4, sizeof(app->ipv4));
@@ -784,6 +799,13 @@ int carplay_app_stop(void)
 {
     if (!s_app.running) return RTCP_OK;
     s_app.stop = true;
+#if defined(RTCARPLAY_IAP2)
+    /* The iAP2 session borrows the receiver state, so retire it before the
+     * poll thread clears the stack.  The iAP2 thread owns its teardown. */
+    if (carplay_bt_owner() == CARPLAY_BT_OWNER_IAP2) {
+        carplay_iap2_request_stop();
+    }
+#endif
     /* The poll thread tears the stack down before clearing running. */
     while (s_app.running) {
         rt_thread_mdelay(10);
@@ -805,6 +827,55 @@ void carplay_app_display_size(uint16_t *width, uint16_t *height)
 const char *carplay_app_pairing_code(void)
 {
     return s_app.pairing_code;
+}
+
+int carplay_app_iap2_info(carplay_app_iap2_info_t *info)
+{
+    if (info == NULL) return RTCP_EINVAL;
+    app_state_t *app = &s_app;
+    if (!app->running || app->stop) return RTCP_ESTATE;
+
+    memset(info, 0, sizeof(*info));
+    info->name = app->name;
+    info->model = app->model;
+    info->ssid = app->ssid;
+    info->passphrase = app->passphrase;
+    info->channel = app->channel;
+    info->security_type = app->passphrase[0] != '\0' ? 2U : 0U;
+    info->airplay_port = app->airplay_port;
+    memcpy(info->ipv4, app->ipv4, sizeof(info->ipv4));
+    if (app->wifi_mac_valid) {
+        memcpy(info->bssid, app->wifi_mac, sizeof(info->bssid));
+        info->bssid_valid = true;
+    }
+    info->device_id = app->device_id;
+    info->public_key_hex = app->public_key_hex;
+    info->source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION;
+    info->mdns_ready = app->mdns != NULL;
+    info->airplay_connected = app->airplay_connected;
+    return RTCP_OK;
+}
+
+/* The shell commands run on one MSH thread, so a plain check-and-set is
+ * enough; the serving threads only release. */
+static volatile int s_bt_owner;
+
+bool carplay_bt_claim(carplay_bt_owner_t owner)
+{
+    if (owner == CARPLAY_BT_OWNER_NONE) return false;
+    if (s_bt_owner != CARPLAY_BT_OWNER_NONE) return false;
+    s_bt_owner = owner;
+    return true;
+}
+
+void carplay_bt_release(carplay_bt_owner_t owner)
+{
+    if (s_bt_owner == owner) s_bt_owner = CARPLAY_BT_OWNER_NONE;
+}
+
+carplay_bt_owner_t carplay_bt_owner(void)
+{
+    return (carplay_bt_owner_t)s_bt_owner;
 }
 
 int carplay_app_touch(uint8_t phase, uint16_t pointer_id,
@@ -1007,6 +1078,7 @@ static void bt_serve_thread(void *parameter)
 
 done:
     s_bt_thread_running = false;
+    carplay_bt_release(CARPLAY_BT_OWNER_ECHO);
 }
 
 static int cmd_carplay_bt(int argc, char **argv)
@@ -1017,6 +1089,13 @@ static int cmd_carplay_bt(int argc, char **argv)
             rt_kprintf("carplay_bt already running\n");
             return 0;
         }
+        if (!carplay_bt_claim(CARPLAY_BT_OWNER_ECHO)) {
+            rt_kprintf("carplay_bt: Bluetooth link is in use by %s\n",
+                       carplay_bt_owner() == CARPLAY_BT_OWNER_IAP2
+                           ? "carplay_iap2"
+                           : "another service");
+            return 0;
+        }
         rtcp_bt_lubanlite_set_event_cb(bt_event_cb, NULL);
         s_bt_serve = true;
         s_bt_thread = rt_thread_create("carplay-bt", bt_serve_thread, NULL,
@@ -1024,6 +1103,7 @@ static int cmd_carplay_bt(int argc, char **argv)
                                        BT_BRINGUP_TICK);
         if (s_bt_thread == NULL) {
             s_bt_serve = false;
+            carplay_bt_release(CARPLAY_BT_OWNER_ECHO);
             rt_kprintf("carplay_bt: cannot create thread\n");
             return 0;
         }

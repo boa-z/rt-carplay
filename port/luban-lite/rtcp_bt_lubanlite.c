@@ -381,6 +381,9 @@ int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
     if (!s_enabled) return RTCP_ESTATE;
 
     if (s_listening) {
+        /* Re-arm: a previous disconnect() set s_stop, and the application
+         * restarting the service expects accept() to block again. */
+        s_stop = false;
         *out_channel = s_server.channel;
         return RTCP_OK;
     }
@@ -497,19 +500,9 @@ int rtcp_bt_lubanlite_send(int fd, const void *buf, size_t len)
     return (int)sent;
 }
 
-int rtcp_bt_lubanlite_recv(int fd, void *buf, size_t len)
+static size_t link_drain(struct bt_link *link, void *buf, size_t len,
+                         bool *closed)
 {
-    if (fd < 1 || fd > (int)BT_LINK_MAX || buf == NULL) return RTCP_EINVAL;
-    if (len == 0U) return 0;
-
-    struct bt_link *link = &s_links[fd - 1];
-    rt_err_t err = rt_sem_take(&link->rx_sem,
-                               rt_tick_from_millisecond(BT_RX_WAIT_MS));
-    if (err != RT_EOK) {
-        /* No data yet; let the caller run its periodic work. */
-        return RTCP_ETIMEDOUT;
-    }
-
     size_t copied = 0U;
     uint8_t *out = buf;
     rt_mutex_take(&link->ring_lock, RT_WAITING_FOREVER);
@@ -517,18 +510,58 @@ int rtcp_bt_lubanlite_recv(int fd, void *buf, size_t len)
         out[copied++] = link->ring[link->tail];
         link->tail = (link->tail + 1U) % BT_RX_RING_SIZE;
     }
-    bool closed = (link->state != BT_LINK_CONNECTED) &&
-                  (link->tail == link->head);
+    *closed = (link->state != BT_LINK_CONNECTED) &&
+              (link->tail == link->head);
     rt_mutex_release(&link->ring_lock);
+    return copied;
+}
 
+int rtcp_bt_lubanlite_recv_timeout(int fd, void *buf, size_t len,
+                                   int timeout_ms)
+{
+    if (fd < 1 || fd > (int)BT_LINK_MAX || buf == NULL) return RTCP_EINVAL;
+    if (len == 0U) return 0;
+
+    struct bt_link *link = &s_links[fd - 1];
+
+    /* Drain first: a bulk read often leaves bytes in the ring, and the
+     * semaphore count does not track how much is still queued. */
+    bool closed = false;
+    size_t copied = link_drain(link, buf, len, &closed);
+    if (copied > 0U) return (int)copied;
+    if (closed) return 0;
+
+    rt_tick_t wait = timeout_ms > 0
+                         ? rt_tick_from_millisecond((rt_int32_t)timeout_ms)
+                         : 0;
+    if (rt_sem_take(&link->rx_sem, wait) != RT_EOK) {
+        /* No data yet; let the caller run its periodic work. */
+        return RTCP_ETIMEDOUT;
+    }
+
+    copied = link_drain(link, buf, len, &closed);
     if (copied > 0U) return (int)copied;
     return closed ? 0 : RTCP_ETIMEDOUT;
+}
+
+int rtcp_bt_lubanlite_recv(int fd, void *buf, size_t len)
+{
+    return rtcp_bt_lubanlite_recv_timeout(fd, buf, len, BT_RX_WAIT_MS);
 }
 
 void rtcp_bt_lubanlite_set_event_cb(void (*cb)(int ev, void *user), void *user)
 {
     s_event_cb = cb;
     s_event_user = user;
+}
+
+void rtcp_bt_lubanlite_drop_link(int fd)
+{
+    if (fd < 1 || fd > (int)BT_LINK_MAX) return;
+    struct bt_link *link = &s_links[fd - 1];
+    if (link->state == BT_LINK_CONNECTED) {
+        (void)bt_rfcomm_dlc_disconnect(&link->dlc);
+    }
 }
 
 void rtcp_bt_lubanlite_disconnect(void)
@@ -567,6 +600,25 @@ uint8_t rtcp_bt_lubanlite_channel(void)
 unsigned rtcp_bt_lubanlite_rx_dropped(void)
 {
     return s_rx_dropped;
+}
+
+int rtcp_bt_lubanlite_local_bdaddr(uint8_t address[6])
+{
+    if (address == NULL) return RTCP_EINVAL;
+    if (!s_enabled) return RTCP_ESTATE;
+
+    struct bt_br_oob oob;
+    int err = bt_br_oob_get_local(&oob);
+    if (err != 0) {
+        RTCP_LOGW(BT_TAG, "cannot read the local BR/EDR address (%d)", err);
+        return RTCP_EIO;
+    }
+    /* bt_addr_t stores the address little-endian (val[0] is the last
+     * printed octet); iAP2 wants the printed order. */
+    for (size_t i = 0U; i < 6U; ++i) {
+        address[i] = oob.addr.val[5U - i];
+    }
+    return RTCP_OK;
 }
 
 #else /* LPKG_RT_CARPLAY_LUBANLITE_BT */
@@ -611,10 +663,25 @@ int rtcp_bt_lubanlite_recv(int fd, void *buf, size_t len)
     return RTCP_ENOTSUP;
 }
 
+int rtcp_bt_lubanlite_recv_timeout(int fd, void *buf, size_t len,
+                                   int timeout_ms)
+{
+    (void)fd;
+    (void)buf;
+    (void)len;
+    (void)timeout_ms;
+    return RTCP_ENOTSUP;
+}
+
 void rtcp_bt_lubanlite_set_event_cb(void (*cb)(int ev, void *user), void *user)
 {
     (void)cb;
     (void)user;
+}
+
+void rtcp_bt_lubanlite_drop_link(int fd)
+{
+    (void)fd;
 }
 
 void rtcp_bt_lubanlite_disconnect(void)
@@ -639,6 +706,12 @@ uint8_t rtcp_bt_lubanlite_channel(void)
 unsigned rtcp_bt_lubanlite_rx_dropped(void)
 {
     return 0U;
+}
+
+int rtcp_bt_lubanlite_local_bdaddr(uint8_t address[6])
+{
+    (void)address;
+    return RTCP_ENOTSUP;
 }
 
 #endif /* LPKG_RT_CARPLAY_LUBANLITE_BT */

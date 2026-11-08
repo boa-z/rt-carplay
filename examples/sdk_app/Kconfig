@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Standalone SDK application integration ("app mode").  Copy this directory to
+# application/rt-thread/rtcarplay/ inside Luban-Lite.  In this mode the
+# package Kconfig (packages/third-party/rt-carplay/Kconfig) must NOT be
+# sourced as well, or the LPKG_RT_CARPLAY_* symbols are defined twice.
+
+menu "rt-carplay application"
+
+config RTCARPLAY_AUTO_START
+    bool "Start the AirPlay receiver automatically after boot"
+    default n
+    help
+      Start the receiver from main() instead of waiting for the
+      carplay_start MSH command.  Enable after the manual bring-up has been
+      verified on the board.
+
+config RTCARPLAY_DIR
+    string "rt-carplay repository path"
+    default "../../../packages/third-party/rt-carplay"
+    help
+      Path to the rt-carplay checkout, relative to this directory or
+      absolute.  The default points at the usual package location; a symlink
+      is fine.
+
+config RTCARPLAY_SCREEN_WIDTH
+    int "Display width for HID touch mapping"
+    default 1280
+
+config RTCARPLAY_SCREEN_HEIGHT
+    int "Display height for HID touch mapping"
+    default 480
+
+config RTCARPLAY_ROTATION
+    int "Display rotation (0, 90, 180 or 270)"
+    default 0
+
+# Library switches consumed by the rt-carplay SConscript.  Defined here only
+# for app mode; package mode defines them in the package Kconfig.
+
+config LPKG_USING_RT_CARPLAY
+    bool
+    default y
+
+config LPKG_RT_CARPLAY_LOG
+    bool
+    default y
+
+config LPKG_RT_CARPLAY_ED25519
+    bool
+    default y
+
+config LPKG_RT_CARPLAY_LUBANLITE_WIFI
+    bool
+    default y
+    depends on AIC_WLAN_REALTEK
+
+endmenu

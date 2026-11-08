@@ -46,6 +46,10 @@ this repo yet.
 - `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
   Screen dump) described under “Linux simulator”.
+- `examples/rtthread_app/` — the RT-Thread/Luban-Lite receiver application
+  (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch) and its MSH
+  commands; `examples/sdk_app/` holds the SDK app glue, Kconfig and the
+  build-verified d21x defconfig.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
   ASan/UBSan.  The end-to-end test runs a real controller implementation
   against `airplay_rtsp_server` on loopback: SRP-6a Pair-Setup, X25519

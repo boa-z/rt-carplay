@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Builds the RT-Thread receiver application together with the rt-carplay
+# library.  The integrating SDK application only needs:
+#
+#     SConscript('<repo>/examples/rtthread_app/SConscript')
+#
+import os
+from building import *
+
+cwd = GetCurrentDir()
+
+# Build the protocol library and ports from the repository root.  When the
+# checkout sits under packages/third-party the SDK has already sourced that
+# SConscript, so only add it once.
+import building
+if not any(group.get('name') == 'rt-carplay' for group in building.Projects):
+    SConscript(os.path.join(cwd, '..', '..', 'SConscript'))
+
+src = Glob('carplay_app.c')
+group = DefineGroup('rt-carplay-app', src,
+                    depend=['LPKG_USING_RT_CARPLAY',
+                            'LPKG_RT_CARPLAY_LUBANLITE_WIFI'],
+                    CPPPATH=[cwd])
+
+Return('group')

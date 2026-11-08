@@ -195,13 +195,19 @@ static int udp_recvfrom(int fd, void *buf, size_t len, rtcp_addr_t *from)
             from->family = RTCP_AF_INET;
             memcpy(from->addr, &in->sin_addr, 4U);
             from->port = ntohs(in->sin_port);
-        } else if (storage.ss_family == AF_INET6) {
+        }
+        /* struct sockaddr_in6 only exists when the stack was built with
+         * IPv6; SAL gates it on NETDEV_IPV6, lwIP on LWIP_IPV6. */
+#if (defined(NETDEV_IPV6) && NETDEV_IPV6) || \
+    (defined(LWIP_IPV6) && LWIP_IPV6)
+        else if (storage.ss_family == AF_INET6) {
             const struct sockaddr_in6 *in6 =
                 (const struct sockaddr_in6 *)&storage;
             from->family = RTCP_AF_INET6;
             memcpy(from->addr, &in6->sin6_addr, 16U);
             from->port = ntohs(in6->sin6_port);
         }
+#endif
     }
     return rc;
 }

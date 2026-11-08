@@ -18,6 +18,17 @@ extern const struct rtcp_wifi rtcp_wifi_lubanlite;
 void rtcp_wifi_lubanlite_set_interface(const char *name);
 
 /*
+ * Application helpers for the SoftAP bring-up.  The Wi-Fi seam above stays
+ * free of IP details; these functions belong to the board application.
+ * get_mac() reads the Realtek MAC (works after ap_start), get_ipv4() returns
+ * the AP netif address once lwIP has configured it (RTCP_ESTATE while it is
+ * not ready), and start_dhcpd() (re)starts the lwIP DHCP server on that netif.
+ */
+int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6]);
+int rtcp_wifi_lubanlite_get_ipv4(uint8_t address[4]);
+int rtcp_wifi_lubanlite_start_dhcpd(void);
+
+/*
  * Fills output with bytes from the ArtInChip CE true random number generator.
  * Usable as struct rtcp_os.random.  Returns false when the CE driver is not
  * built in or the generator fails/times out; callers must then refuse to

@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Luban-Lite application integration.  Copy this directory (with main.c and
+# Kconfig) to application/rt-thread/rtcarplay/ and adjust RTCARPLAY_DIR in
+# menuconfig if the repository lives somewhere else.
+import os
+from building import *
+
+cwd = GetCurrentDir()
+
+try:
+    repo = GetConfigValue('RTCARPLAY_DIR')
+except KeyError:
+    repo = ''
+repo = repo.strip('"')
+
+if not repo:
+    repo = os.path.join('..', '..', '..', 'packages', 'third-party', 'rt-carplay')
+if not os.path.isabs(repo):
+    repo = os.path.join(cwd, repo)
+repo = os.path.normpath(repo)
+
+src = Glob('main.c')
+group = DefineGroup('Applications', src, depend=[''], CPPPATH=[cwd])
+
+group = group + SConscript(os.path.join(repo, 'examples', 'rtthread_app',
+                                        'SConscript'))
+
+Return('group')

@@ -29,6 +29,20 @@ list and rejects a second add, so the seam always deletes first.
 AP. AP-only mode uses `wlan0`; call it with the actual name when the board runs
 STA+AP concurrently.
 
+### Board helpers
+
+The receiver application needs three things the `rtcp_wifi` seam deliberately
+does not expose. They live beside it in `rtcp_lubanlite.h`:
+
+| Function | Behavior |
+|----------|----------|
+| `rtcp_wifi_lubanlite_get_mac()` | Reads the Realtek MAC (after `ap_start`); the device id / Bonjour host name come from it |
+| `rtcp_wifi_lubanlite_get_ipv4()` | AP netif address once lwIP configured it; `RTCP_ESTATE` while not ready |
+| `rtcp_wifi_lubanlite_start_dhcpd()` | Restarts the lwIP DHCP server on the AP netif (`LWIP_USING_DHCPD`); `RTCP_ENOTSUP` when disabled |
+
+The IP/netif lookup matches the first `w*` interface with an address, as the
+WLAN adaptation may register `w0` or `w1` depending on bring-up order.
+
 ### Required Kconfig
 
 ```

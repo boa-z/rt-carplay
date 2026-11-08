@@ -20,8 +20,10 @@ cpppath = [cwd + '/include']
 ccflags = []
 
 # Force-include the logging provider so include/rtcp/log.h stays platform-free.
+# LOCAL_CCFLAGS is a single flag string; DefineGroup() rewrites it.
 if GetDepend('LPKG_RT_CARPLAY_LOG'):
-    ccflags = ['-include', os.path.join(cwd, 'port/rtthread/include/rtcp_log_rtthread.h')]
+    ccflags = '-include ' + os.path.join(
+        cwd, 'port/rtthread/include/rtcp_log_rtthread.h')
 
 # Protocol core: hardware and OS independent.
 for sub in ('airplay', 'iap2', 'discovery', 'input', 'media', 'mfi'):
@@ -47,6 +49,16 @@ cpppath.append(cwd + '/port/rtthread/include')
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI'):
     src += Glob('port/luban-lite/*.c')
     cpppath.append(cwd + '/port/luban-lite/include')
+
+    # The Realtek API headers live outside the SDK's global include path;
+    # the driver SConscript adds them only to its own group.
+    aic_root = os.environ.get('AIC_ROOT', '')
+    if aic_root:
+        realtek = os.path.join(aic_root, 'bsp', 'peripheral', 'wireless',
+                               'realtek')
+        for sub in ('api/wifi', 'api', 'include', 'os/os_dep/include',
+                    'platform/include', 'platform/rtwlan_bsp'):
+            cpppath.append(os.path.join(realtek, sub))
 
 group = DefineGroup('rt-carplay', src, depend=['LPKG_USING_RT_CARPLAY'],
                     CPPPATH=cpppath, LOCAL_CCFLAGS=ccflags)

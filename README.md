@@ -23,6 +23,8 @@ this repo yet.
 - `core/airplay/` — binary plist, RTSP codec, TLV8, HID plists/descriptors,
   screen codec, DataStream AEAD decryption, ControlCipher streams and timing.
 - `core/media/`, `core/input/` — timestamp helpers and the input bridge.
+- `core/discovery/` — AirPlay Bonjour TXT records and the Apple CarPlay
+  SoftAP vendor IE.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
   ASan/UBSan.
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.

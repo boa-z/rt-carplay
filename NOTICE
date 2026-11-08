@@ -13,7 +13,8 @@ Third-party protocol code currently included:
 
 - The modules in `core/iap2/` (`iap2_core`, `iap2_identity`, `iap2_carplay`,
   `iap2_mfi_auth`) and the ported AirPlay modules in `core/airplay/`
-  (plist/RTSP/TLV8/screen/DataStream and Pair-Setup/Pair-Verify/SRP-6a)
+  (plist/RTSP/TLV8/screen/DataStream, Pair-Setup/Pair-Verify/SRP-6a,
+  MFiSAP and the Bonjour TXT defaults)
   are ported from ESP32 CarPlay Web Relay (GPL-3.0-or-later, Copyright
   (C) 2026 ESP32 CarPlay Web Relay contributors).  Its iAP2 and AirPlay
   structure follows DiPlay (GPL-3.0, Copyright (C) 2025-2026 DiPlay

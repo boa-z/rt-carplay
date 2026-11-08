@@ -7,35 +7,39 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(RTCP_BUILD_TESTS "Build host-side unit tests" ON)
 
-add_library(rtcp_core STATIC
-    core/mfi/mfi2c.c
-    core/iap2/iap2_core.c
-    core/iap2/iap2_identity.c
-    core/iap2/iap2_carplay.c
-    core/iap2/iap2_mfi_auth.c
-)
+file(GLOB_RECURSE RTCP_CORE_SOURCES CONFIGURE_DEPENDS core/*.c)
+add_library(rtcp_core STATIC ${RTCP_CORE_SOURCES})
 
 target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core
     ${CMAKE_CURRENT_SOURCE_DIR}/core/mfi
     ${CMAKE_CURRENT_SOURCE_DIR}/core/iap2/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/airplay/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/media/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/input/include
 )
 
 target_compile_options(rtcp_core PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(rtcp_core PUBLIC m)
 
 if(RTCP_BUILD_TESTS)
     enable_testing()
 
-    foreach(t
-            test_mfi2c:${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mfi2c.c
-            test_iap2_core:${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/test_iap2_core.c
-            test_iap2_identity:${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/test_iap2_identity.c
-            test_iap2_carplay:${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/test_iap2_carplay.c
-            test_iap2_mfi_auth:${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/test_iap2_mfi_auth.c)
-        string(REPLACE ":" ";" pair "${t}")
-        list(GET pair 0 name)
-        list(GET pair 1 source)
+    set(RTCP_TESTS
+        test_mfi2c
+        test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
+        test_airplay_bplist test_airplay_rtsp_codec test_airplay_tlv8
+        test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist
+        test_airplay_control_stream test_input_bridge test_media_timestamp
+    )
+
+    foreach(name ${RTCP_TESTS})
+        if(name STREQUAL "test_mfi2c")
+            set(source ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mfi2c.c)
+        else()
+            set(source ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/${name}.c)
+        endif()
         add_executable(${name} ${source})
         target_link_libraries(${name} PRIVATE rtcp_core)
         target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)

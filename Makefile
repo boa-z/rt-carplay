@@ -1,31 +1,38 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-CC      ?= cc
-CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
-CPPFLAGS += -Iinclude -Icore -Icore/mfi -Icore/iap2/include
-BUILD   := build
+CC       ?= cc
+AR       ?= ar
+CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
+CPPFLAGS += -Iinclude -Icore -Icore/mfi \
+            -Icore/iap2/include -Icore/airplay/include \
+            -Icore/media/include -Icore/input/include
+LDLIBS   += -lm
+BUILD    := build
 
-TESTS := test_mfi2c test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
-BINS  := $(addprefix $(BUILD)/,$(TESTS))
+CORE_SRCS := $(wildcard core/*/*.c)
+CORE_OBJS := $(CORE_SRCS:%.c=$(BUILD)/%.o)
+LIB       := $(BUILD)/librtcp_core.a
+
+TESTS := test_mfi2c \
+         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
+         test_airplay_bplist test_airplay_rtsp_codec test_airplay_tlv8 \
+         test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist \
+         test_airplay_control_stream test_input_bridge test_media_timestamp
+BINS := $(addprefix $(BUILD)/,$(TESTS))
 
 all: $(BINS)
 
-$(BUILD):
-	mkdir -p $(BUILD)
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-$(BUILD)/test_mfi2c: core/mfi/mfi2c.c tests/test_mfi2c.c | $(BUILD)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+$(LIB): $(CORE_OBJS)
+	$(AR) rcs $@ $^
 
-$(BUILD)/test_iap2_core: core/iap2/iap2_core.c tests/unit/test_iap2_core.c | $(BUILD)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+$(BUILD)/test_mfi2c: tests/test_mfi2c.c $(LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(LDLIBS)
 
-$(BUILD)/test_iap2_identity: core/iap2/iap2_identity.c tests/unit/test_iap2_identity.c | $(BUILD)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
-
-$(BUILD)/test_iap2_carplay: core/iap2/iap2_carplay.c tests/unit/test_iap2_carplay.c | $(BUILD)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
-
-$(BUILD)/test_iap2_mfi_auth: core/iap2/iap2_mfi_auth.c tests/unit/test_iap2_mfi_auth.c | $(BUILD)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+$(BUILD)/test_%: tests/unit/test_%.c $(LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(LDLIBS)
 
 check: all
 	@for t in $(BINS); do echo "== $$t =="; ./$$t; done

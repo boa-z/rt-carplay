@@ -2,6 +2,7 @@
 #ifndef RTCP_NET_H
 #define RTCP_NET_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -32,6 +33,14 @@ struct rtcp_net {
     int  (*recv)(int fd, void *buf, size_t len);
     int  (*poll)(struct rtcp_pollfd *fds, int n, int timeout_ms);
     void (*close)(int fd);
+
+    /* IPv4 UDP, used by the mDNS responder.  udp_open binds INADDR_ANY:port;
+     * reuse enables SO_REUSEADDR/SO_REUSEPORT where available.  udp_join adds
+     * the socket to a multicast group. */
+    int  (*udp_open)(uint16_t port, bool reuse);
+    int  (*udp_join)(int fd, const uint8_t group[4]);
+    int  (*udp_sendto)(int fd, const rtcp_addr_t *to, const void *buf, size_t len);
+    int  (*udp_recvfrom)(int fd, void *buf, size_t len, rtcp_addr_t *from);
 };
 
 #endif /* RTCP_NET_H */

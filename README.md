@@ -26,8 +26,9 @@ this repo yet.
   plist writer and the RTSP session (info, SETUP, RECORD, teardown), and
   persistent pairing storage.
 - `core/media/`, `core/input/` — timestamp helpers and the input bridge.
-- `core/discovery/` — AirPlay Bonjour TXT records and the Apple CarPlay
-  SoftAP vendor IE.
+- `core/discovery/` — AirPlay Bonjour TXT records, an mDNS responder for
+  `_airplay._tcp` (transport-free packet builder plus UDP polling through the
+  net seam), and the Apple CarPlay SoftAP vendor IE.
 - `port/linux/` — POSIX OS and TCP implementations; the BT and Wi-Fi seams
   are explicit stubs there because a desktop host has no accessory stack.
 - `port/rtthread/` — RT-Thread OS and BSD-socket seams; the BT/RFCOMM seam is

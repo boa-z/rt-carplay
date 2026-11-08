@@ -7,7 +7,7 @@ tree. It contains no CarPlay logic, only the three platform seams declared in
 | File | Seam | Notes |
 |------|------|-------|
 | `rtcp_os_rtthread.c` | `rtcp_os` | tick-based `now_ms`, `rt_thread_mdelay`, `rt_malloc/free`, `rt_thread_create`, mutexes with delete |
-| `rtcp_net_rtthread.c` | `rtcp_net` | BSD sockets from SAL (`RT_USING_SAL`) or lwIP directly |
+| `rtcp_net_rtthread.c` | `rtcp_net` | BSD sockets from SAL (`RT_USING_SAL`) or lwIP directly, including IPv4 UDP for mDNS |
 | `rtcp_bt_rtthread.c` | `rtcp_bt` | **stub**: every call returns `RTCP_ENOTSUP` |
 
 `include/rtcp_rtthread.h` exports the three constant tables plus
@@ -39,6 +39,8 @@ The socket seam uses a fixed `poll()` array of 8 descriptors. Enlarge
 
 * `RT_USING_HEAP`
 * `RT_USING_SAL` (recommended) or lwIP with `SAL`-compatible `closesocket()`
+* For mDNS: UDP sockets plus IGMP multicast membership (`LWIP_IGMP` in lwIP);
+  `udp_join` returns `RTCP_ENOTSUP` when `IP_ADD_MEMBERSHIP` is unavailable
 * mbedTLS 2.28.x built with:
 
   | Symbol | Why |

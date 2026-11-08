@@ -103,6 +103,48 @@ int main(void)
     assert(rtcp_net_linux.poll(NULL, 1, 0) == RTCP_EINVAL);
     assert(rtcp_net_linux.connect(NULL) == RTCP_EINVAL);
 
+    /* UDP loopback (mDNS transport).  Multicast join is environment
+     * dependent and is exercised on the target, not here. */
+    int receiver = rtcp_net_linux.udp_open(0U, false);
+    assert(receiver >= 0);
+    uint16_t udp_port = rtcp_net_linux_local_port(receiver);
+    assert(udp_port != 0U);
+    int sender = rtcp_net_linux.udp_open(0U, false);
+    assert(sender >= 0);
+
+    rtcp_addr_t unicast = {
+        .family = RTCP_AF_INET,
+        .addr = {127, 0, 0, 1},
+        .port = udp_port,
+    };
+    static const char datagram[] = "mDNS";
+    assert(rtcp_net_linux.udp_sendto(sender, &unicast, datagram,
+                                     sizeof(datagram)) ==
+           (int)sizeof(datagram));
+
+    struct rtcp_pollfd datagram_poll = {
+        .fd = receiver,
+        .events = RTCP_POLLIN,
+        .revents = 0,
+    };
+    assert(rtcp_net_linux.poll(&datagram_poll, 1, 1000) == 1);
+    assert(datagram_poll.revents & RTCP_POLLIN);
+
+    rtcp_addr_t source = {0};
+    memset(buffer, 0, sizeof(buffer));
+    int datagram_len = rtcp_net_linux.udp_recvfrom(receiver, buffer,
+                                                   sizeof(buffer), &source);
+    assert(datagram_len == (int)sizeof(datagram));
+    assert(memcmp(buffer, datagram, sizeof(datagram)) == 0);
+    assert(source.family == RTCP_AF_INET);
+    assert(source.addr[0] == 127U && source.addr[3] == 1U);
+
+    assert(rtcp_net_linux.udp_sendto(-1, &unicast, datagram, 1) ==
+           RTCP_EINVAL);
+    assert(rtcp_net_linux.udp_recvfrom(-1, buffer, 1, NULL) == RTCP_EINVAL);
+    rtcp_net_linux.close(receiver);
+    rtcp_net_linux.close(sender);
+
     /* Documented stubs. */
     uint8_t bdaddr[6] = {0};
     assert(rtcp_bt_linux.enable("linux", bdaddr) == RTCP_ENOTSUP);

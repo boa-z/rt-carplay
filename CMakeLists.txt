@@ -68,7 +68,8 @@ if(RTCP_BUILD_TESTS)
         test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify
         test_airplay_rtsp_pairing test_airplay_rtsp_session
         test_airplay_pairing_store
-        test_discovery test_port_linux test_input_bridge test_media_timestamp
+        test_discovery test_mdns_responder test_port_linux test_input_bridge
+        test_media_timestamp
     )
 
     foreach(name ${RTCP_TESTS})

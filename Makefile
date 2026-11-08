@@ -35,7 +35,8 @@ TESTS := test_mfi2c \
          test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify \
          test_airplay_rtsp_pairing test_airplay_rtsp_session \
          test_airplay_pairing_store \
-         test_discovery test_port_linux test_input_bridge test_media_timestamp
+         test_discovery test_mdns_responder test_port_linux test_input_bridge \
+         test_media_timestamp
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 

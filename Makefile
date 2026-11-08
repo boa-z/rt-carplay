@@ -37,13 +37,14 @@ TESTS := test_mfi2c \
          test_airplay_pairing_store \
          test_airplay_control_cipher test_airplay_control_port \
          test_airplay_timing_port test_airplay_event_port \
-         test_airplay_screen_server \
+         test_airplay_screen_server test_airplay_rtsp_server \
          test_discovery test_mdns_responder test_port_linux test_input_bridge \
          test_media_timestamp
 
 # These tests drive the poll seams through the POSIX port.
 PORT_TESTS := test_airplay_control_port test_airplay_timing_port \
-              test_airplay_event_port test_airplay_screen_server
+              test_airplay_event_port test_airplay_screen_server \
+              test_airplay_rtsp_server
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 

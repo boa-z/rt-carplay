@@ -24,7 +24,11 @@ this repo yet.
   screen codec, DataStream AEAD decryption, ControlCipher streams, timing,
   Pair-Setup/Pair-Verify/SRP-6a, the MFiSAP responder, the `/info` binary
   plist writer and the RTSP session (info, SETUP, RECORD, teardown), and
-  persistent pairing storage.
+  persistent pairing storage.  On top of those sit the poll-driven
+  endpoints — ControlCipher event channel, UDP timing, Screen DataStream —
+  and `airplay_rtsp_server`, a single-controller RTSP server that owns the
+  listener, the ControlCipher transition after Pair-Verify and the media
+  endpoints the session asks for.
 - `core/media/`, `core/input/` — timestamp helpers and the input bridge.
 - `core/discovery/` — AirPlay Bonjour TXT records, an mDNS responder for
   `_airplay._tcp` (transport-free packet builder plus UDP polling through the

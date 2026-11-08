@@ -24,6 +24,13 @@ void carplay_video_sink_stop(void);
 
 bool carplay_video_sink_is_running(void);
 
+/* NAL units waiting for the decoder.  Useful to pace a file feeder. */
+size_t carplay_video_sink_pending(void);
+
+/* Decoder counters since start; any output pointer may be NULL. */
+void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
+                              unsigned *dropped, unsigned *errors);
+
 /* Drop-in carplay_app_screen_cb_t: queues the Annex-B data and returns. */
 void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
                               size_t annex_b_len, uint64_t sender_time_ns,

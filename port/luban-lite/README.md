@@ -159,7 +159,7 @@ independent.
 4. **BT H5/HCI** — `hci_h5` must reach `HCI_READY`; Classic inquiry and SDP
    must find and serve `_iap2._tcp` / CarPlay UUIDs. The RFCOMM data path
    remains stubbed until this passes.
-5. **CE TRNG** — with `CONFIG_AIC_CE_DRV=y`, call `rtcp_lubanlite_random()`
-   twice from a shell command (or run the AirPlay server and pair): both
-   calls must return `true`, the buffers must differ, and no poll timeout may
-   appear in the log. This confirms the unit-3 inference above.
+5. **CE TRNG** — with `CONFIG_AIC_CE_DRV=y`, run `carplay_randtest` (it calls
+   `rtcp_lubanlite_random()` twice): both calls must succeed, the two hex
+   dumps must differ, and no poll timeout may appear in the log. This
+   confirms the unit-3 inference above.

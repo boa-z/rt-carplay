@@ -19,6 +19,7 @@
 #include <rtthread.h>
 #include <rtdevice.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -526,3 +527,175 @@ bool carplay_video_sink_is_running(void)
 {
     return s_sink.running;
 }
+
+size_t carplay_video_sink_pending(void)
+{
+    video_sink_t *sink = &s_sink;
+    if (!sink->running || sink->lock == NULL) return 0U;
+    if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK) return 0U;
+    size_t pending =
+        (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
+    (void)rt_mutex_release(sink->lock);
+    return pending;
+}
+
+void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
+                              unsigned *dropped, unsigned *errors)
+{
+    if (nals != NULL) *nals = s_sink.nal_count;
+    if (frames != NULL) *frames = s_sink.frame_count;
+    if (dropped != NULL) *dropped = s_sink.dropped_nals;
+    if (errors != NULL) *errors = s_sink.decode_errors;
+}
+
+/* ------------------------------------------------------------------ */
+/* Bring-up shell command: decode an Annex-B file without a controller */
+/* ------------------------------------------------------------------ */
+
+#define VIDEO_TEST_READ_BYTES (64U * 1024U)
+#define VIDEO_TEST_CARRY_BYTES (SINK_MAX_NAL_BYTES + VIDEO_TEST_READ_BYTES)
+
+static size_t find_last_start_code(const uint8_t *data, size_t len)
+{
+    if (len < 3U) return SIZE_MAX;
+    size_t i = len - 3U;
+    for (;;) {
+        if (data[i] == 0x00 && data[i + 1U] == 0x00 && data[i + 2U] == 0x01) {
+            return i;
+        }
+        if (i == 0U) return SIZE_MAX;
+        --i;
+    }
+}
+
+static void wait_for_decode_room(void)
+{
+    unsigned guard = 2000U;
+    while (carplay_video_sink_is_running() &&
+           carplay_video_sink_pending() >= 8U && guard-- != 0U) {
+        rt_thread_mdelay(5);
+    }
+}
+
+static int play_h264_file(const char *path)
+{
+    bool started_here = false;
+    if (!carplay_video_sink_is_running()) {
+        int result = carplay_video_sink_start(1280U, 480U);
+        if (result != RTCP_OK) {
+            rt_kprintf("[" TAG "] cannot start the sink: %d\n", result);
+            return result;
+        }
+        started_here = true;
+    }
+
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        rt_kprintf("[" TAG "] cannot open %s\n", path);
+        if (started_here) carplay_video_sink_stop();
+        return RTCP_ENOENT;
+    }
+    uint8_t *carry = malloc(VIDEO_TEST_CARRY_BYTES);
+    if (carry == NULL) {
+        fclose(file);
+        if (started_here) carplay_video_sink_stop();
+        return RTCP_ENOMEM;
+    }
+
+    size_t carry_len = 0U;
+    size_t fed_bytes = 0U;
+    unsigned fed_batches = 0U;
+    bool eof = false;
+    while (carplay_video_sink_is_running()) {
+        if (!eof && carry_len < VIDEO_TEST_CARRY_BYTES) {
+            size_t got = fread(carry + carry_len, 1U,
+                               VIDEO_TEST_CARRY_BYTES - carry_len, file);
+            if (got == 0U) eof = true;
+            carry_len += got;
+        }
+
+        const uint8_t *start = find_start_code(carry, carry + carry_len);
+        if (start == NULL) {
+            if (eof) break;
+            /* Keep a possible split start code, drop the rest. */
+            size_t keep = carry_len > 2U ? 2U : carry_len;
+            memmove(carry, carry + carry_len - keep, keep);
+            carry_len = keep;
+            continue;
+        }
+        if (start != carry) {
+            size_t drop = (size_t)(start - carry);
+            memmove(carry, start, carry_len - drop);
+            carry_len -= drop;
+        }
+
+        size_t next = find_last_start_code(carry + 3U, carry_len - 3U);
+        if (next == SIZE_MAX) {
+            if (!eof && carry_len < VIDEO_TEST_CARRY_BYTES) continue;
+            /* One NAL fills the buffer (or ends the file): submit it whole. */
+            next = carry_len;
+        } else {
+            next += 3U;
+        }
+        if (next == 0U) continue;
+
+        carplay_video_sink_frame(false, carry, next, 0U, NULL);
+        fed_bytes += next;
+        ++fed_batches;
+        memmove(carry, carry + next, carry_len - next);
+        carry_len -= next;
+        if (eof && carry_len < 3U) break;
+        wait_for_decode_room();
+    }
+
+    free(carry);
+    fclose(file);
+    unsigned nals = 0U, frames = 0U, dropped = 0U, errors = 0U;
+    carplay_video_sink_stats(&nals, &frames, &dropped, &errors);
+    rt_kprintf("[" TAG "] played %s: %u batches, %u bytes, decoder %u NALs/%u frames, dropped %u, errors %u\n",
+               path, fed_batches, (unsigned)fed_bytes, nals, frames, dropped,
+               errors);
+    return RTCP_OK;
+}
+
+static int cmd_carplay_video(int argc, char **argv)
+{
+    if (argc < 2) {
+        rt_kprintf("usage: carplay_video start [width height] | stop | status | play <annexb-file>\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "start") == 0) {
+        unsigned width = argc >= 4 ? (unsigned)atoi(argv[2]) : 1280U;
+        unsigned height = argc >= 4 ? (unsigned)atoi(argv[3]) : 480U;
+        int result = carplay_video_sink_start((uint16_t)width, (uint16_t)height);
+        rt_kprintf("[" TAG "] start %ux%u: %d\n", width, height, result);
+        return 0;
+    }
+    if (strcmp(argv[1], "stop") == 0) {
+        carplay_video_sink_stop();
+        rt_kprintf("[" TAG "] stopped\n");
+        return 0;
+    }
+    if (strcmp(argv[1], "status") == 0) {
+        unsigned nals = 0U, frames = 0U, dropped = 0U, errors = 0U;
+        carplay_video_sink_stats(&nals, &frames, &dropped, &errors);
+        rt_kprintf("[" TAG "] %s, pending %u, NALs %u, frames %u, dropped %u, errors %u\n",
+                   carplay_video_sink_is_running() ? "running" : "stopped",
+                   (unsigned)carplay_video_sink_pending(), nals, frames,
+                   dropped, errors);
+        return 0;
+    }
+    if (strcmp(argv[1], "play") == 0) {
+        if (argc < 3) {
+            rt_kprintf("usage: carplay_video play <annexb-file>\n");
+            return 0;
+        }
+        (void)play_h264_file(argv[2]);
+        return 0;
+    }
+    rt_kprintf("unknown carplay_video subcommand: %s\n", argv[1]);
+    return 0;
+}
+
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_video, carplay_video,
+                     Test the MPP video path: start/stop/status/play file);

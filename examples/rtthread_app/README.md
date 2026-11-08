@@ -62,7 +62,20 @@ carplay_touch down 640 240    # inject touch in display pixels
 carplay_touch move 700 260
 carplay_touch up 700 260
 carplay_stop
+
+carplay_randtest              # CE TRNG self-test (two distinct 32-byte reads)
+
+carplay_video status          # decoder counters, queue depth
+carplay_video start 1280 480  # exercise MPP + DE without a controller
+carplay_video play /data/sample.h264   # decode an Annex-B file
+carplay_video stop            # release the decoder, restore the UI layer
 ```
+
+`carplay_video play` is the bring-up path when no controller is available:
+it starts the sink if needed, feeds complete NAL units with a 64 KB read
+window (paced by decoder queue depth), and prints the decoder counters.
+`carplay_video start`/`play` also work while the receiver runs, as long as
+the controller is not streaming.
 
 `RTCARPLAY_AUTO_START=y` calls `carplay_app_start()` from `main()` instead.
 

@@ -906,6 +906,36 @@ static int cmd_carplay_touch(int argc, char **argv)
     return 0;
 }
 
+static int cmd_carplay_randtest(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    uint8_t first[32];
+    uint8_t second[32];
+    bool ok_first = rtcp_lubanlite_random(first, sizeof(first));
+    bool ok_second = rtcp_lubanlite_random(second, sizeof(second));
+    for (size_t i = 0U; i < sizeof(first); ++i) {
+        rt_kprintf("%02x", first[i]);
+    }
+    rt_kprintf("\n");
+    for (size_t i = 0U; i < sizeof(second); ++i) {
+        rt_kprintf("%02x", second[i]);
+    }
+    rt_kprintf("\n");
+    if (!ok_first || !ok_second) {
+        rt_kprintf("carplay_randtest: entropy provider unavailable "
+                   "(CONFIG_AIC_CE_DRV / DRIVER_HAL_EN?)\n");
+    } else if (memcmp(first, second, sizeof(first)) == 0) {
+        rt_kprintf("carplay_randtest: FAIL, two calls returned identical "
+                   "bytes\n");
+    } else {
+        rt_kprintf("carplay_randtest: OK, distinct output\n");
+    }
+    memset(first, 0, sizeof(first));
+    memset(second, 0, sizeof(second));
+    return 0;
+}
+
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_start, carplay_start,
                      Start the rt-carplay receiver);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_stop, carplay_stop,
@@ -914,3 +944,5 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_status, carplay_status,
                      Show rt-carplay receiver status);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_touch, carplay_touch,
                      Inject a touch: carplay_touch down|move|up X Y [pointer]);
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_randtest, carplay_randtest,
+                     Verify the CE TRNG: two calls must differ);

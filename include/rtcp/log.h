@@ -5,9 +5,15 @@
 /*
  * Minimal logging seam.  The core is silent unless a platform build defines
  * RTCP_LOG_ENABLE (and optionally RTCP_LOG_TAG).  Platform ports may instead
- * provide macros of their own before including core headers.
+ * define RTCP_LOG_CUSTOM and provide RTCP_LOGE/W/I/D before including any
+ * core header; the RT-Thread port does this through a forced include, so no
+ * platform API appears in this directory.
  */
-#ifdef RTCP_LOG_ENABLE
+#if defined(RTCP_LOG_CUSTOM)
+
+/* The platform supplies RTCP_LOGE(), RTCP_LOGW(), RTCP_LOGI(), RTCP_LOGD(). */
+
+#elif defined(RTCP_LOG_ENABLE)
 
 #include <stdio.h>
 

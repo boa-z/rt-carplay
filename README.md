@@ -29,6 +29,11 @@ this repo yet.
   SoftAP vendor IE.
 - `port/linux/` — POSIX OS and TCP implementations; the BT and Wi-Fi seams
   are explicit stubs there because a desktop host has no accessory stack.
+- `port/rtthread/` — RT-Thread OS and BSD-socket seams; the BT/RFCOMM seam is
+  an explicit `RTCP_ENOTSUP` stub until the Zephyr host is board-validated.
+- `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam for the
+  ArtInChip SDK.
+- `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
   ASan/UBSan.
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.

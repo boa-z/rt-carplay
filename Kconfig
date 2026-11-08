@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+menuconfig LPKG_USING_RT_CARPLAY
+    bool "rt-carplay: AirPlay/iAP2 CarPlay receiver"
+    default n
+    depends on LPKG_USING_MBEDTLS
+    help
+        Portable CarPlay (wireless iAP2 + AirPlay) receiver core with an
+        RT-Thread OS/socket port.  Requires mbedTLS 2.x built with
+        MBEDTLS_CHACHA20_C, MBEDTLS_POLY1305_C, MBEDTLS_CHACHAPOLY_C and
+        MBEDTLS_HKDF_C; see port/luban-lite/README.md.
+
+if LPKG_USING_RT_CARPLAY
+
+config LPKG_RT_CARPLAY_LOG
+    bool "Enable rt-carplay logging"
+    default y
+    help
+        Route RTCP_LOGx() output through rt_kprintf().  Turn off to drop the
+        logging strings from the image.
+
+config LPKG_RT_CARPLAY_LUBANLITE_WIFI
+    bool "Use the Luban-Lite Realtek SoftAP seam"
+    default y if AIC_WLAN_REALTEK
+    depends on AIC_WLAN_REALTEK
+    help
+        Bind rtcp_wifi to the Realtek RTL8733BS SoftAP API.  Vendor IE
+        injection additionally needs CONFIG_REALTEK_FULL_FNC_MODE.
+
+endif

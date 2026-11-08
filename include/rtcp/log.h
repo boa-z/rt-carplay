@@ -24,10 +24,22 @@
 
 #else
 
-#define RTCP_LOGE(tag, ...) ((void)(tag))
-#define RTCP_LOGW(tag, ...) ((void)(tag))
-#define RTCP_LOGI(tag, ...) ((void)(tag))
-#define RTCP_LOGD(tag, ...) ((void)(tag))
+/*
+ * Silent builds still reference their arguments.  A plain "(void)(tag)" drops
+ * the format arguments, so variables that exist only for a log line would be
+ * reported as "set but not used"; the dead call keeps them used and costs
+ * nothing (the body is empty and "if (0)" is folded away).
+ */
+static inline void rtcp_log_discard(const char *tag, const char *fmt, ...)
+{
+    (void)tag;
+    (void)fmt;
+}
+
+#define RTCP_LOGE(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
+#define RTCP_LOGW(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
+#define RTCP_LOGI(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
+#define RTCP_LOGD(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
 
 #endif
 

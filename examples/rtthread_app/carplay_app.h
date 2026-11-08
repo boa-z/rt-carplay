@@ -6,7 +6,8 @@
  * with the Apple vendor IE, DHCP, mDNS advertisement, the AirPlay RTSP
  * server (Pair-Setup/Pair-Verify/Screen/Event endpoints) and the touch ->
  * HID input bridge.  Board specifics stay behind the rtcp_lubanlite
- * helpers; decoded Screen frames are handed to on_screen for a video sink.
+ * helpers; the encoded Screen stream is handed to on_screen, which defaults
+ * to the on-board MPP/DE video sink when RTCARPLAY_VIDEO is enabled.
  */
 #pragma once
 
@@ -35,7 +36,7 @@ typedef struct {
     uint16_t rotation_degrees;  /* 0, 90, 180 or 270 */
     const char *seed_path;      /* default "/data/rt-carplay.seed" */
     const char *store_path;     /* default "/data/rt-carplay-pairings.bin" */
-    carplay_app_screen_cb_t on_screen;
+    carplay_app_screen_cb_t on_screen; /* NULL = on-board sink if built in */
     void *screen_context;
 } carplay_app_config_t;
 

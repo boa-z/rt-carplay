@@ -4,8 +4,9 @@
  *
  * Boot order (start): entropy + Ed25519 identity, pairing store, SoftAP and
  * vendor IE, DHCP, /info plist, AirPlay RTSP server, mDNS, input bridge,
- * poll thread.  Everything is torn down by that thread when it observes the
- * stop flag, so the RTSP server and the event cipher stay single-threaded.
+ * on-board video sink (RTCARPLAY_VIDEO), poll thread.  Everything is torn
+ * down by that thread when it observes the stop flag, so the RTSP server and
+ * the event cipher stay single-threaded.
  */
 #include "carplay_app.h"
 

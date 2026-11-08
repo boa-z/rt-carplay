@@ -21,7 +21,9 @@ this repo yet.
   callbacks.  Ported from `esp32-carplay-web-relay` (GPL-3.0-or-later, itself
   based on DiPlay); copyright notices retained.
 - `core/airplay/` — binary plist, RTSP codec, TLV8, HID plists/descriptors,
-  screen codec, DataStream AEAD decryption, ControlCipher streams and timing.
+  screen codec, DataStream AEAD decryption, ControlCipher streams, timing,
+  Pair-Setup/Pair-Verify/SRP-6a, the MFiSAP responder and the RTSP session
+  (info, SETUP, RECORD, teardown).
 - `core/media/`, `core/input/` — timestamp helpers and the input bridge.
 - `core/discovery/` — AirPlay Bonjour TXT records and the Apple CarPlay
   SoftAP vendor IE.

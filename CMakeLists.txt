@@ -47,6 +47,14 @@ target_compile_definitions(rtcp_core PUBLIC
 target_compile_options(rtcp_core PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(rtcp_core PUBLIC rtcp_mbedcrypto m)
 
+file(GLOB_RECURSE RTCP_PORT_LINUX_SOURCES CONFIGURE_DEPENDS port/linux/*.c)
+add_library(rtcp_port_linux STATIC ${RTCP_PORT_LINUX_SOURCES})
+target_include_directories(rtcp_port_linux PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/port/linux/include)
+find_package(Threads REQUIRED)
+target_link_libraries(rtcp_port_linux PUBLIC Threads::Threads)
+
 if(RTCP_BUILD_TESTS)
     enable_testing()
 
@@ -60,7 +68,7 @@ if(RTCP_BUILD_TESTS)
         test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify
         test_airplay_rtsp_pairing test_airplay_rtsp_session
         test_airplay_pairing_store
-        test_discovery test_input_bridge test_media_timestamp
+        test_discovery test_port_linux test_input_bridge test_media_timestamp
     )
 
     foreach(name ${RTCP_TESTS})
@@ -70,7 +78,11 @@ if(RTCP_BUILD_TESTS)
             set(source ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/${name}.c)
         endif()
         add_executable(${name} ${source})
-        target_link_libraries(${name} PRIVATE rtcp_core)
+        if(name STREQUAL "test_port_linux")
+            target_link_libraries(${name} PRIVATE rtcp_port_linux)
+        else()
+            target_link_libraries(${name} PRIVATE rtcp_core)
+        endif()
         target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
         add_test(NAME ${name} COMMAND ${name})
     endforeach()

@@ -27,6 +27,8 @@ this repo yet.
 - `core/media/`, `core/input/` — timestamp helpers and the input bridge.
 - `core/discovery/` — AirPlay Bonjour TXT records and the Apple CarPlay
   SoftAP vendor IE.
+- `port/linux/` — POSIX OS and TCP implementations; the BT and Wi-Fi seams
+  are explicit stubs there because a desktop host has no accessory stack.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
   ASan/UBSan.
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.

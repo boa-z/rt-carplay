@@ -20,6 +20,7 @@ struct rtcp_os {
     rtcp_mutex_t  (*mutex_create)(void);
     void          (*mutex_lock)(rtcp_mutex_t m);
     void          (*mutex_unlock)(rtcp_mutex_t m);
+    void          (*mutex_destroy)(rtcp_mutex_t m);
 };
 
 #endif /* RTCP_OS_H */

@@ -4,7 +4,7 @@ AR       ?= ar
 CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
 CPPFLAGS += -Iinclude -Icore -Icore/mfi \
             -Icore/iap2/include -Icore/airplay/include \
-            -Icore/media/include -Icore/input/include -Icore/discovery/include -Itests/support
+            -Icore/media/include -Icore/input/include -Icore/discovery/include -Iport/linux/include -Itests/support
 LDLIBS   += -lm
 BUILD    := build
 
@@ -22,6 +22,10 @@ CORE_SRCS := $(wildcard core/*/*.c)
 CORE_OBJS := $(CORE_SRCS:%.c=$(BUILD)/%.o)
 LIB       := $(BUILD)/librtcp_core.a
 
+PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
+PORT_LINUX_OBJS := $(PORT_LINUX_SRCS:%.c=$(BUILD)/%.o)
+PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
+
 TESTS := test_mfi2c \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session \
@@ -31,7 +35,7 @@ TESTS := test_mfi2c \
          test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify \
          test_airplay_rtsp_pairing test_airplay_rtsp_session \
          test_airplay_pairing_store \
-         test_discovery test_input_bridge test_media_timestamp
+         test_discovery test_port_linux test_input_bridge test_media_timestamp
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 
@@ -55,8 +59,14 @@ $(LIB): $(CORE_OBJS)
 $(BUILD)/test_mfi2c: tests/test_mfi2c.c $(LIB) $(MBEDTLS_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS)
 
+$(PORT_LINUX_LIB): $(PORT_LINUX_OBJS)
+	$(AR) rcs $@ $^
+
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB) $(MBEDTLS_LIB) $(TEST_SUPPORT_OBJ)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(TEST_SUPPORT_OBJ) $(MBEDTLS_LIB) $(LDLIBS)
+
+$(BUILD)/test_port_linux: tests/unit/test_port_linux.c $(PORT_LINUX_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(PORT_LINUX_LIB) -lpthread
 
 check: all
 	@for t in $(BINS); do echo "== $$t =="; ./$$t; done

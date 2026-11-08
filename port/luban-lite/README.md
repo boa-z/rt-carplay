@@ -6,7 +6,8 @@ RT-Thread port:
 | File | Purpose |
 |------|---------|
 | `rtcp_wifi_lubanlite.c` | `rtcp_wifi` backed by the Realtek RTL8733BS SoftAP API |
-| `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite` and interface setter |
+| `rtcp_random_lubanlite.c` | `rtcp_os.random` backed by the ArtInChip CE TRNG |
+| `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite`, interface setter and `rtcp_lubanlite_random` |
 
 The first hardware target is an ArtInChip D213 with an RTL8733BS (SDIO Wi-Fi +
 HCI H5 Bluetooth).
@@ -42,6 +43,37 @@ driver answers "Command not found" at runtime, and the iPhone never shows the
 
 No Realtek firmware blob or library is stored in this repository; they come
 from the SDK and stay under their own license.
+
+## Entropy seam
+
+`rtcp_lubanlite_random()` drives the CE TRNG through the public HAL: build an
+aligned `struct crypto_task` with `alg.trng.alg_tag = ALG_TRNG`, start it with
+`hal_crypto_start_symm()`, wait on `hal_crypto_poll_finish()` and copy the
+cache-line buffer out. Install it over the RT-Thread table before starting the
+server:
+
+```c
+static struct rtcp_os os;
+
+os = rtcp_os_rtthread;
+os.random = rtcp_lubanlite_random;
+```
+
+Requirements: `CONFIG_AIC_CE_DRV=y` and `CONFIG_DRIVER_HAL_EN=y`. Without
+them the function is compiled as a stub returning `false`, and the AirPlay
+server refuses to run Pair-Setup (no weak fallback).
+
+Two caveats, both **[unknown until board-verified]**:
+
+- **Completion unit.** The HAL names symmetric=0, hash=1 and asymmetric=2, and
+  `hal_crypto_init()` clears four ISR bits. This port waits on unit 3 for
+  `ALG_TRNG`. If that guess is wrong the poll times out and pairing fails
+  closed; confirm by checking that `rtcp_lubanlite_random()` returns distinct
+  bytes and never times out on hardware.
+- **Shared engine.** The CE runs one task at a time. Do not use this provider
+  while another CE user (e.g. `drv_ce`, a hardware-backed TLS stack) is
+  active. On the reference configuration mbedTLS is software-only, so the
+  TRNG is the sole CE user.
 
 ## mbedTLS configuration
 
@@ -113,3 +145,7 @@ independent.
 4. **BT H5/HCI** — `hci_h5` must reach `HCI_READY`; Classic inquiry and SDP
    must find and serve `_iap2._tcp` / CarPlay UUIDs. The RFCOMM data path
    remains stubbed until this passes.
+5. **CE TRNG** — with `CONFIG_AIC_CE_DRV=y`, call `rtcp_lubanlite_random()`
+   twice from a shell command (or run the AirPlay server and pair): both
+   calls must return `true`, the buffers must differ, and no poll timeout may
+   appear in the log. This confirms the unit-3 inference above.

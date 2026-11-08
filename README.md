@@ -41,8 +41,8 @@ this repo yet.
   are explicit stubs there because a desktop host has no accessory stack.
 - `port/rtthread/` — RT-Thread OS and BSD-socket seams; the BT/RFCOMM seam is
   an explicit `RTCP_ENOTSUP` stub until the Zephyr host is board-validated.
-- `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam for the
-  ArtInChip SDK.
+- `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam, and
+  the CE TRNG entropy provider for the ArtInChip SDK.
 - `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
   Screen dump) described under “Linux simulator”.

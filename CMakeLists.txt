@@ -80,7 +80,7 @@ if(RTCP_BUILD_TESTS)
         test_airplay_control_cipher test_airplay_control_port
         test_airplay_timing_port test_airplay_event_port
         test_airplay_screen_server test_airplay_rtsp_server
-        test_airplay_ed25519
+        test_airplay_pairing_e2e test_airplay_ed25519
         test_discovery test_mdns_responder test_port_linux test_input_bridge
         test_media_timestamp
     )
@@ -88,7 +88,7 @@ if(RTCP_BUILD_TESTS)
     set(RTCP_PORT_TESTS
         test_port_linux test_airplay_control_port test_airplay_timing_port
         test_airplay_event_port test_airplay_screen_server
-        test_airplay_rtsp_server)
+        test_airplay_rtsp_server test_airplay_pairing_e2e)
 
     foreach(name ${RTCP_TESTS})
         if(name STREQUAL "test_mfi2c")
@@ -96,7 +96,12 @@ if(RTCP_BUILD_TESTS)
         else()
             set(source ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/${name}.c)
         endif()
-        add_executable(${name} ${source})
+        if(name STREQUAL "test_airplay_pairing_e2e")
+            add_executable(${name} ${source}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/airplay_srp6a_test_client.c)
+        else()
+            add_executable(${name} ${source})
+        endif()
         if(name STREQUAL "test_port_linux")
             target_link_libraries(${name} PRIVATE rtcp_port_linux)
         elseif(name IN_LIST RTCP_PORT_TESTS)

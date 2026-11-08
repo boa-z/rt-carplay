@@ -40,6 +40,7 @@
 
 #include <zephyr/autoconf.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/assigned_numbers.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/classic/classic.h>
 #include <zephyr/bluetooth/classic/rfcomm.h>
@@ -72,6 +73,15 @@
 #define BT_RX_WAIT_MS 500
 
 #define BT_SERVICE_NAME_MAX 63U
+
+/* Class of Device: Audio + Rendering services, Audio/Video major class,
+ * Car audio minor class (0x00240420).  A head unit normally reports this;
+ * some phones use it to offer CarPlay/head-unit behavior.  The assigned
+ * numbers header defines the field values, so shift major/minor into place. */
+#define RTCP_BT_LUBANLITE_COD                                              \
+    (BT_COD_MAJOR_SVC_CLASS_AUDIO | BT_COD_MAJOR_SVC_CLASS_RENDERING |     \
+     (BT_COD_MAJOR_DEVICE_CLASS_AUDIO_VIDEO << 8) |                        \
+     (BT_COD_MINOR_DEVICE_CLASS_AUDIO_VIDEO_CAR_AUDIO << 2))
 
 enum bt_link_state {
     BT_LINK_FREE = 0,
@@ -363,10 +373,19 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
         RTCP_LOGW(BT_TAG, "set discoverable failed (%d)", err);
     }
 
+    err = bt_br_set_class_of_device(RTCP_BT_LUBANLITE_COD);
+    if (err != 0) {
+        RTCP_LOGW(BT_TAG, "set class of device failed (%d)", err);
+    }
+
     if (name != NULL && name[0] != '\0') {
-        /* Host-side name only; the controller keeps its own BR/EDR name
-         * until a Write_Local_Name is issued (board follow-up). */
-        (void)bt_set_name(name);
+        /* With LPKG_BT_DEVICE_NAME_DYNAMIC, bt_set_name() issues the HCI
+         * Write_Local_Name for Classic once the host is ready, so this is
+         * the name the phone sees during discovery. */
+        err = bt_set_name(name);
+        if (err != 0) {
+            RTCP_LOGW(BT_TAG, "set local name failed (%d)", err);
+        }
     }
 
     s_enabled = true;

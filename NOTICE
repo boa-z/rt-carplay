@@ -9,6 +9,13 @@ version.  See LICENSE for the full text.
 Third-party notices
 -------------------
 
+Third-party code currently included:
+
+- `third_party/ed25519/` vendors orlp/ed25519 (zlib license, Copyright (c)
+  2015 Orson Peters <orsonpeters@gmail.com>); the unmodified sources and the
+  license text are kept alongside.  It provides the software Ed25519 identity
+  used by Pair-Setup/Pair-Verify; it is not Apple MFi material.
+
 Third-party protocol code currently included:
 
 - The modules in `core/iap2/` (`iap2_core`, `iap2_identity`, `iap2_carplay`,

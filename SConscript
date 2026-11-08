@@ -32,6 +32,13 @@ for sub in ('airplay', 'iap2', 'discovery', 'input', 'media', 'mfi'):
     else:
         cpppath.append(os.path.join(cwd, 'core', sub))
 
+# Software Ed25519 identity (vendored orlp/ed25519, zlib license).
+if GetDepend('LPKG_RT_CARPLAY_ED25519'):
+    src += Glob('core/crypto/*.c')
+    src += Glob('third_party/ed25519/*.c')
+    cpppath.append(cwd + '/core/crypto/include')
+    cpppath.append(cwd + '/third_party/ed25519')
+
 # RT-Thread OS and socket seams.
 src += Glob('port/rtthread/*.c')
 cpppath.append(cwd + '/port/rtthread/include')

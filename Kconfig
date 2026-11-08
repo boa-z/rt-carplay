@@ -19,6 +19,15 @@ config LPKG_RT_CARPLAY_LOG
         Route RTCP_LOGx() output through rt_kprintf().  Turn off to drop the
         logging strings from the image.
 
+config LPKG_RT_CARPLAY_ED25519
+    bool "Vendored software Ed25519 identity"
+    default y
+    help
+        Compile orlp/ed25519 (zlib license, third_party/ed25519) and the
+        airplay_ed25519 wrapper.  This is the software signing identity used
+        by Pair-Setup / Pair-Verify; without it the application must provide
+        its own sign/verify callbacks (for example a hardware-backed key).
+
 config LPKG_RT_CARPLAY_LUBANLITE_WIFI
     bool "Use the Luban-Lite Realtek SoftAP seam"
     default y if AIC_WLAN_REALTEK

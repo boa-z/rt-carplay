@@ -26,7 +26,8 @@ set_target_properties(rtcp_mbedcrypto PROPERTIES
 add_dependencies(rtcp_mbedcrypto rtcp_mbedtls)
 
 file(GLOB_RECURSE RTCP_CORE_SOURCES CONFIGURE_DEPENDS core/*.c)
-add_library(rtcp_core STATIC ${RTCP_CORE_SOURCES})
+file(GLOB RTCP_ED25519_SOURCES CONFIGURE_DEPENDS third_party/ed25519/*.c)
+add_library(rtcp_core STATIC ${RTCP_CORE_SOURCES} ${RTCP_ED25519_SOURCES})
 
 target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -34,6 +35,8 @@ target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/mfi
     ${CMAKE_CURRENT_SOURCE_DIR}/core/iap2/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/airplay/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ed25519
     ${CMAKE_CURRENT_SOURCE_DIR}/core/media/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/input/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/discovery/include
@@ -71,6 +74,7 @@ if(RTCP_BUILD_TESTS)
         test_airplay_control_cipher test_airplay_control_port
         test_airplay_timing_port test_airplay_event_port
         test_airplay_screen_server test_airplay_rtsp_server
+        test_airplay_ed25519
         test_discovery test_mdns_responder test_port_linux test_input_bridge
         test_media_timestamp
     )

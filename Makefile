@@ -3,8 +3,9 @@ CC       ?= cc
 AR       ?= ar
 CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
 CPPFLAGS += -Iinclude -Icore -Icore/mfi \
-            -Icore/iap2/include -Icore/airplay/include \
-            -Icore/media/include -Icore/input/include -Icore/discovery/include -Iport/linux/include -Itests/support
+            -Icore/iap2/include -Icore/airplay/include -Icore/crypto/include \
+            -Icore/media/include -Icore/input/include -Icore/discovery/include \
+            -Ithird_party/ed25519 -Iport/linux/include -Itests/support
 LDLIBS   += -lm
 BUILD    := build
 
@@ -20,6 +21,9 @@ CPPFLAGS += $(MBEDTLS_CPPFLAGS)
 
 CORE_SRCS := $(wildcard core/*/*.c)
 CORE_OBJS := $(CORE_SRCS:%.c=$(BUILD)/%.o)
+# Vendored portable Ed25519 (zlib); used only by core/crypto.
+ED25519_SRCS := $(wildcard third_party/ed25519/*.c)
+ED25519_OBJS := $(ED25519_SRCS:%.c=$(BUILD)/%.o)
 LIB       := $(BUILD)/librtcp_core.a
 
 PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
@@ -38,6 +42,7 @@ TESTS := test_mfi2c \
          test_airplay_control_cipher test_airplay_control_port \
          test_airplay_timing_port test_airplay_event_port \
          test_airplay_screen_server test_airplay_rtsp_server \
+         test_airplay_ed25519 \
          test_discovery test_mdns_responder test_port_linux test_input_bridge \
          test_media_timestamp
 
@@ -62,7 +67,14 @@ $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-$(LIB): $(CORE_OBJS)
+# The vendored Ed25519 field arithmetic relies on two's-complement signed
+# shifts; that is well-defined under -fwrapv and not a UBSan finding in our
+# code, so the host sanitizers are disabled for it only.
+$(BUILD)/third_party/%.o: third_party/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(filter-out -fsanitize=%,$(CFLAGS)) -fwrapv $(CPPFLAGS) -c $< -o $@
+
+$(LIB): $(CORE_OBJS) $(ED25519_OBJS)
 	$(AR) rcs $@ $^
 
 $(BUILD)/test_mfi2c: tests/test_mfi2c.c $(LIB) $(MBEDTLS_LIB)

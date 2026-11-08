@@ -1,34 +1,47 @@
-# rt-carplay (local draft)
+# rt-carplay
 
-This directory is a **local, unpublished** skeleton for the independent
-`rt-carplay` project.  Nothing here has been pushed to
-`github.com/boa-z/rt-carplay`; the repository URL, license, and CI are
-deliberately not finalised yet.
+An independent, RT-Thread-first CarPlay receiver stack.  The protocol core
+builds and runs on a Linux host with no RT-Thread, Luban-Lite, or ArtInChip
+headers; platform ports live outside `core/`.
 
-Purpose of this skeleton (M0): prove that the protocol core can be built and
-tested on a Linux host with no RT-Thread, Luban-Lite, or ArtInChip headers.
+Current state (M0/M1): foundation and host-testable protocol modules.  The
+repository is under active development; no hardware has been validated from
+this repo yet.
 
-Current contents:
+## Contents
 
-- `include/rtcp/` — the six platform seams (os, net, bt, mfi, wifi, media,
-  input) plus common error codes.
-- `core/mfi/mfi2c.c` — Apple MFi 2.0C register state machine, extracted from
-  the Luban-Lite PoC but with no RT-Thread dependency.
-- `core/iap2/` — portable iAP2 link layer, parameter/message builders for
-  Identify/IdentificationInformation, CarPlayStartSession/WiFiConfig, and the
-  MFi authentication state machine.  Ported from `esp32-carplay-web-relay`
-  (GPL-3.0-or-later, itself based on DiPlay); copyright notices retained.
-- `tests/` — fake-bus MFi test plus the upstream host tests for every iAP2
-  module, all compiled with ASan/UBSan.
+- `include/rtcp/` — platform seams (os, net, bt, mfi, wifi, media, input) and
+  common error codes.
+- `core/mfi/` — Apple MFi 2.0C register state machine, extracted from the
+  Luban-Lite PoC but with no RT-Thread dependency.
+- `core/iap2/` — portable iAP2 link layer, Identify/IdentificationInformation,
+  CarPlayStartSession/WiFiConfig builders, and the MFi authentication state
+  machine.  Ported from `esp32-carplay-web-relay` (GPL-3.0-or-later, itself
+  based on DiPlay); copyright notices retained.
+- `core/airplay/` — binary plist, RTSP codec, TLV8, HID plists/descriptors,
+  screen codec, DataStream AEAD decryption, ControlCipher streams and timing.
+- `core/media/`, `core/input/` — timestamp helpers and the input bridge.
+- `tests/` — fake-bus MFi test plus host unit tests, all compiled with
+  ASan/UBSan.
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.
 
-Build and test (no cmake required):
+## Build and test
+
+The AirPlay modules need mbedTLS 2.28 (`MBEDTLS_CHACHAPOLY_C` and
+`MBEDTLS_HKDF_C` enabled).  Fetch the pinned source once, or point
+`RTCP_MBEDTLS_DIR` at an existing 2.28 checkout such as the one in the
+RT-Thread/Luban-Lite SDK:
 
 ```sh
+scripts/fetch-mbedtls.sh
+
 make check
 ```
 
-The same test is also wired for CMake/CTest:
+The host build compiles a private `libmbedcrypto.a` under `build/mbedtls`
+with `config/mbedtls_rtcp_host.h`; nothing from mbedTLS is vendored in git.
+
+The same tests are wired for CMake/CTest:
 
 ```sh
 cmake -S . -B build -DRTCP_BUILD_TESTS=ON
@@ -36,8 +49,10 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-License: **GPL-3.0-or-later** (architecture decision A1, confirmed
-2026-11-08).  See `LICENSE`.
+## License
+
+**GPL-3.0-or-later** (architecture decision A1, confirmed 2026-11-08).  See
+`LICENSE` and `NOTICE`.
 
 - Modules ported from `esp32-carplay-web-relay` (GPL-3.0-or-later) must keep
   their copyright and license notices.

@@ -2,3 +2,4 @@ build/
 *.o
 *.a
 test_mfi2c
+third_party/mbedtls/

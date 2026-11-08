@@ -14,9 +14,11 @@ this repo yet.
   common error codes.
 - `core/mfi/` — Apple MFi 2.0C register state machine, extracted from the
   Luban-Lite PoC but with no RT-Thread dependency.
-- `core/iap2/` — portable iAP2 link layer, Identify/IdentificationInformation,
-  CarPlayStartSession/WiFiConfig builders, and the MFi authentication state
-  machine.  Ported from `esp32-carplay-web-relay` (GPL-3.0-or-later, itself
+- `core/iap2/` — portable iAP2 link layer, parameter framing,
+  Identify/IdentificationInformation, CarPlayStartSession/WiFiConfig builders,
+  the MFi authentication state machine, and the wireless accessory session
+  that ties them together behind injected transport/MFi/Wi-Fi/AirPlay
+  callbacks.  Ported from `esp32-carplay-web-relay` (GPL-3.0-or-later, itself
   based on DiPlay); copyright notices retained.
 - `core/airplay/` — binary plist, RTSP codec, TLV8, HID plists/descriptors,
   screen codec, DataStream AEAD decryption, ControlCipher streams and timing.

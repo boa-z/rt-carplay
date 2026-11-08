@@ -52,6 +52,7 @@ if(RTCP_BUILD_TESTS)
     set(RTCP_TESTS
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
+        test_iap2_parameter test_iap2_session
         test_airplay_bplist test_airplay_rtsp_codec test_airplay_tlv8
         test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist
         test_airplay_control_stream test_airplay_screen_stream

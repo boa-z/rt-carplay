@@ -68,9 +68,16 @@ if(RTCP_BUILD_TESTS)
         test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify
         test_airplay_rtsp_pairing test_airplay_rtsp_session
         test_airplay_pairing_store
+        test_airplay_control_cipher test_airplay_control_port
+        test_airplay_timing_port test_airplay_event_port
+        test_airplay_screen_server
         test_discovery test_mdns_responder test_port_linux test_input_bridge
         test_media_timestamp
     )
+
+    set(RTCP_PORT_TESTS
+        test_port_linux test_airplay_control_port test_airplay_timing_port
+        test_airplay_event_port test_airplay_screen_server)
 
     foreach(name ${RTCP_TESTS})
         if(name STREQUAL "test_mfi2c")
@@ -81,6 +88,8 @@ if(RTCP_BUILD_TESTS)
         add_executable(${name} ${source})
         if(name STREQUAL "test_port_linux")
             target_link_libraries(${name} PRIVATE rtcp_port_linux)
+        elseif(name IN_LIST RTCP_PORT_TESTS)
+            target_link_libraries(${name} PRIVATE rtcp_core rtcp_port_linux)
         else()
             target_link_libraries(${name} PRIVATE rtcp_core)
         endif()

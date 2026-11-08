@@ -35,8 +35,15 @@ TESTS := test_mfi2c \
          test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify \
          test_airplay_rtsp_pairing test_airplay_rtsp_session \
          test_airplay_pairing_store \
+         test_airplay_control_cipher test_airplay_control_port \
+         test_airplay_timing_port test_airplay_event_port \
+         test_airplay_screen_server \
          test_discovery test_mdns_responder test_port_linux test_input_bridge \
          test_media_timestamp
+
+# These tests drive the poll seams through the POSIX port.
+PORT_TESTS := test_airplay_control_port test_airplay_timing_port \
+              test_airplay_event_port test_airplay_screen_server
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 
@@ -65,6 +72,13 @@ $(PORT_LINUX_LIB): $(PORT_LINUX_OBJS)
 
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB) $(MBEDTLS_LIB) $(TEST_SUPPORT_OBJ)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(TEST_SUPPORT_OBJ) $(MBEDTLS_LIB) $(LDLIBS)
+
+# Explicit rules win over the pattern rule above.
+define PORT_TEST_RULE
+$(BUILD)/$(1): tests/unit/$(1).c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB)
+	$$(CC) $$(CFLAGS) $$(CPPFLAGS) -o $$@ $$< $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $$(LDLIBS)
+endef
+$(foreach t,$(PORT_TESTS),$(eval $(call PORT_TEST_RULE,$(t))))
 
 $(BUILD)/test_port_linux: tests/unit/test_port_linux.c $(PORT_LINUX_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(PORT_LINUX_LIB) -lpthread

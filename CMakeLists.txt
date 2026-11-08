@@ -58,6 +58,12 @@ target_include_directories(rtcp_port_linux PUBLIC
 find_package(Threads REQUIRED)
 target_link_libraries(rtcp_port_linux PUBLIC Threads::Threads)
 
+# Host simulator: mDNS + RTSP AirPlay receiver, no video sink.
+file(GLOB RTCP_SIM_SOURCES CONFIGURE_DEPENDS examples/linux_sim/*.c)
+add_executable(rt-carplay-sim ${RTCP_SIM_SOURCES})
+target_link_libraries(rt-carplay-sim PRIVATE rtcp_core rtcp_port_linux)
+target_compile_options(rt-carplay-sim PRIVATE -Wall -Wextra -Werror)
+
 if(RTCP_BUILD_TESTS)
     enable_testing()
 

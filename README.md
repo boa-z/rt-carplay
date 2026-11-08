@@ -43,6 +43,8 @@ this repo yet.
 - `port/luban-lite/` — Realtek RTL8733BS SoftAP + Apple vendor-IE seam for the
   ArtInChip SDK.
 - `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
+- `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
+  Screen dump) described under “Linux simulator”.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
   ASan/UBSan.
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.
@@ -70,6 +72,30 @@ cmake -S . -B build -DRTCP_BUILD_TESTS=ON
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
+
+## Linux simulator
+
+`build/rt-carplay-sim` is an end-to-end bench built by `make`: it advertises
+`_airplay._tcp` over mDNS and serves the AirPlay RTSP endpoint with a
+software Ed25519 identity.  A controller on the same LAN can pair and send
+its Screen DataStream; the H.264 payload is written as an Annex-B dump.
+There is no video or audio sink.
+
+```sh
+./build/rt-carplay-sim --ip 192.168.1.20 \
+    --seed-file ./identity.seed --pairing-store ./pairings.bin \
+    --dump-h264 ./screen.h264
+```
+
+`--name`, `--model`, `--device-id`, `--pair-code`, `--port`, `--no-dump`
+and `--help` are also available.  The identity seed is generated on first
+run (mode 0600); delete it to rotate the accessory key.  The pairing PIN is
+static (`3939`) because this is a protocol bench, not a product, and the
+process stays in the foreground until Ctrl-C.
+
+Verified on the host: mDNS discovery (`PTR`/`SRV`/`TXT`/`A` for
+`_airplay._tcp.local`) and `GET /info` returning the binary plist.  Pairing
+and Screen streaming still need a real controller.
 
 ## License
 

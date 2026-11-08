@@ -53,7 +53,10 @@ PORT_TESTS := test_airplay_control_port test_airplay_timing_port \
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 
-all: $(BINS)
+SIM := $(BUILD)/rt-carplay-sim
+SIM_SRCS := $(wildcard examples/linux_sim/*.c)
+
+all: $(BINS) $(SIM)
 
 $(MBEDTLS_LIB):
 	@if [ ! -f "$(MBEDTLS_HDR)" ]; then \
@@ -82,6 +85,10 @@ $(BUILD)/test_mfi2c: tests/test_mfi2c.c $(LIB) $(MBEDTLS_LIB)
 
 $(PORT_LINUX_LIB): $(PORT_LINUX_OBJS)
 	$(AR) rcs $@ $^
+
+$(SIM): $(SIM_SRCS) $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SIM_SRCS) $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(LDLIBS)
 
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB) $(MBEDTLS_LIB) $(TEST_SUPPORT_OBJ)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(TEST_SUPPORT_OBJ) $(MBEDTLS_LIB) $(LDLIBS)

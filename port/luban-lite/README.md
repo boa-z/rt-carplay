@@ -116,8 +116,11 @@ start re-arms the listener: `rfcomm_listen()` clears the internal stop flag.
 
 The SDP record advertises one 128-bit service class UUID (pass the iAP2 UUID;
 `NULL` advertises the Serial Port profile for bring-up), the dynamically
-allocated RFCOMM channel and a service name.  Zephyr's SDP encoder byte-swaps
-UUID128 values, so the port stores the reverse of the canonical form.
+allocated RFCOMM channel and a service name.  With a 128-bit UUID it also
+carries the BluetoothProfileDescriptorList (iAP2 UUID + version 0x0100), which
+Apple's iAP2 record specifies beside the service class.  Zephyr's SDP encoder
+byte-swaps UUID128 values, so the port stores the reverse of the canonical
+form.
 
 ### Required Kconfig
 

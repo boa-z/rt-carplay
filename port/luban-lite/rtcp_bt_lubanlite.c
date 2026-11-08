@@ -122,13 +122,15 @@ static void *s_event_user;
  * Zephyr encoder copies the values into the response, so only the pointers
  * need to stay valid. */
 static struct bt_sdp_record s_sdp_record;
-static struct bt_sdp_attribute s_sdp_attrs[7];
+static struct bt_sdp_attribute s_sdp_attrs[8];
 static struct bt_sdp_data_elem s_lang_elems[3];
 static struct bt_sdp_data_elem s_browse_elems[1];
 static struct bt_sdp_data_elem s_class_elems[1];
 static struct bt_sdp_data_elem s_proto_elems[2];
 static struct bt_sdp_data_elem s_l2cap_elems[1];
 static struct bt_sdp_data_elem s_rfcomm_elems[2];
+static struct bt_sdp_data_elem s_profile_elems[2];
+static struct bt_sdp_data_elem s_profile_seq[1];
 static uint32_t s_zero32;
 static uint16_t s_lang_native = 0x656e; /* 'e' 'n' on the wire */
 static uint16_t s_lang_code = 106;       /* UTF-8 MIB enum */
@@ -137,6 +139,7 @@ static uint16_t s_browse_uuid = BT_SDP_PUBLIC_BROWSE_GROUP;
 static uint16_t s_spp_uuid = BT_SDP_SERIAL_PORT_SVCLASS;
 static uint16_t s_l2cap_uuid = BT_SDP_PROTO_L2CAP;
 static uint16_t s_rfcomm_uuid = BT_SDP_PROTO_RFCOMM;
+static uint16_t s_profile_version = 0x0100;
 static uint8_t s_rfcomm_channel;
 static uint8_t s_uuid_le[16];
 static char s_service_name[BT_SERVICE_NAME_MAX + 1U];
@@ -240,8 +243,21 @@ static void sdp_build_record(const char *name, const uint8_t uuid_le[16],
              (uint32_t)name_len + 2U, s_service_name);
     s_sdp_attrs[6].id = BT_SDP_ATTR_SVCNAME_PRIMARY;
 
+    size_t attr_count = 7U;
+    if (uuid_le != NULL) {
+        /* BluetoothProfileDescriptorList: the iAP2 profile UUID with version
+         * 0x0100, beside the service class as Apple's iAP2 record specifies.
+         * Zephyr swaps UUID128 bytes exactly as for the class list above. */
+        sdp_elem(&s_profile_elems[0], BT_SDP_UUID128, 16, 17, uuid_le);
+        sdp_elem(&s_profile_elems[1], BT_SDP_UINT16, 2, 3, &s_profile_version);
+        sdp_elem(&s_profile_seq[0], BT_SDP_SEQ8, 20, 22, s_profile_elems);
+        sdp_elem(&s_sdp_attrs[7].val, BT_SDP_SEQ8, 22, 24, s_profile_seq);
+        s_sdp_attrs[7].id = BT_SDP_ATTR_PROFILE_DESC_LIST;
+        attr_count = 8U;
+    }
+
     s_sdp_record.attrs = s_sdp_attrs;
-    s_sdp_record.attr_count = 7U;
+    s_sdp_record.attr_count = attr_count;
     s_sdp_record.handle = 0U;
     s_sdp_record.index = 0U;
 }

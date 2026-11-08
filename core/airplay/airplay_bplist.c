@@ -67,7 +67,9 @@ static airplay_bplist_result_t resolve_object(
             return AIRPLAY_BPLIST_INVALID_OBJECT;
         }
         info->marker = marker;
-        info->type = nibble == 0x08U || nibble == 0x09U ? 1U : 0U;
+        /* Booleans stay in the type-0 family; get_uint additionally checks
+         * the marker nibble, so this does not widen integer acceptance. */
+        info->type = 0U;
         info->count = 0U;
         info->payload_offset = cursor;
         info->payload_bytes = 0U;

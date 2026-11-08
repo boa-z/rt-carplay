@@ -29,7 +29,7 @@ PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
 TESTS := test_mfi2c \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session \
-         test_airplay_bplist test_airplay_rtsp_codec test_airplay_tlv8 \
+         test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
          test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist \
          test_airplay_control_stream test_airplay_screen_stream test_airplay_mfi_sap \
          test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify \

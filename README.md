@@ -22,8 +22,9 @@ this repo yet.
   based on DiPlay); copyright notices retained.
 - `core/airplay/` — binary plist, RTSP codec, TLV8, HID plists/descriptors,
   screen codec, DataStream AEAD decryption, ControlCipher streams, timing,
-  Pair-Setup/Pair-Verify/SRP-6a, the MFiSAP responder and the RTSP session
-  (info, SETUP, RECORD, teardown), and persistent pairing storage.
+  Pair-Setup/Pair-Verify/SRP-6a, the MFiSAP responder, the `/info` binary
+  plist writer and the RTSP session (info, SETUP, RECORD, teardown), and
+  persistent pairing storage.
 - `core/media/`, `core/input/` — timestamp helpers and the input bridge.
 - `core/discovery/` — AirPlay Bonjour TXT records and the Apple CarPlay
   SoftAP vendor IE.

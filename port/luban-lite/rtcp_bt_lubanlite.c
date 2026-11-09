@@ -89,9 +89,13 @@
 /* ------------------------------------------------------------------ */
 
 /* HCI_Write_Extended_Inquiry_Response (OGF 0x03 / OCF 0x0052).  This fork
- * does not define the opcode, so declare it here. */
+ * does not define the opcode, so declare it here.  The parameter is
+ * FEC_Required (1 byte) followed by the 240-byte EIR; BTstack builds the
+ * same 241-byte layout in gap_run_set_eir_data().  A 240-byte-only command
+ * is answered with status 0x12 (Invalid HCI Command Parameters). */
 #define RTCP_BT_HCI_OP_WRITE_EIR BT_OP(BT_OGF_BASEBAND, 0x0052)
 #define RTCP_BT_EIR_SIZE 240U
+#define RTCP_BT_EIR_PARAM_SIZE (1U + RTCP_BT_EIR_SIZE)
 #define RTCP_BT_EIR_TYPE_UUID128_COMPLETE 0x07
 #define RTCP_BT_EIR_TYPE_NAME_COMPLETE 0x09
 
@@ -124,10 +128,12 @@ static void write_eir(const char *name)
         return;
     }
 
-    uint8_t *eir = net_buf_add(buf, RTCP_BT_EIR_SIZE);
-    memset(eir, 0, RTCP_BT_EIR_SIZE);
+    /* Byte 0 is FEC_Required (0 = FEC not required); the EIR data follows. */
+    uint8_t *eir = net_buf_add(buf, RTCP_BT_EIR_PARAM_SIZE);
+    memset(eir, 0, RTCP_BT_EIR_PARAM_SIZE);
 
-    size_t pos = 0U;
+    size_t pos = 1U;
+
     eir[pos++] = 1U + 16U; /* element length: type byte + UUID128 */
     eir[pos++] = RTCP_BT_EIR_TYPE_UUID128_COMPLETE;
     memcpy(&eir[pos], s_iap2_uuid_eir, sizeof(s_iap2_uuid_eir));

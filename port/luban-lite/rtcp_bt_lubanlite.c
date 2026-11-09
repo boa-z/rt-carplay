@@ -42,6 +42,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/assigned_numbers.h>
 #include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/classic/classic.h>
 #include <zephyr/bluetooth/classic/rfcomm.h>
 #include <zephyr/bluetooth/classic/sdp.h>
@@ -82,6 +83,75 @@
     (BT_COD_MAJOR_SVC_CLASS_AUDIO | BT_COD_MAJOR_SVC_CLASS_RENDERING |     \
      (BT_COD_MAJOR_DEVICE_CLASS_AUDIO_VIDEO << 8) |                        \
      (BT_COD_MINOR_DEVICE_CLASS_AUDIO_VIDEO_CAR_AUDIO << 2))
+
+/* ------------------------------------------------------------------ */
+/* Extended Inquiry Response                                           */
+/* ------------------------------------------------------------------ */
+
+/* HCI_Write_Extended_Inquiry_Response (OGF 0x03 / OCF 0x0052).  This fork
+ * does not define the opcode, so declare it here. */
+#define RTCP_BT_HCI_OP_WRITE_EIR BT_OP(BT_OGF_BASEBAND, 0x0052)
+#define RTCP_BT_EIR_SIZE 240U
+#define RTCP_BT_EIR_TYPE_UUID128_COMPLETE 0x07
+#define RTCP_BT_EIR_TYPE_NAME_COMPLETE 0x09
+
+/*
+ * The wireless CarPlay receiver must announce the iAP2 service class in its
+ * EIR.  The working ZALink stack does exactly that: libzablue.a
+ * (bt_gap.c:bt_eir_data_init) writes a 0x07 element whose first UUID128 is
+ * 00000000-deca-fade-deca-deafdecacafe before it becomes discoverable.
+ *
+ * Without it the iPhone treats us as an unknown accessory: board log
+ * 2026-11-09 shows a generic SDP walk (search 0x0100, attribute dump, search
+ * PnP 0x1200) followed by a disconnect with reason 0x13, and no iAP2
+ * pairing.  Zephyr's bt_br_init() already selects inquiry mode 0x02
+ * (results with RSSI / extended inquiry), so writing the EIR is enough for
+ * the controller to include it in inquiry responses.
+ *
+ * HCI carries 128-bit UUIDs little-endian (LSO first), the same order as
+ * Zephyr's SDP encoder wants for UUID128 values.
+ */
+static const uint8_t s_iap2_uuid_eir[16] = {
+    0xfe, 0xca, 0xca, 0xde, 0xaf, 0xde, 0xca, 0xde,
+    0xde, 0xfa, 0xca, 0xde, 0x00, 0x00, 0x00, 0x00,
+};
+
+static void write_eir(const char *name)
+{
+    struct net_buf *buf = bt_hci_cmd_alloc(K_FOREVER);
+    if (buf == NULL) {
+        RTCP_LOGW(BT_TAG, "EIR buffer allocation failed");
+        return;
+    }
+
+    uint8_t *eir = net_buf_add(buf, RTCP_BT_EIR_SIZE);
+    memset(eir, 0, RTCP_BT_EIR_SIZE);
+
+    size_t pos = 0U;
+    eir[pos++] = 1U + 16U; /* element length: type byte + UUID128 */
+    eir[pos++] = RTCP_BT_EIR_TYPE_UUID128_COMPLETE;
+    memcpy(&eir[pos], s_iap2_uuid_eir, sizeof(s_iap2_uuid_eir));
+    pos += sizeof(s_iap2_uuid_eir);
+
+    size_t name_len = (name != NULL) ? strlen(name) : 0U;
+    if (name_len > RTCP_BT_EIR_SIZE - pos - 2U) {
+        name_len = RTCP_BT_EIR_SIZE - pos - 2U;
+    }
+    if (name_len > 0U) {
+        eir[pos++] = (uint8_t)(name_len + 1U);
+        eir[pos++] = RTCP_BT_EIR_TYPE_NAME_COMPLETE;
+        memcpy(&eir[pos], name, name_len);
+        pos += name_len;
+    }
+
+    int err = bt_hci_cmd_send_sync(RTCP_BT_HCI_OP_WRITE_EIR, buf, NULL);
+    if (err != 0) {
+        RTCP_LOGW(BT_TAG, "write EIR failed (%d)", err);
+    } else {
+        RTCP_LOGI(BT_TAG, "EIR: iAP2 UUID128 advertised (%u bytes)",
+                  (unsigned)pos);
+    }
+}
 
 enum bt_link_state {
     BT_LINK_FREE = 0,
@@ -144,6 +214,47 @@ static uint8_t s_service_availability = 0xFF;
 static uint8_t s_rfcomm_channel;
 static uint8_t s_uuid_le[16];
 static char s_service_name[BT_SERVICE_NAME_MAX + 1U];
+
+/* PnP Information (Device ID) record.  The diag4 board log shows the iPhone
+ * walking generic SDP (search uuid16 0x1200) and dropping the link when that
+ * search matched nothing.  The working ZALink stack does not publish a PnP
+ * record and still connects -- its EIR names the iAP2 service class (see
+ * write_eir), which is the actual fix.  This record is kept as a defensive
+ * answer for the generic enumeration path, in the same shape as Zephyr's DID
+ * service (subsys/bluetooth/host/classic/did.c).  The vendor/product values
+ * are placeholders: no ArtInChip Bluetooth SIG company identifier is on
+ * record here, so VendorID 0xFFFF is deliberately "unassigned". */
+#define RTCP_BT_PNP_SPEC_ID       0x0103U  /* Device ID spec 1.3 */
+#define RTCP_BT_PNP_VENDOR_SRC    0x0001U  /* VendorID = SIG company ID */
+#define RTCP_BT_PNP_VENDOR_ID     0xFFFFU  /* unassigned */
+#define RTCP_BT_PNP_PRODUCT_ID    0x0001U
+#define RTCP_BT_PNP_VERSION       0x0001U
+
+static struct bt_sdp_attribute s_pnp_attrs[] = {
+    BT_SDP_NEW_SERVICE,
+    BT_SDP_LIST(
+        BT_SDP_ATTR_SVCLASS_ID_LIST,
+        BT_SDP_TYPE_SIZE_VAR(BT_SDP_SEQ8, 3),
+        BT_SDP_DATA_ELEM_LIST(
+            { BT_SDP_TYPE_SIZE(BT_SDP_UUID16),
+              BT_SDP_ARRAY_16(BT_SDP_PNP_INFO_SVCLASS) },
+        )),
+    BT_SDP_LIST(BT_SDP_ATTR_SPECIFICATION_ID,
+                BT_SDP_TYPE_SIZE(BT_SDP_UINT16),
+                BT_SDP_ARRAY_16(RTCP_BT_PNP_SPEC_ID)),
+    BT_SDP_LIST(BT_SDP_ATTR_VENDOR_ID, BT_SDP_TYPE_SIZE(BT_SDP_UINT16),
+                BT_SDP_ARRAY_16(RTCP_BT_PNP_VENDOR_ID)),
+    BT_SDP_LIST(BT_SDP_ATTR_PRODUCT_ID, BT_SDP_TYPE_SIZE(BT_SDP_UINT16),
+                BT_SDP_ARRAY_16(RTCP_BT_PNP_PRODUCT_ID)),
+    BT_SDP_LIST(BT_SDP_ATTR_VERSION, BT_SDP_TYPE_SIZE(BT_SDP_UINT16),
+                BT_SDP_ARRAY_16(RTCP_BT_PNP_VERSION)),
+    BT_SDP_LIST(BT_SDP_ATTR_PRIMARY_RECORD, BT_SDP_TYPE_SIZE(BT_SDP_BOOL),
+                BT_SDP_ARRAY_8(1)),
+    BT_SDP_LIST(BT_SDP_ATTR_VENDOR_ID_SOURCE,
+                BT_SDP_TYPE_SIZE(BT_SDP_UINT16),
+                BT_SDP_ARRAY_16(RTCP_BT_PNP_VENDOR_SRC)),
+};
+static struct bt_sdp_record s_pnp_record = BT_SDP_RECORD(s_pnp_attrs);
 
 NET_BUF_POOL_FIXED_DEFINE(bt_tx_pool, BT_TX_POOL_COUNT,
                           BT_RFCOMM_BUF_SIZE(BT_DLC_MTU),
@@ -393,10 +504,6 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
         RTCP_LOGE(BT_TAG, "set connectable failed (%d)", err);
         return RTCP_EIO;
     }
-    err = bt_br_set_discoverable(true, false);
-    if (err != 0 && err != -EALREADY) {
-        RTCP_LOGW(BT_TAG, "set discoverable failed (%d)", err);
-    }
 
     err = bt_br_set_class_of_device(RTCP_BT_LUBANLITE_COD);
     if (err != 0) {
@@ -411,6 +518,16 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
         if (err != 0) {
             RTCP_LOGW(BT_TAG, "set local name failed (%d)", err);
         }
+    }
+
+    /* The EIR must exist before the controller answers inquiries; include
+     * the iAP2 service class here or iOS never starts the iAP2 flow (see
+     * the comment on write_eir). */
+    write_eir(name);
+
+    err = bt_br_set_discoverable(true, false);
+    if (err != 0 && err != -EALREADY) {
+        RTCP_LOGW(BT_TAG, "set discoverable failed (%d)", err);
     }
 
     s_enabled = true;
@@ -458,6 +575,14 @@ int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
         (void)bt_rfcomm_server_unregister(&s_server);
         s_server.channel = 0U;
         return RTCP_EIO;
+    }
+
+    /* The iPhone searches 0x1200 (PnP Information) right after the iAP2
+     * record; see the record comment above.  A failure here only costs the
+     * iOS path, so keep the iAP2 service registered and log it. */
+    err = bt_sdp_register_service(&s_pnp_record);
+    if (err != 0) {
+        RTCP_LOGE(BT_TAG, "PnP SDP register failed (%d)", err);
     }
 
     s_listening = true;

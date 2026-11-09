@@ -1175,11 +1175,13 @@ static int cmd_carplay_randtest(int argc, char **argv)
  * connection and echoes bytes back.  A Bluetooth serial terminal that
  * browses SDP for the iAP2 UUID (or an iAP2 probe) exercises the path.
  *
- * The UUID is the Apple iAP2 service class; the same 16-byte value appears
- * in the vendor ZABlue library shipped with the SDK (read-only reference),
- * so it is confirmed rather than guessed.
+ * The UUID is the accessory-side iAP2 service class (...CAFF), the same
+ * value the vendor ZABlue library registers with its RFCOMM server
+ * (iap2_uuid_srv).  ...CAFE is the iPhone-side service and must not be
+ * used here: advertising it made iOS see no accessory iAP2 service and
+ * drop the link (diag7).
  */
-#define BT_BRINGUP_UUID "00000000-deca-fade-deca-deafdecacafe"
+#define BT_BRINGUP_UUID "00000000-deca-fade-deca-deafdecacaff"
 #define BT_BRINGUP_STACK (8U * 1024U)
 #define BT_BRINGUP_PRIORITY 20U
 #define BT_BRINGUP_TICK 20U

@@ -30,8 +30,18 @@
 
 #define IAP2_LOG(fmt, ...) rt_kprintf("[iap2] " fmt "\n", ##__VA_ARGS__)
 
-/* Apple iAP2 service class UUID (confirmed in the vendor ZABlue library). */
-#define IAP2_LINK_UUID "00000000-deca-fade-deca-deafdecacafe"
+/* iAP2 service class UUID of the *accessory* RFCOMM server (...CAFF).
+ *
+ * The two DECAFADE UUIDs have distinct roles.  The accessory publishes its
+ * own service under ...CAFF and the phone connects to that; ...CAFE is the
+ * iPhone-side service an accessory queries when it initiates the connection
+ * itself.  The working ZALink stack registers iap2_uuid_srv = ...CAFF and
+ * ios_dev_uuid_srv = ...CAFE in exactly those roles.
+ *
+ * diag7 registered this server as ...CAFE, so iOS found no accessory iAP2
+ * service: after the ACL connect it ran only the generic SDP walk
+ * (0x0100/0x1200/0x1000) and dropped the link with reason 0x13. */
+#define IAP2_LINK_UUID "00000000-deca-fade-deca-deafdecacaff"
 
 #define IAP2_LINK_RX_MS 100
 #define IAP2_LINK_RX_BYTES 1024U

@@ -75,14 +75,14 @@
 
 #define BT_SERVICE_NAME_MAX 63U
 
-/* Class of Device: Audio + Rendering services, Audio/Video major class,
- * Car audio minor class (0x00240420).  A head unit normally reports this;
- * some phones use it to offer CarPlay/head-unit behavior.  The assigned
- * numbers header defines the field values, so shift major/minor into place. */
-#define RTCP_BT_LUBANLITE_COD                                              \
-    (BT_COD_MAJOR_SVC_CLASS_AUDIO | BT_COD_MAJOR_SVC_CLASS_RENDERING |     \
-     (BT_COD_MAJOR_DEVICE_CLASS_AUDIO_VIDEO << 8) |                        \
-     (BT_COD_MINOR_DEVICE_CLASS_AUDIO_VIDEO_CAR_AUDIO << 2))
+/* Class of Device: exactly the value the working ZALink stack reports in
+ * its CarPlay mode.  bt_gap_init() in libzablue.a loads 0x240000 and adds
+ * 1032 (0x408) for BT_MODE=0: Audio + Rendering services, Audio/Video major
+ * class, Hands-free minor class.  (Mode 1, the phone-like mode, is
+ * 0x7A020C.)  Matching the reference byte-for-byte removes one more
+ * classification difference for iOS; the symbolic field macros from
+ * assigned_numbers.h are easy to shift differently from the vendor. */
+#define RTCP_BT_LUBANLITE_COD 0x00240408U
 
 /* ------------------------------------------------------------------ */
 /* Extended Inquiry Response                                           */
@@ -116,6 +116,12 @@
  * UUID128s in this one 0x07 element, and these are those exact bytes.
  * Only the iAP2 UUID is registered in the SDP database, so the other three
  * are announcement-only, again as in the reference.
+ *
+ * Note that this announced UUID (...cafe) is the iPhone-side iAP2 service:
+ * the reference stack's own RFCOMM server, the one a phone connects to, is
+ * registered under ...caff (iap2_uuid_srv in libzablue.a).  EIR and SDP use
+ * different UUIDs for their different roles; see IAP2_LINK_UUID in
+ * iap2_link_lubanlite.c.
  *
  * HCI carries 128-bit UUIDs little-endian (LSO first).
  */

@@ -130,6 +130,16 @@ static int capture_audio(uint16_t stream_type, const uint8_t *data, size_t len,
     return RTCP_OK;
 }
 
+static unsigned volume_events;
+static float volume_last_db;
+
+static void capture_volume(float volume_db, void *context)
+{
+    (void)context;
+    volume_last_db = volume_db;
+    ++volume_events;
+}
+
 /* ------------------------------------------------------------------ */
 /* Providers                                                          */
 /* ------------------------------------------------------------------ */
@@ -857,6 +867,25 @@ static void run_encrypted_info(airplay_rtsp_server_t *server, client_t *client,
     assert(memcmp(response.body, info_plist, info_len) == 0);
 }
 
+/* The sender's SET_PARAMETER volume reaches the receiver callback and the
+ * session acknowledges it with 200 OK. */
+static void run_set_parameter_volume(airplay_rtsp_server_t *server,
+                                     client_t *client, uint32_t *cseq)
+{
+    static const char body[] = "volume: -12.000000\r\n";
+    uint8_t request[256];
+    response_t response;
+    unsigned before = volume_events;
+    size_t request_len = build_request(
+        request, sizeof(request), "SET_PARAMETER", "/stream",
+        "text/parameters", (*cseq)++, (const uint8_t *)body,
+        sizeof(body) - 1U);
+    client_exchange(server, client, request, request_len, &response);
+    assert(contains(response.headers, response.headers_len, "200"));
+    assert(volume_events == before + 1U);
+    assert(volume_last_db > -12.001f && volume_last_db < -11.999f);
+}
+
 static void run_tampered_frame(airplay_rtsp_server_t *server,
                                client_t *client)
 {
@@ -1292,6 +1321,7 @@ static void run_screen_stream(airplay_rtsp_server_t *server, client_t *client,
     mbedtls_chachapoly_context cipher;
     mbedtls_chachapoly_init(&cipher);
     assert(mbedtls_chachapoly_setkey(&cipher, output_key) == 0);
+    unsigned frames_before = screen_frames;
     for (unsigned frame_index = 0U; frame_index < 2U; ++frame_index) {
         uint8_t nonce[12] = {0};
         write_le64(nonce + 4U, frame_index);
@@ -1305,11 +1335,11 @@ static void run_screen_stream(airplay_rtsp_server_t *server, client_t *client,
                (int)sizeof(frame));
 
         uint64_t start = rtcp_os_linux.now_ms();
-        while (screen_frames == frame_index &&
+        while (screen_frames == frames_before + frame_index &&
                rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
             airplay_rtsp_server_poll(server, 10);
         }
-        assert(screen_frames == frame_index + 1U);
+        assert(screen_frames == frames_before + frame_index + 1U);
     }
     mbedtls_chachapoly_free(&cipher);
 
@@ -1396,12 +1426,13 @@ static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
 
     assert(rtcp_net_linux.udp_sendto(fd, &address, wire, sizeof(wire)) ==
            (int)sizeof(wire));
+    unsigned packets_before = audio_packets;
     uint64_t start = rtcp_os_linux.now_ms();
-    while (audio_packets == 0U &&
+    while (audio_packets == packets_before &&
            rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
         airplay_rtsp_server_poll(server, 10);
     }
-    assert(audio_packets == 1U);
+    assert(audio_packets == packets_before + 1U);
     assert(audio_packets_stream_type == 100U);
     assert(audio_pcm_len == sizeof(pcm));
     assert(memcmp(audio_pcm, pcm, sizeof(pcm)) == 0);
@@ -1445,6 +1476,7 @@ int main(void)
     config.info_plist_len = info_len;
     config.on_screen_message = capture_screen;
     config.on_audio_pcm = capture_audio;
+    config.on_volume = capture_volume;
     config.on_event_state = capture_event_state;
 
     airplay_rtsp_server_t *server = NULL;
@@ -1467,6 +1499,24 @@ int main(void)
     mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
     run_tampered_frame(server, &client);
 
+    /* The malformed frame dropped only that connection.  A reconnecting
+     * controller must Pair-Verify against the pairing stored by the first
+     * Pair-Setup and run a complete second session on the same server. */
+    client_t client2;
+    client_connect(server, &client2);
+    uint8_t shared_secret2[KEY_BYTES];
+    run_pair_verify(server, &client2, &fixture, shared_secret2);
+    run_encrypted_info(server, &client2, info_plist, info_len);
+    cseq = 60U;
+    uint16_t event_port2 = run_initial_setup(server, &client2, &cseq);
+    run_event_channel(server, shared_secret2, event_port2);
+    run_set_parameter_volume(server, &client2, &cseq);
+    run_audio_stream(server, &client2, shared_secret2, &cseq);
+    run_screen_stream(server, &client2, shared_secret2, &cseq);
+    mbedtls_platform_zeroize(shared_secret2, sizeof(shared_secret2));
+
+    if (client2.cipher != NULL) airplay_control_cipher_destroy(client2.cipher);
+    rtcp_net_linux.close(client2.fd);
     if (client.cipher != NULL) airplay_control_cipher_destroy(client.cipher);
     rtcp_net_linux.close(client.fd);
     airplay_rtsp_server_stop(server);
@@ -1474,8 +1524,11 @@ int main(void)
     airplay_ed25519_keypair_clear(&fixture.controller);
     mbedtls_platform_zeroize(&fixture, sizeof(fixture));
 
-    assert(screen_messages == 2U);
-    assert(event_transitions == 2U);
+    assert(screen_messages == 4U);
+    assert(screen_frames == 4U);
+    assert(audio_packets == 2U);
+    assert(volume_events == 1U);
+    assert(event_transitions == 4U);
     puts("airplay pairing end-to-end host test passed");
     return 0;
 }

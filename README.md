@@ -126,8 +126,10 @@ audio enabled the served document is 4153 bytes, feature mask
 `0x615653aee2`, with 8 `audioFormats` and 9 `audioLatencies` entries (checked
 by decoding the socket response with Python plistlib).  The socket-level test
 suite also streams an encrypted audio RTP packet through the real server and
-checks the decrypted PCM.  Pairing with a physical controller still needs the
-hardware.
+checks the decrypted PCM, forwards a SET_PARAMETER volume to the receiver
+callback, and drops a session on a tampered frame and then reconnects with
+Pair-Verify against the stored pairing.  Pairing with a physical controller
+still needs the hardware.
 
 ## License
 

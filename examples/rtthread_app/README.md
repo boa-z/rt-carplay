@@ -246,8 +246,9 @@ path is independent of MFi.
 
 ## Verification status
 
-- Host protocol tests (including the socket-level Pair-Setup/Pair-Verify and
-  Screen DataStream test) pass under ASan/UBSan.
+- Host protocol tests (including the socket-level Pair-Setup/Pair-Verify,
+  Screen DataStream, encrypted-audio and SET_PARAMETER volume test, and a
+  full second session after a tampered frame) pass under ASan/UBSan.
 - **Build-verified (2026-11-08)**: with this defconfig, the Luban-Lite d21x
   project compiles and links into
   `output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x.elf` and the

@@ -823,6 +823,76 @@ static airplay_rtsp_session_result_t handle_setup(
     return result;
 }
 
+/* Parses a "volume: <dB>" line out of a text/parameters SET_PARAMETER body.
+ * The body is a borrow into the receive buffer, so it is not NUL-terminated
+ * and is scanned line by line.  Values are clamped to the AirPlay scale
+ * [-144, 0] dB. */
+static bool parse_volume_parameter(const uint8_t *body, size_t body_len,
+                                   float *volume_db)
+{
+    static const char name[] = "volume:";
+    const size_t name_len = sizeof(name) - 1U;
+    size_t offset = 0U;
+    while (offset < body_len) {
+        size_t line_end = offset;
+        while (line_end < body_len && body[line_end] != '\r' &&
+               body[line_end] != '\n') {
+            ++line_end;
+        }
+        if (line_end - offset >= name_len &&
+            memcmp(body + offset, name, name_len) == 0) {
+            const uint8_t *cursor = body + offset + name_len;
+            const uint8_t *end = body + line_end;
+            while (cursor < end && (*cursor == ' ' || *cursor == '\t')) {
+                ++cursor;
+            }
+            bool negative = false;
+            if (cursor < end && (*cursor == '-' || *cursor == '+')) {
+                negative = *cursor == '-';
+                ++cursor;
+            }
+            bool digits = false;
+            double value = 0.0;
+            while (cursor < end && *cursor >= '0' && *cursor <= '9') {
+                value = value * 10.0 + (double)(*cursor - '0');
+                digits = true;
+                ++cursor;
+            }
+            if (cursor < end && *cursor == '.') {
+                ++cursor;
+                double scale = 0.1;
+                while (cursor < end && *cursor >= '0' && *cursor <= '9') {
+                    value += (double)(*cursor - '0') * scale;
+                    scale *= 0.1;
+                    digits = true;
+                    ++cursor;
+                }
+            }
+            if (!digits) return false;
+            if (negative) value = -value;
+            if (value > 0.0) value = 0.0;
+            if (value < -144.0) value = -144.0;
+            *volume_db = (float)value;
+            return true;
+        }
+        while (line_end < body_len && body[line_end] != '\n') ++line_end;
+        offset = line_end + 1U;
+    }
+    return false;
+}
+
+static void handle_set_parameter(airplay_rtsp_session_t *session,
+                                 const airplay_rtsp_request_t *request)
+{
+    if (session->config.on_volume == NULL) return;
+    float volume_db = 0.0f;
+    if (!parse_volume_parameter(request->body, request->body_len,
+                                &volume_db)) {
+        return;
+    }
+    session->config.on_volume(volume_db, session->config.volume_context);
+}
+
 static uint8_t *copy_info_plist(const uint8_t *info_plist,
                                 size_t info_plist_len,
                                 bool *allocated_in_psram)
@@ -1000,9 +1070,15 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
         return handle_teardown(session, request, response,
                                response_capacity, response_len);
     }
+    if (strcmp(request->method, "SET_PARAMETER") == 0) {
+        /* Volume rides on SET_PARAMETER while the session is live; unknown
+         * parameters (progress, ...) are acknowledged and ignored. */
+        handle_set_parameter(session, request);
+        return status_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
+                               response, response_capacity, response_len);
+    }
     if (strcmp(request->method, "OPTIONS") == 0 ||
-        strcmp(request->method, "GET_PARAMETER") == 0 ||
-        strcmp(request->method, "SET_PARAMETER") == 0) {
+        strcmp(request->method, "GET_PARAMETER") == 0) {
         return status_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
                                response, response_capacity, response_len);
     }

@@ -58,7 +58,8 @@ this repo yet.
   (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch), with an
   on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), an
   AirPlay PCM -> `sound0` audio sink (`audio_sink_lubanlite.c`: ring buffer
-  plus writer thread, lazy codec configure), the
+  plus writer thread, lazy codec configure, SET_PARAMETER volume -> codec
+  mixer), the
   `carplay_bt` RFCOMM bring-up command, the `carplay_iap2` wireless iAP2
   session pump (`iap2_link_lubanlite.c`: identification, Wi-Fi config,
   CarPlay invite over the same transport) and its MSH commands;

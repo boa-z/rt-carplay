@@ -52,6 +52,11 @@ typedef struct {
     airplay_audio_pcm_cb_t on_audio_pcm;
     void *audio_pcm_context;
 
+    /* SET_PARAMETER "volume: <dB>" from the sender (0 = full scale).
+     * NULL acknowledges the request without changing anything. */
+    airplay_rtsp_volume_cb_t on_volume;
+    void *volume_context;
+
     /* Event-channel connect/disconnect notifications. */
     airplay_rtsp_event_state_cb_t on_event_state;
     void *event_state_context;

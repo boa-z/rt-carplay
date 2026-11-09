@@ -157,6 +157,17 @@ errors.  When `sound0` is missing the application logs
 `audio sink unavailable` and continues video-only -- `/info` then does not
 advertise audio, so a controller starts no audio stream.
 
+The sender also controls the speaker with SET_PARAMETER `volume: <dB>` (0 dB
+is full scale; AirPlay sends down to -144 dB).  The RTSP session parses the
+parameter, the server forwards it to `on_volume`, and the sink applies it
+through the codec mixer (`AUDIO_TYPE_MIXER` / `AUDIO_MIXER_VOLUME`).  The
+scale is mapped linearly over [-45, 0] dB onto the codec's 0..100 range
+(below -45 dB the output is inaudible); the writer thread applies it on its
+next wake, and a value that arrives before playback starts is applied when
+the stream starts.  Each change logs `[carplay-aud] sender volume -<x>.<y>
+dB -> <pct>%`, and `carplay_status` prints the last requested percent.  The
+mapping and the codec fade curve are to be tuned on hardware.
+
 `airplay_audio_pcm_cb_t` delivers signed 16-bit little-endian interleaved
 PCM.  Opus and AAC are not advertised and are rejected at SETUP, so the
 sender always negotiates LPCM.
@@ -260,12 +271,16 @@ path is independent of MFi.
   multi-stream SETUP (screen+audio in one request, alt stream, key reuse 503,
   audio-only TEARDOWN); the socket-level pairing test now sends an encrypted
   audio RTP packet through the real server and checks the decrypted PCM and
-  format.  The SDK build links `carplay_audio_sink_start/pcm/stop/stats`,
+  format.  The session test also covers SET_PARAMETER volume parsing
+  (`volume: <dB>` value and clamping, non-volume parameters ignored, no
+  callback for GET_PARAMETER).  The SDK build links
+  `carplay_audio_sink_start/pcm/stop/stats/set_volume_db/volume_percent`,
   `airplay_audio_stream_start/poll/stop`, `sound0` and `RT_USING_AUDIO`
-  (image 4,026,880 bytes, zero warnings).  Build-only: the codec has not
+  (image 4,028,928 bytes, zero warnings).  Build-only: the codec has not
   played a sample; the first board run with a controller should log
-  `[carplay-aud] playback <rate> Hz <ch> ch 16-bit` and `carplay_status`
-  should show growing packet counters.
+  `[carplay-aud] playback <rate> Hz <ch> ch 16-bit`, `carplay_status` should
+  show growing packet counters, and moving the phone's volume slider should
+  log `[carplay-aud] sender volume -<x>.<y> dB -> <pct>%`.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input, the CE TRNG unit assignment, the Bluetooth
   H5/RFCOMM path, the MFi exchange with a real phone, the iAP2 session and

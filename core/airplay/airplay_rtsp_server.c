@@ -375,6 +375,13 @@ static void server_stop_audio(uint16_t stream_type, void *context)
     airplay_audio_stream_stop(stream, server->net);
 }
 
+static void server_volume(float volume_db, void *context)
+{
+    airplay_rtsp_server_t *server = context;
+    if (server == NULL || server->config.on_volume == NULL) return;
+    server->config.on_volume(volume_db, server->config.volume_context);
+}
+
 /* ------------------------------------------------------------------ */
 /* RTSP connection                                                     */
 /* ------------------------------------------------------------------ */
@@ -606,6 +613,8 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.stop_timing = server_stop_timing;
     session_config.stop_audio = server_stop_audio;
     session_config.media_context = server;
+    session_config.on_volume = server_volume;
+    session_config.volume_context = server;
 
     if (airplay_rtsp_session_create_borrowing_info_plist(
             &session_config, &server->session) != AIRPLAY_RTSP_SESSION_OK) {

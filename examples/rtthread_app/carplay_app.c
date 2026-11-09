@@ -352,6 +352,13 @@ static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
     return carplay_audio_sink_pcm(format->sample_rate, format->channels, data,
                                   len);
 }
+
+static void on_volume(float volume_db, void *context)
+{
+    app_state_t *app = context;
+    if (!app->audio_started || app->shutting_down) return;
+    carplay_audio_sink_set_volume_db(volume_db);
+}
 #endif
 
 static void on_event_state(bool connected, void *context)
@@ -789,6 +796,8 @@ int carplay_app_start(const carplay_app_config_t *config)
     if (app->audio_started) {
         server_config.on_audio_pcm = on_audio_pcm;
         server_config.audio_pcm_context = app;
+        server_config.on_volume = on_volume;
+        server_config.volume_context = app;
     }
 #endif
     result = airplay_rtsp_server_start(&server_config, &app->server);
@@ -1023,6 +1032,10 @@ static int cmd_carplay_status(int argc, char **argv)
                "bytes, %u write errors\n",
                carplay_audio_sink_is_running() ? "ready" : "stopped", packets,
                replays, dropped, errors);
+    int volume = carplay_audio_sink_volume_percent();
+    if (volume >= 0) {
+        rt_kprintf("carplay audio speaker volume: %d%%\n", volume);
+    }
 #endif
     return 0;
 }

@@ -35,6 +35,10 @@
  * means the stream stopped or the phone reconnected: drop the stale tail
  * instead of playing it into the next stream. */
 #define SINK_STREAM_GAP_MS 500U
+/* The AirPlay volume is in dB over [-144, 0].  Below -45 dB everything is
+ * inaudible, so [-45, 0] maps linearly onto the codec's 0..100 mixer range. */
+#define SINK_VOLUME_FLOOR_DB (-45.0f)
+#define SINK_VOLUME_MAX_DB 0.0f
 
 typedef struct {
     rt_device_t dev;
@@ -59,6 +63,12 @@ typedef struct {
     uint8_t device_channels;
     bool device_started;
     bool device_opened;
+
+    /* Sender volume: queued under lock, applied by the writer thread. */
+    bool volume_known;  /* a SET_PARAMETER volume has been received */
+    bool volume_pending;
+    int volume_level;   /* requested codec percent, 0..100 */
+    int applied_volume; /* percent applied to the current stream, -1 = none */
 
     volatile bool stop;
     volatile bool running;
@@ -140,6 +150,64 @@ static bool write_caps(audio_sink_t *sink, uint32_t rate, uint8_t channels)
     return true;
 }
 
+/* Maps the sender's dB scale onto the codec's 0..100 mixer range.  AirPlay
+ * sends [-144, 0]; below -45 dB the output is inaudible, so that part of the
+ * range is folded onto 0.  The comparison also catches NaN. */
+static int volume_db_to_percent(float volume_db)
+{
+    if (!(volume_db > SINK_VOLUME_FLOOR_DB)) return 0;
+    if (volume_db >= SINK_VOLUME_MAX_DB) return 100;
+    const float span = SINK_VOLUME_MAX_DB - SINK_VOLUME_FLOOR_DB;
+    return (int)((volume_db - SINK_VOLUME_FLOOR_DB) * (100.0f / span) + 0.5f);
+}
+
+static bool apply_volume(audio_sink_t *sink, int level)
+{
+    if (!sink->device_started || level == sink->applied_volume) return true;
+
+    struct rt_audio_caps caps;
+    memset(&caps, 0, sizeof(caps));
+    caps.main_type = AUDIO_TYPE_MIXER;
+    caps.sub_type = AUDIO_MIXER_VOLUME;
+    caps.udata.value = level;
+    rt_err_t result = rt_device_control(sink->dev, AUDIO_CTL_CONFIGURE, &caps);
+    if (result != RT_EOK) {
+        ++sink->config_errors;
+        if (sink->config_errors == 1U || sink->config_errors % 100U == 0U) {
+            rt_kprintf("[" TAG "] volume %d%% failed: %d\n", level,
+                       (int)result);
+        }
+        return false;
+    }
+    sink->applied_volume = level;
+    return true;
+}
+
+/* Applies a volume queued by the poll thread.  Called from the writer thread on
+ * every wake, so a request that arrives before playback starts is applied by
+ * start_device() and a failed mixer write is retried on the next wake. */
+static void service_volume(audio_sink_t *sink)
+{
+    if (!sink->device_started || sink->lock == NULL) return;
+
+    bool known;
+    bool pending;
+    int level;
+    if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK) return;
+    known = sink->volume_known;
+    pending = sink->volume_pending;
+    level = sink->volume_level;
+    (void)rt_mutex_release(sink->lock);
+
+    if (!known || (!pending && sink->applied_volume == level)) return;
+    if (!apply_volume(sink, level)) return;
+
+    if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) == RT_EOK) {
+        if (sink->volume_level == level) sink->volume_pending = false;
+        (void)rt_mutex_release(sink->lock);
+    }
+}
+
 static bool start_device(audio_sink_t *sink, uint32_t rate, uint8_t channels)
 {
     if (!write_caps(sink, rate, channels)) return false;
@@ -156,6 +224,10 @@ static bool start_device(audio_sink_t *sink, uint32_t rate, uint8_t channels)
     sink->device_rate = rate;
     sink->device_channels = channels;
     ++sink->replays;
+    /* The mixer state may not survive a STOP/START cycle, so apply the
+     * sender's volume to the new stream even when nothing new arrived. */
+    sink->applied_volume = -1;
+    service_volume(sink);
     rt_kprintf("[" TAG "] playback %u Hz %u ch 16-bit\n", (unsigned)rate,
                (unsigned)channels);
     /* The codec enables the power amplifier on start; aplay waits 200 ms
@@ -184,7 +256,13 @@ static void sink_thread(void *argument)
     rt_kprintf("[" TAG "] writer thread running\n");
 
     while (!sink->stop) {
-        if (rt_sem_take(sink->wake, SINK_WAKE_TIMEOUT_MS) != RT_EOK) continue;
+        /* The poll thread wakes us for PCM and for a volume change alike; a
+         * timeout still services a volume queued before playback started. */
+        if (rt_sem_take(sink->wake, SINK_WAKE_TIMEOUT_MS) != RT_EOK) {
+            service_volume(sink);
+            continue;
+        }
+        service_volume(sink);
         while (!sink->stop) {
             uint8_t chunk[SINK_WRITE_BYTES];
             uint32_t rate = 0U;
@@ -241,6 +319,7 @@ int carplay_audio_sink_start(void)
     if (sink->running || sink->thread_running) return RTCP_ESTATE;
 
     memset(sink, 0, sizeof(*sink));
+    sink->applied_volume = -1;
 
     sink->dev = rt_device_find(SINK_DEVICE_NAME);
     if (sink->dev == NULL) {
@@ -402,4 +481,44 @@ void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
     if (dropped_bytes != NULL) *dropped_bytes = s_sink.dropped_bytes;
     if (write_errors != NULL) *write_errors = s_sink.write_errors;
     if (replays != NULL) *replays = s_sink.replays;
+}
+
+void carplay_audio_sink_set_volume_db(float volume_db)
+{
+    audio_sink_t *sink = &s_sink;
+    if (!sink->running || sink->lock == NULL) return;
+
+    /* A NaN or out-of-range value must never reach the codec: clamp first. */
+    if (!(volume_db > SINK_VOLUME_FLOOR_DB)) volume_db = SINK_VOLUME_FLOOR_DB;
+    if (volume_db > SINK_VOLUME_MAX_DB) volume_db = SINK_VOLUME_MAX_DB;
+    int level = volume_db_to_percent(volume_db);
+
+    if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK) return;
+    bool changed = !sink->volume_known || sink->volume_level != level;
+    sink->volume_known = true;
+    sink->volume_level = level;
+    sink->volume_pending = true;
+    (void)rt_mutex_release(sink->lock);
+
+    if (changed) {
+        /* rt_kprintf has no float support: print tenths of a dB by hand. */
+        int tenths = (int)(-volume_db * 10.0f + 0.5f);
+        if (tenths == 0) {
+            rt_kprintf("[" TAG "] sender volume 0 dB -> %d%%\n", level);
+        } else {
+            rt_kprintf("[" TAG "] sender volume -%d.%d dB -> %d%%\n",
+                       tenths / 10, tenths % 10, level);
+        }
+    }
+    (void)rt_sem_release(sink->wake);
+}
+
+int carplay_audio_sink_volume_percent(void)
+{
+    audio_sink_t *sink = &s_sink;
+    if (!sink->running || sink->lock == NULL) return -1;
+    if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK) return -1;
+    int percent = sink->volume_known ? sink->volume_level : -1;
+    (void)rt_mutex_release(sink->lock);
+    return percent;
 }

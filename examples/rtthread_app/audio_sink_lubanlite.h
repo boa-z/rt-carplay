@@ -41,3 +41,13 @@ int carplay_audio_sink_pcm(uint32_t sample_rate, uint8_t channels,
  * PCM discarded because the ring was full. */
 void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
                               unsigned *write_errors, unsigned *replays);
+
+/* Queues the sender's SET_PARAMETER volume (dB; 0 = full scale, the AirPlay
+ * range is [-144, 0]).  The writer thread applies it through the codec mixer;
+ * a value that arrives before playback starts is kept until then.  The scale
+ * is mapped linearly over [-45, 0] dB to the codec's 0..100 range. */
+void carplay_audio_sink_set_volume_db(float volume_db);
+
+/* Last requested volume in codec percent, or -1 when the sender never set
+ * one (the codec keeps its default). */
+int carplay_audio_sink_volume_percent(void);

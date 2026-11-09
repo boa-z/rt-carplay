@@ -312,7 +312,10 @@ independent.
    `CONFIG_RTCARPLAY_AUDIO=y`, start a phone session: the log must show
    `[carplay-aud] playback <rate> Hz <ch> ch 16-bit`, `carplay_status` must
    show a growing packet counter, and the speaker must play the CarPlay
-   audio. If `[carplay-aud] sound0 not found` appears, the audio driver is
+   audio. Move the phone's volume slider: the log must show
+   `[carplay-aud] sender volume -<x>.<y> dB -> <pct>%` and the loudness must
+   follow, and `carplay_status` must print `carplay audio speaker volume:
+   <pct>%`. If `[carplay-aud] sound0 not found` appears, the audio driver is
    not registered; if packets grow but nothing is audible, check the PA
    enable pin/level (`AIC_AUDIO_EN_PIN_*`, `AIC_AUDIO_SPK_*`) and the codec
    wiring in the board target.

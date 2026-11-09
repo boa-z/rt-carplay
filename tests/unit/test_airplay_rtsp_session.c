@@ -849,12 +849,139 @@ static void test_audio_stream_lifecycle(void)
     assert(ports.audio_stops == 3U); /* the alt stream */
 }
 
+typedef struct {
+    unsigned calls;
+    float last_db;
+} volume_capture_t;
+
+static void test_volume(float volume_db, void *context)
+{
+    volume_capture_t *capture = context;
+    ++capture->calls;
+    capture->last_db = volume_db;
+}
+
+static void test_set_parameter_volume(void)
+{
+    static const uint8_t identifier[] = "test-accessory";
+    static const uint8_t public_key[32] = {0};
+    volume_capture_t capture = {0};
+    airplay_rtsp_session_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.pairing.pair_setup.pairing_code = "external-test-code";
+    config.pairing.pair_setup.accessory_identifier = identifier;
+    config.pairing.pair_setup.accessory_identifier_len = sizeof(identifier) - 1U;
+    config.pairing.pair_setup.accessory_public_key = public_key;
+    config.pairing.pair_setup.random = test_random;
+    config.pairing.pair_setup.sign_accessory = test_sign;
+    config.pairing.pair_setup.verify_controller = test_verify;
+    config.pairing.pair_setup.save_pairing = test_save;
+    config.pairing.pair_verify.accessory_identifier = identifier;
+    config.pairing.pair_verify.accessory_identifier_len = sizeof(identifier) - 1U;
+    config.pairing.pair_verify.random = test_random;
+    config.pairing.pair_verify.sign_accessory = test_sign;
+    config.pairing.pair_verify.verify_controller = test_verify;
+    config.pairing.pair_verify.lookup_controller = test_lookup;
+    config.info_plist = k_setup_plist;
+    config.info_plist_len = sizeof(k_setup_plist);
+    config.on_volume = test_volume;
+    config.volume_context = &capture;
+
+    airplay_rtsp_session_t *session = NULL;
+    assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_OK);
+    uint8_t response[AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES];
+    size_t response_len = 0U;
+    bool enable_cipher = false;
+
+    /* The sender's text/parameters volume line reaches the callback. */
+    airplay_rtsp_request_t request = parse_request(
+        "SET_PARAMETER /stream RTSP/1.0\r\n"
+        "CSeq: 20\r\n"
+        "Content-Type: text/parameters\r\n"
+        "Content-Length: 20\r\n"
+        "\r\n"
+        "volume: -20.500000\r\n");
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(capture.calls == 1U);
+    assert(capture.last_db == -20.5f);
+
+    /* Full scale is 0 dB and volumes outside [-144, 0] are clamped. */
+    request = parse_request(
+        "SET_PARAMETER /stream RTSP/1.0\r\n"
+        "CSeq: 21\r\n"
+        "Content-Type: text/parameters\r\n"
+        "Content-Length: 18\r\n"
+        "\r\n"
+        "volume: 0.000000\r\n");
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(capture.calls == 2U && capture.last_db == 0.0f);
+
+    request = parse_request(
+        "SET_PARAMETER /stream RTSP/1.0\r\n"
+        "CSeq: 22\r\n"
+        "Content-Type: text/parameters\r\n"
+        "Content-Length: 18\r\n"
+        "\r\n"
+        "volume: 5.000000\r\n");
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(capture.calls == 3U && capture.last_db == 0.0f);
+
+    request = parse_request(
+        "SET_PARAMETER /stream RTSP/1.0\r\n"
+        "CSeq: 23\r\n"
+        "Content-Type: text/parameters\r\n"
+        "Content-Length: 21\r\n"
+        "\r\n"
+        "volume: -200.000000\r\n");
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(capture.calls == 4U && capture.last_db == -144.0f);
+
+    /* Other parameters and malformed values are acknowledged but ignored. */
+    request = parse_request(
+        "SET_PARAMETER /stream RTSP/1.0\r\n"
+        "CSeq: 24\r\n"
+        "Content-Type: text/parameters\r\n"
+        "Content-Length: 17\r\n"
+        "\r\n"
+        "progress: 1/2/3\r\n");
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(capture.calls == 4U);
+
+    request = parse_request(
+        "SET_PARAMETER /stream RTSP/1.0\r\n"
+        "CSeq: 25\r\n"
+        "Content-Type: text/parameters\r\n"
+        "Content-Length: 14\r\n"
+        "\r\n"
+        "volume: loud\r\n");
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(capture.calls == 4U);
+
+    request = parse_request("GET_PARAMETER /stream RTSP/1.0\r\nCSeq: 26\r\n\r\n");
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(capture.calls == 4U);
+
+    airplay_rtsp_session_destroy(session);
+}
+
 int main(void)
 {
     test_info_and_setup_gates();
     test_initial_setup_timing_and_event_ports();
     test_screen_key_lifecycle();
     test_audio_stream_lifecycle();
+    test_set_parameter_volume();
     puts("airplay RTSP session host test passed (copy/borrow, RECORD before Screen SETUP, teardown gate, test-only signer)");
     return 0;
 }

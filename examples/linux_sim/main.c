@@ -286,6 +286,14 @@ static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
     return RTCP_OK;
 }
 
+/* The sender ships its volume as SET_PARAMETER "volume: <dB>".  The real
+ * receiver maps it onto the codec mixer; the sim logs it. */
+static void on_volume(float volume_db, void *context)
+{
+    (void)context;
+    fprintf(stderr, "volume: %.1f dB\n", (double)volume_db);
+}
+
 static void on_event_state(bool connected, void *context)
 {
     (void)context;
@@ -470,6 +478,8 @@ int main(int argc, char **argv)
     server_config.screen_message_context = &sim;
     server_config.on_audio_pcm = audio ? on_audio_pcm : NULL;
     server_config.audio_pcm_context = &sim;
+    server_config.on_volume = audio ? on_volume : NULL;
+    server_config.volume_context = &sim;
     server_config.on_event_state = on_event_state;
 
     airplay_rtsp_server_t *server = NULL;

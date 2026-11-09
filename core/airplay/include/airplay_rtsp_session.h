@@ -43,6 +43,11 @@ typedef void (*airplay_rtsp_stop_audio_cb_t)(uint16_t stream_type,
                                              void *context);
 typedef void (*airplay_rtsp_stop_media_cb_t)(void *context);
 
+/* SET_PARAMETER "volume: <dB>" from the sender (text/parameters body).
+ * 0 dB is full scale and -144 dB is silence; the callback is invoked only
+ * when a well-formed volume parameter is present. */
+typedef void (*airplay_rtsp_volume_cb_t)(float volume_db, void *context);
+
 typedef struct {
     airplay_rtsp_pairing_config_t pairing;
     const uint8_t *info_plist;
@@ -57,6 +62,8 @@ typedef struct {
     airplay_rtsp_stop_media_cb_t stop_timing;
     airplay_rtsp_stop_audio_cb_t stop_audio;
     void *media_context;
+    airplay_rtsp_volume_cb_t on_volume;
+    void *volume_context;
 } airplay_rtsp_session_config_t;
 
 typedef enum {

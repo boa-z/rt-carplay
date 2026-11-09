@@ -330,8 +330,15 @@ path is independent of MFi.
   16 KB lwIP/SDIO/MMC stacks, 4-byte alignment and a 4 KB WLAN workqueue.
   Build-only for this app: the receiver's own Wi-Fi/RTSP path still needs the
   board run.
+- **First board run (2026-11-09)**: the image booted and the MSH commands
+  worked, but `carplay_randtest` failed: the initial guess of completion unit
+  3 for the CE TRNG times out.  The SDK's own TRNG implementation
+  (`packages/artinchip/aic-authorization/authorization/rng.c`) uses
+  `hal_crypto_start_hash()` and the `ALG_HASH_ACCELERATOR` bit, with
+  `data.in_len = 4`; the port now matches it and zeroes the output on
+  failure.  The board retest of this fix is pending.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
-  controller, touch input, the CE TRNG unit assignment, the Bluetooth
-  H5/RFCOMM path, the MFi exchange with a real phone, the iAP2 session and
-  audio playback all need the hardware run.  Treat the first boot as a
-  bring-up session and watch the console log.
+  controller, touch input, the CE TRNG fix (unit resolved, retest pending),
+  the Bluetooth H5/RFCOMM path, the MFi exchange with a real phone, the iAP2
+  session and audio playback all need the hardware run.  Treat the first
+  boot as a bring-up session and watch the console log.

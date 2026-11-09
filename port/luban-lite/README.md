@@ -71,10 +71,13 @@ from the SDK and stay under their own license.
 ## Entropy seam
 
 `rtcp_lubanlite_random()` drives the CE TRNG through the public HAL: build an
-aligned `struct crypto_task` with `alg.trng.alg_tag = ALG_TRNG`, start it with
-`hal_crypto_start_symm()`, wait on `hal_crypto_poll_finish()` and copy the
-cache-line buffer out. Install it over the RT-Thread table before starting the
-server:
+aligned `struct crypto_task` with `alg.trng.alg_tag = ALG_TRNG` and
+`data.in_len = 4`, start it with `hal_crypto_start_hash()`, wait on the
+`ALG_HASH_ACCELERATOR` completion bit and copy the cache-line buffer out.
+This follows the SDK's own TRNG implementation
+(`packages/artinchip/aic-authorization/authorization/rng.c`).  On any failure
+the output is zeroed and `false` is returned.  Install it over the RT-Thread
+table before starting the server:
 
 ```c
 static struct rtcp_os os;
@@ -87,13 +90,14 @@ Requirements: `CONFIG_AIC_CE_DRV=y` and `CONFIG_DRIVER_HAL_EN=y`. Without
 them the function is compiled as a stub returning `false`, and the AirPlay
 server refuses to run Pair-Setup (no weak fallback).
 
-Two caveats, both **[unknown until board-verified]**:
+Two caveats:
 
-- **Completion unit.** The HAL names symmetric=0, hash=1 and asymmetric=2, and
-  `hal_crypto_init()` clears four ISR bits. This port waits on unit 3 for
-  `ALG_TRNG`. If that guess is wrong the poll times out and pairing fails
-  closed; confirm by checking that `rtcp_lubanlite_random()` returns distinct
-  bytes and never times out on hardware.
+- **Completion unit (resolved).** The first board run on 2026-11-09 showed
+  that waiting on unit 3 (the initial inference from `hal_crypto_init()`
+  clearing four ISR bits) times out. The SDK's own TRNG implementation uses
+  `hal_crypto_start_hash()` with the `ALG_HASH_ACCELERATOR` bit, and the port
+  now matches it. The board retest of this fix is pending; `carplay_randtest`
+  must print two distinct dumps and `carplay_randtest: OK, distinct output`.
 - **Shared engine.** The CE runs one task at a time. Do not use this provider
   while another CE user (e.g. `drv_ce`, a hardware-backed TLS stack) is
   active. On the reference configuration mbedTLS is software-only, so the

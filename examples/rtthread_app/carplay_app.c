@@ -1131,8 +1131,8 @@ static int cmd_carplay_randtest(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
-    uint8_t first[32];
-    uint8_t second[32];
+    uint8_t first[32] = {0};
+    uint8_t second[32] = {0};
     bool ok_first = rtcp_lubanlite_random(first, sizeof(first));
     bool ok_second = rtcp_lubanlite_random(second, sizeof(second));
     for (size_t i = 0U; i < sizeof(first); ++i) {
@@ -1145,7 +1145,7 @@ static int cmd_carplay_randtest(int argc, char **argv)
     rt_kprintf("\n");
     if (!ok_first || !ok_second) {
         rt_kprintf("carplay_randtest: entropy provider unavailable "
-                   "(CONFIG_AIC_CE_DRV / DRIVER_HAL_EN?)\n");
+                   "(check the CE TRNG error log)\n");
     } else if (memcmp(first, second, sizeof(first)) == 0) {
         rt_kprintf("carplay_randtest: FAIL, two calls returned identical "
                    "bytes\n");

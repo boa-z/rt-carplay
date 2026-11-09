@@ -373,6 +373,7 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
 
     if (s_enabled) return RTCP_OK;
 
+    RTCP_LOGI(BT_TAG, "enabling Bluetooth (H5 setup + firmware download)");
     int err = bt_enable(NULL);
     if (err != 0 && err != -EALREADY) {
         RTCP_LOGE(BT_TAG, "bt_enable failed (%d)", err);

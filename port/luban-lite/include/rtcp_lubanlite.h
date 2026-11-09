@@ -114,6 +114,15 @@ bool rtcp_mfi_lubanlite_ready(void);
 const struct rtcp_mfi *rtcp_mfi_lubanlite(void);
 
 /*
+ * Bring-up diagnostic.  Prints the raw bytes read from the coprocessor with
+ * the vendor shape (write STOP, 50 ms, read STOP), the immediate shape and
+ * the combined repeated-start attempt, then scans 0x08..0x77 and prints every
+ * address that ACKs.  Does not start authentication and does not read the
+ * certificate body.  Runs from the 'carplay_mfi' shell command.
+ */
+void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address);
+
+/*
  * Fills output with bytes from the ArtInChip CE true random number generator.
  * Usable as struct rtcp_os.random.  Returns false when the CE driver is not
  * built in or the generator fails/times out; callers must then refuse to

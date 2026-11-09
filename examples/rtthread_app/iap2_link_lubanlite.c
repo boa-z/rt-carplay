@@ -456,3 +456,39 @@ static int cmd_carplay_iap2(int argc, char **argv)
 
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_iap2, carplay_iap2,
                      Wireless iAP2 over RFCOMM: start|stop|status);
+
+#if defined(RTCARPLAY_MFI)
+/*
+ * Bring-up diagnostic: dump every transaction shape on the coprocessor bus
+ * and scan the bus, so an unexpected probe result can be compared with the
+ * raw bus behaviour.  Usage: carplay_mfi [bus] [addr]  (defaults i2c0/0x10).
+ */
+static int cmd_carplay_mfi(int argc, char **argv)
+{
+    const char *bus_name = argc >= 2 ? argv[1] : RTCARPLAY_MFI_I2C_BUS;
+    unsigned addr = RTCARPLAY_MFI_I2C_ADDR;
+
+    if (argc >= 3) {
+        const char *p = argv[2];
+        unsigned v = 0;
+
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) p += 2;
+        while (*p != '\0') {
+            char c = *p++;
+            unsigned d;
+
+            if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A' + 10);
+            else { v = 0; break; }
+            v = (v << 4) | d;
+        }
+        addr = v;
+    }
+
+    rtcp_mfi_lubanlite_dump(bus_name, (uint8_t)addr);
+    return 0;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_mfi, carplay_mfi,
+                     raw MFi 2.0C bus dump (bring-up diagnostic));
+#endif

@@ -71,6 +71,8 @@ CONFIG_AIC_AUDIO_EN_PIN_LOW=y
 CONFIG_AIC_AUDIO_SPK_1=y
 # AirPlay audio -> RT-Thread "sound0" replay (rt-carplay audio sink).
 CONFIG_RTCARPLAY_AUDIO=y
+# Touch panel (GT911) -> CarPlay HID touch reports.
+CONFIG_RTCARPLAY_TOUCH_PANEL=y
 CONFIG_AIC_USING_DMA=y
 CONFIG_AIC_USING_WRI=y
 CONFIG_AIC_USING_RTC=y

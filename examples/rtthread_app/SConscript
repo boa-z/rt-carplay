@@ -29,6 +29,10 @@ if GetDepend('RTCARPLAY_VIDEO'):
 if GetDepend('RTCARPLAY_AUDIO'):
     src += Glob('audio_sink_lubanlite.c')
 
+# Touch panel (GT911 on demo128-nand-carplay): panel points -> touch queue.
+if GetDepend('RTCARPLAY_TOUCH_PANEL'):
+    src += Glob('touch_panel_lubanlite.c')
+
 # Wireless iAP2 over the Zephyr RFCOMM transport (carplay_iap2 command).
 if GetDepend('RTCARPLAY_IAP2'):
     src += Glob('iap2_link_lubanlite.c')

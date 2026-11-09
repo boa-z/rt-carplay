@@ -66,6 +66,21 @@ config RTCARPLAY_AUDIO
 # Library switches consumed by the rt-carplay SConscript.  Defined here only
 # for app mode; package mode defines them in the package Kconfig.
 
+config RTCARPLAY_TOUCH_PANEL
+    bool "Forward the touch panel to CarPlay"
+    default y
+    depends on RT_USING_TOUCH
+    help
+      Open the RT-Thread CTP device selected by the display configuration
+      (CONFIG_AIC_TOUCH_PANEL_NAME, "gt911" on demo128-nand-carplay), read
+      its points on the panel interrupt and feed them to the CarPlay HID
+      touch report.  Coordinates are scaled from the panel range to the
+      display size.
+
+      The HID report carries two contacts, so a third simultaneous finger
+      is not forwarded.  Without this option only the carplay_touch shell
+      command injects touches.
+
 config LPKG_USING_RT_CARPLAY
     bool
     default y

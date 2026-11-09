@@ -55,7 +55,8 @@ this repo yet.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
   Screen dump) described under “Linux simulator”.
 - `examples/rtthread_app/` — the RT-Thread/Luban-Lite receiver application
-  (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch), with an
+  (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch, fed by the
+  GT911 panel reader or the `carplay_touch` command), with an
   on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), an
   AirPlay PCM -> `sound0` audio sink (`audio_sink_lubanlite.c`: ring buffer
   plus writer thread, lazy codec configure, SET_PARAMETER volume -> codec

@@ -37,6 +37,10 @@
 #include "audio_sink_lubanlite.h"
 #endif
 
+#if defined(RTCARPLAY_TOUCH_PANEL)
+#include "touch_panel_lubanlite.h"
+#endif
+
 #if defined(RTCARPLAY_IAP2)
 #include "iap2_link_lubanlite.h"
 #endif
@@ -150,6 +154,7 @@ typedef struct {
 #endif
 #if defined(RTCARPLAY_AUDIO)
     bool audio_started;
+    bool touch_panel_started;
     unsigned audio_packets;
 #endif
 } app_state_t;
@@ -383,6 +388,17 @@ static bool send_hid_report(uint32_t hid_uid, const uint8_t *report,
                                                report_len);
 }
 
+#if defined(RTCARPLAY_TOUCH_PANEL)
+/* Panel reader thread -> touch queue; the poll thread turns the queue into
+ * HID reports, so the panel thread never touches the event channel. */
+static void on_panel_touch(uint8_t phase, uint16_t pointer_id, uint16_t x,
+                           uint16_t y, void *context)
+{
+    (void)context;
+    (void)carplay_app_touch(phase, pointer_id, x, y);
+}
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Touch queue: any thread -> poll thread                              */
 /* ------------------------------------------------------------------ */
@@ -443,6 +459,12 @@ static void drain_touch(app_state_t *app)
 static void shutdown_stack(app_state_t *app)
 {
     app->shutting_down = true;
+#if defined(RTCARPLAY_TOUCH_PANEL)
+    if (app->touch_panel_started) {
+        carplay_touch_panel_stop();
+        app->touch_panel_started = false;
+    }
+#endif
 #if defined(RTCARPLAY_VIDEO)
     if (app->video_started) {
         carplay_video_sink_stop();
@@ -867,6 +889,18 @@ int carplay_app_start(const carplay_app_config_t *config)
     }
     (void)rt_thread_startup(app->thread);
 
+#if defined(RTCARPLAY_TOUCH_PANEL)
+    /* The touch queue exists now (app->running and app->lock); a board without
+     * the panel driver keeps working through carplay_touch. */
+    result = carplay_touch_panel_start(app->width, app->height, on_panel_touch,
+                                       app);
+    if (result != RTCP_OK) {
+        APP_LOG("touch panel unavailable rc=%d; use carplay_touch", result);
+    } else {
+        app->touch_panel_started = true;
+    }
+#endif
+
     APP_LOG("advertising \"%s\" on %u.%u.%u.%u:%u (device %s, PIN %s)",
             app->name, app->ipv4[0], app->ipv4[1], app->ipv4[2], app->ipv4[3],
             (unsigned)airplay_rtsp_server_get_port(app->server),
@@ -1035,6 +1069,12 @@ static int cmd_carplay_status(int argc, char **argv)
     int volume = carplay_audio_sink_volume_percent();
     if (volume >= 0) {
         rt_kprintf("carplay audio speaker volume: %d%%\n", volume);
+    }
+#endif
+#if defined(RTCARPLAY_TOUCH_PANEL)
+    uint16_t points = carplay_touch_panel_points();
+    if (points != 0U) {
+        rt_kprintf("carplay touch panel: %u point(s)\n", (unsigned)points);
     }
 #endif
     return 0;

@@ -13,7 +13,7 @@ stay in `core/` and `port/`.
 | Discovery | `_airplay._tcp` via `mdns_responder` (TXT from `airplay_txt_build`) |
 | AirPlay | `airplay_rtsp_server` on port 7000 with the `/info` plist |
 | Audio | decrypted PCM -> ring buffer -> `sound0` writer thread (RTCARPLAY_AUDIO) |
-| Input | `carplay_touch` queues events; the poll thread sends HID reports |
+| Input | panel reader (`RTCARPLAY_TOUCH_PANEL`) or `carplay_touch` queues events; the poll thread sends HID reports |
 
 The pairing PIN is generated from the CE TRNG at each start and printed on
 the console (a product would show it on the display).  The poll thread owns
@@ -78,7 +78,7 @@ the duplicate include.
 ```
 carplay_start                 # bring the receiver up, prints the PIN
 carplay_status                # running/stopped, display size, PIN, audio counters
-carplay_touch down 640 240    # inject touch in display pixels
+carplay_touch down 640 240    # inject touch in display pixels (panel runs too)
 carplay_touch move 700 260
 carplay_touch up 700 260
 carplay_stop
@@ -102,6 +102,25 @@ carplay_video stop            # release the decoder, restore the UI layer
 `carplay_video play` is the bring-up path when no controller is available:
 it starts the sink if needed, feeds complete NAL units with a 64 KB read
 window (paced by decoder queue depth), and prints the decoder counters.
+
+## Touch input
+
+With `CONFIG_RTCARPLAY_TOUCH_PANEL=y` (default when `RT_USING_TOUCH` is on)
+`touch_panel_lubanlite.c` opens the RT-Thread CTP device named by
+`CONFIG_AIC_TOUCH_PANEL_NAME` (`gt911` on demo128-nand-carplay).  The panel
+interrupt disables the IRQ, a dedicated thread reads the point buffer,
+resolves DOWN/MOVE/UP with the panel track id, scales the driver's
+`range_x`/`range_y` to the display size and calls `carplay_app_touch()`; the
+poll thread turns the queue into HID reports, so the panel thread never
+touches the event channel.  A missing device logs
+`[carplay-touch] touch device ... not found` and leaves `carplay_touch`
+available for synthetic input.
+
+The CarPlay HID report carries two contacts
+(`INPUT_BRIDGE_TOUCH_CONTACTS`), so a third simultaneous finger is not
+forwarded.  Rotate the panel and the display with the same board settings:
+the driver applies flip/rotate/crop and `input_bridge` applies the CarPlay
+rotation on top.
 `carplay_video start`/`play` also work while the receiver runs, as long as
 the controller is not streaming.
 
@@ -276,11 +295,23 @@ path is independent of MFi.
   callback for GET_PARAMETER).  The SDK build links
   `carplay_audio_sink_start/pcm/stop/stats/set_volume_db/volume_percent`,
   `airplay_audio_stream_start/poll/stop`, `sound0` and `RT_USING_AUDIO`
-  (image 4,028,928 bytes, zero warnings).  Build-only: the codec has not
-  played a sample; the first board run with a controller should log
-  `[carplay-aud] playback <rate> Hz <ch> ch 16-bit`, `carplay_status` should
-  show growing packet counters, and moving the phone's volume slider should
-  log `[carplay-aud] sender volume -<x>.<y> dB -> <pct>%`.
+  (image 4,030,976 bytes with the touch milestone, zero warnings).
+  Build-only: the codec has not played a sample; the first board run with a
+  controller should log `[carplay-aud] playback <rate> Hz <ch> ch 16-bit`,
+  `carplay_status` should show growing packet counters, and moving the
+  phone's volume slider should log `[carplay-aud] sender volume -<x>.<y> dB
+  -> <pct>%`.
+- **Touch panel (2026-11-08)**: `touch_panel_lubanlite.c` opens the
+  RT-Thread CTP device named by `CONFIG_AIC_TOUCH_PANEL_NAME` (`gt911` on
+  demo128-nand-carplay), takes points on the panel interrupt (the rx
+  indication disables the IRQ, the reader thread drains the panel and
+  re-enables it) and forwards DOWN/MOVE/UP with the driver's track id into
+  the same queue as `carplay_touch`.  Coordinates are scaled from
+  `range_x`/`range_y` to the display size.  The ELF contains
+  `carplay_touch_panel_start/stop/points`, `panel_thread`, `panel_rx`,
+  `rt_touch_read/control`, `touch_irq_callback` and `gt911_read_point`.
+  Build-only: the first board run must log `[carplay-touch] gt911: <n>
+  point(s), 1024x600 -> <w>x<h>` and the phone UI must follow the panel.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input, the CE TRNG unit assignment, the Bluetooth
   H5/RFCOMM path, the MFi exchange with a real phone, the iAP2 session and

@@ -319,3 +319,10 @@ independent.
    not registered; if packets grow but nothing is audible, check the PA
    enable pin/level (`AIC_AUDIO_EN_PIN_*`, `AIC_AUDIO_SPK_*`) and the codec
    wiring in the board target.
+7. **Touch panel** — with `CONFIG_RTCARPLAY_TOUCH_PANEL=y` and the CTP
+   driver enabled (`gt911` on this board), `carplay_start` must log
+   `[carplay-touch] gt911: <n> point(s), 1024x600 -> <w>x<h>`, and touching
+   the panel must move the CarPlay pointer (watch `carplay_status` and the
+   phone UI).  If the device is missing the log says
+   `touch device gt911 not found`; `carplay_touch down x y` still injects
+   events for isolating the AirPlay HID path from the panel driver.

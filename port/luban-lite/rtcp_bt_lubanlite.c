@@ -97,7 +97,11 @@
 #define RTCP_BT_EIR_SIZE 240U
 #define RTCP_BT_EIR_PARAM_SIZE (1U + RTCP_BT_EIR_SIZE)
 #define RTCP_BT_EIR_TYPE_UUID128_COMPLETE 0x07
+#define RTCP_BT_EIR_TYPE_NAME_SHORTENED 0x08
 #define RTCP_BT_EIR_TYPE_NAME_COMPLETE 0x09
+/* The reference stack publishes a third name element with this type; iOS
+ * ignores unknown EIR types, and the working firmware sends it, so match. */
+#define RTCP_BT_EIR_TYPE_NAME_VENDOR 0x30
 
 /*
  * The wireless CarPlay receiver must announce the iAP2 service class in its
@@ -105,20 +109,42 @@
  * (bt_gap.c:bt_eir_data_init) writes a 0x07 element whose first UUID128 is
  * 00000000-deca-fade-deca-deafdecacafe before it becomes discoverable.
  *
- * Without it the iPhone treats us as an unknown accessory: board log
- * 2026-11-09 shows a generic SDP walk (search 0x0100, attribute dump, search
- * PnP 0x1200) followed by a disconnect with reason 0x13, and no iAP2
- * pairing.  Zephyr's bt_br_init() already selects inquiry mode 0x02
- * (results with RSSI / extended inquiry), so writing the EIR is enough for
- * the controller to include it in inquiry responses.
+ * The board log of 2026-11-09 (diag6) shows that the iAP2 UUID alone is not
+ * enough: the iPhone still ran a generic SDP walk (search 0x0100, PnP 0x1200,
+ * SDP server 0x1000) and disconnected with reason 0x13 without ever searching
+ * the iAP2 UUID or opening RFCOMM.  The reference stack advertises four
+ * UUID128s in this one 0x07 element, and these are those exact bytes.
+ * Only the iAP2 UUID is registered in the SDP database, so the other three
+ * are announcement-only, again as in the reference.
  *
- * HCI carries 128-bit UUIDs little-endian (LSO first), the same order as
- * Zephyr's SDP encoder wants for UUID128 values.
+ * HCI carries 128-bit UUIDs little-endian (LSO first).
  */
-static const uint8_t s_iap2_uuid_eir[16] = {
+static const uint8_t s_eir_uuid128_list[64] = {
+    /* 00000000-deca-fade-deca-deafdecacafe (iAP2) */
     0xfe, 0xca, 0xca, 0xde, 0xaf, 0xde, 0xca, 0xde,
     0xde, 0xfa, 0xca, 0xde, 0x00, 0x00, 0x00, 0x00,
+    /* 02030302-1d19-415f-86f2-22a2106a0a77 */
+    0x77, 0x0a, 0x6a, 0x10, 0xa2, 0x22, 0xf2, 0x86,
+    0x5f, 0x41, 0x19, 0x1d, 0x02, 0x03, 0x03, 0x02,
+    /* 2d8d2466-e14d-451c-88bc-7301abea291a */
+    0x1a, 0x29, 0xea, 0xab, 0x01, 0x73, 0xbc, 0x88,
+    0x1c, 0x45, 0x4d, 0xe1, 0x66, 0x24, 0x8d, 0x2d,
+    /* ec884348-cd41-40a2-9727-575d50bf1fd3 */
+    0xd3, 0x1f, 0xbf, 0x50, 0x5d, 0x57, 0x27, 0x97,
+    0xa2, 0x40, 0x41, 0xcd, 0x48, 0x43, 0x88, 0xec,
 };
+
+static size_t eir_put_name(uint8_t *eir, size_t pos, uint8_t type,
+                           const char *name, size_t len)
+{
+    if (len == 0U || pos + 2U + len > RTCP_BT_EIR_PARAM_SIZE) {
+        return pos;
+    }
+    eir[pos++] = (uint8_t)(len + 1U);
+    eir[pos++] = type;
+    memcpy(&eir[pos], name, len);
+    return pos + len;
+}
 
 static void write_eir(const char *name)
 {
@@ -132,30 +158,65 @@ static void write_eir(const char *name)
     uint8_t *eir = net_buf_add(buf, RTCP_BT_EIR_PARAM_SIZE);
     memset(eir, 0, RTCP_BT_EIR_PARAM_SIZE);
 
-    size_t pos = 1U;
-
-    eir[pos++] = 1U + 16U; /* element length: type byte + UUID128 */
-    eir[pos++] = RTCP_BT_EIR_TYPE_UUID128_COMPLETE;
-    memcpy(&eir[pos], s_iap2_uuid_eir, sizeof(s_iap2_uuid_eir));
-    pos += sizeof(s_iap2_uuid_eir);
-
+    /* Elements: complete name, the 0x07 UUID list (66 bytes), shortened
+     * name, vendor-type name.  Keep the three name copies within 240 bytes. */
     size_t name_len = (name != NULL) ? strlen(name) : 0U;
-    if (name_len > RTCP_BT_EIR_SIZE - pos - 2U) {
-        name_len = RTCP_BT_EIR_SIZE - pos - 2U;
+    if (name_len > (RTCP_BT_EIR_SIZE - 72U) / 3U) {
+        name_len = (RTCP_BT_EIR_SIZE - 72U) / 3U;
     }
-    if (name_len > 0U) {
-        eir[pos++] = (uint8_t)(name_len + 1U);
-        eir[pos++] = RTCP_BT_EIR_TYPE_NAME_COMPLETE;
-        memcpy(&eir[pos], name, name_len);
-        pos += name_len;
-    }
+
+    size_t pos = 1U;
+    pos = eir_put_name(eir, pos, RTCP_BT_EIR_TYPE_NAME_COMPLETE, name,
+                       name_len);
+
+    eir[pos++] = 1U + sizeof(s_eir_uuid128_list); /* 0x41: type + 4 UUIDs */
+    eir[pos++] = RTCP_BT_EIR_TYPE_UUID128_COMPLETE;
+    memcpy(&eir[pos], s_eir_uuid128_list, sizeof(s_eir_uuid128_list));
+    pos += sizeof(s_eir_uuid128_list);
+
+    pos = eir_put_name(eir, pos, RTCP_BT_EIR_TYPE_NAME_SHORTENED, name,
+                       name_len);
+    pos = eir_put_name(eir, pos, RTCP_BT_EIR_TYPE_NAME_VENDOR, name,
+                       name_len);
 
     int err = bt_hci_cmd_send_sync(RTCP_BT_HCI_OP_WRITE_EIR, buf, NULL);
     if (err != 0) {
         RTCP_LOGW(BT_TAG, "write EIR failed (%d)", err);
     } else {
-        RTCP_LOGI(BT_TAG, "EIR: iAP2 UUID128 advertised (%u bytes)",
+        RTCP_LOGI(BT_TAG, "EIR: iAP2 + 3 service UUIDs advertised (%u bytes)",
                   (unsigned)pos);
+    }
+}
+
+/*
+ * Zephyr leaves the controller's default inquiry scan parameters in place:
+ * interval 0x1000 (2.56 s) and window 0x0012 (11.25 ms), a 0.44% duty cycle
+ * (BT_BR_INQUIRY_SCAN_PARAM_DEFAULT).  An iPhone inquiry then hits the
+ * accessory only once in a while, which matches the report that the device
+ * is hard to discover.  The working ZALink stack configures page scan as
+ * interval 0x50 (50 ms) / window 0x40 (40 ms), interlaced; use the same
+ * 80% duty for both scans so discovery and connection setup are reliable.
+ */
+static void configure_scan(void)
+{
+    const struct bt_br_page_scan_param page = {
+        .interval = 0x0050U,
+        .window = 0x0040U,
+        .type = BT_BR_SCAN_TYPE_INTERLACED,
+    };
+    const struct bt_br_inquiry_scan_param inquiry = {
+        .interval = 0x0050U,
+        .window = 0x0040U,
+        .type = BT_BR_SCAN_TYPE_INTERLACED,
+    };
+
+    int err = bt_br_page_scan_update_param(&page);
+    if (err != 0) {
+        RTCP_LOGW(BT_TAG, "page scan parameters failed (%d)", err);
+    }
+    err = bt_br_inquiry_scan_update_param(&inquiry);
+    if (err != 0) {
+        RTCP_LOGW(BT_TAG, "inquiry scan parameters failed (%d)", err);
     }
 }
 
@@ -504,6 +565,8 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
         RTCP_LOGE(BT_TAG, "bt_enable failed (%d)", err);
         return RTCP_EIO;
     }
+
+    configure_scan();
 
     err = bt_br_set_connectable(true, NULL);
     if (err != 0 && err != -EALREADY) {

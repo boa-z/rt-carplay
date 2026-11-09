@@ -53,8 +53,9 @@ config LPKG_RT_CARPLAY_LUBANLITE_MFI
         Bind struct rtcp_mfi to a 2.0C authentication coprocessor on the
         RT-Thread I2C bus, so the wireless iAP2 session can run the MFi
         certificate/challenge exchange.  The bus name and address are
-        board parameters (i2c0/0x6A on demo128-nand-carplay); the register
-        engine is core/mfi/mfi2c.c.  Without a working coprocessor the
-        session stops after IdentificationInformation.
+        board parameters (i2c0/0x10 on demo128-nand-carplay; 0x11 also
+        answers, and the 0x6A device is the vendor RJGT204, not MFi); the
+        register engine is core/mfi/mfi2c.c.  Without a working
+        coprocessor the session stops after IdentificationInformation.
 
 endif

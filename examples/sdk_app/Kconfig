@@ -143,8 +143,10 @@ config RTCARPLAY_MFI
     help
       Probe the MFi 2.0C-compatible authentication coprocessor at startup and
       use it for the iAP2 certificate/challenge exchange.  demo128-nand-carplay
-      wires it to i2c0 at 0x6A (ZABlue's HW_SECRUITY_I2C_ID/ADDR).  When the
-      probe fails the session still runs, but stops after identification.
+      has the Apple 2.0C on i2c0 at 0x10 (0x11 also answers; board-verified in
+      the CarPlay PoC).  The 0x6A device on the same bus is the vendor
+      RJGT204, not the MFi coprocessor.  When the probe fails the session
+      still runs, but stops after identification.
 
 config RTCARPLAY_MFI_I2C_BUS
     string "I2C bus carrying the MFi coprocessor"
@@ -153,7 +155,7 @@ config RTCARPLAY_MFI_I2C_BUS
 
 config RTCARPLAY_MFI_I2C_ADDR
     hex "MFi coprocessor I2C address"
-    default 0x6A
+    default 0x10
     depends on RTCARPLAY_MFI
 
 endmenu

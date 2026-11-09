@@ -11,8 +11,9 @@
  *   read : write the register byte (STOP), then read the data (STOP).
  * No repeated START is used; the coprocessor does not answer it.
  *
- * The demo128-nand-carplay board has the part on i2c0 at 0x6A (ZABlue's
- * HW_SECRUITY_I2C_ID=0 / HW_SECRUITY_I2C_ADDR=0x6A; i2c0 runs at 100 kHz).
+ * The demo128-nand-carplay board has the Apple 2.0C on i2c0 at 0x10
+ * (0x11 also answers; i2c0 runs at 100 kHz).  The 0x6A device on the same
+ * bus is the vendor RJGT204 device lock, not the MFi coprocessor.
  * The private key never leaves the coprocessor: this file can read the
  * certificate and ask for a signature, nothing else.
  */

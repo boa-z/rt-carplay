@@ -224,9 +224,11 @@ the 2.4 GHz 1-14 range the original relay accepted.
 
 `RTCARPLAY_MFI` (default on, needs `AIC_I2C_DRV`) adds the 2.0C
 authentication coprocessor from `port/luban-lite/rtcp_mfi_lubanlite.c`.
-The board wires it to `i2c0` at `0x6A` (ZABlue's
-`HW_SECRUITY_I2C_ID`/`HW_SECRUITY_I2C_ADDR`); both are Kconfig values
-(`RTCARPLAY_MFI_I2C_BUS`, `RTCARPLAY_MFI_I2C_ADDR`).  The session is created
+The board has the Apple 2.0C on `i2c0` at `0x10` (board-verified in the
+PoC; `0x11` also answers).  The `0x6A` address in ZABlue's
+`HW_SECRUITY_I2C_ID`/`HW_SECRUITY_I2C_ADDR` properties belongs to the
+vendor RJGT204 device lock, not the MFi coprocessor.  Bus and address are
+Kconfig values (`RTCARPLAY_MFI_I2C_BUS`, `RTCARPLAY_MFI_I2C_ADDR`).  The session is created
 with the provider (`config.mfi = rtcp_mfi_lubanlite()`), so the phone's
 certificate/challenge exchange runs and the flow can reach Wi-Fi
 configuration and `CarPlayStartSession`.  The probe happens when the iAP2
@@ -237,12 +239,12 @@ transport path.  `carplay_iap2 status` reports the coprocessor as
 certificate and signatures are used.
 
 The register engine and transaction shape were verified on the board in the
-PoC (`core/mfi/mfi2c.c`: probe at 0x4E, sign at 0x20, certificate at 0x31,
-ID `0x00000200`).  The RJGT204's compatibility with the Apple 2.0C register
-set and the full MFi exchange with a real phone remain board-verification
-items, as do the security level, link-key reporting and the H5
-firmware/baud path (see `port/luban-lite/README.md`).  The AirPlay receiver
-path is independent of MFi.
+PoC against the 2.0C at i2c0/0x10 (`core/mfi/mfi2c.c`: probe at 0x4E, sign
+at 0x20, certificate at 0x31, ID `0x00000200`).  The full MFi exchange with
+a real phone remains a board-verification item, as do the security level,
+link-key reporting and the H5 firmware/baud path (see
+`port/luban-lite/README.md`).  The AirPlay receiver path is independent of
+MFi.
 
 ## Verification status
 
@@ -286,9 +288,10 @@ path is independent of MFi.
   `rtcp_mfi2c_probe/sign/read_cert` and `rt_i2c_read_reg`; the image is
   4,012,544 bytes with zero build warnings.  The transaction shape, the
   register addresses and the 2.0C ID were verified on the board in the PoC;
-  the I2C bus/address defaults come from ZABlue's properties (i2c0/0x6A).
+  the I2C bus/address defaults are the board-verified i2c0/0x10 (0x11 also
+  answers; 0x6A is the RJGT204 device lock, not MFi).
   Build-only for the provider itself: the first `carplay_iap2 start` on the
-  board should log `I/mfi: 2.0C at i2c0 0x6a: id=0x00000200 ...` and
+  board should log `I/mfi: 2.0C at i2c0 0x10: id=0x00000200 ...` and
   `MFi certificate sent`, followed by `MFi authenticated` when a phone
   connects.
 - **Audio (2026-11-08)**: the audio DataStream is host-verified end to end.

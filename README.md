@@ -51,8 +51,9 @@ this repo yet.
   RFCOMM over RTL8733 H5, with SDP records, an iAP2 byte stream and the
   timed-receive/local-BD-address helpers the iAP2 pump uses), and
   `rtcp_mfi_lubanlite`: the 2.0C authentication coprocessor over the
-  RT-Thread I2C bus (i2c0/0x6A on demo128-nand-carplay), which removes the
-  MFi wall for the wireless iAP2 flow.
+  RT-Thread I2C bus (i2c0/0x10 on demo128-nand-carplay; the 0x6A part on
+  the same bus is the vendor RJGT204 device lock), which removes the MFi
+  wall for the wireless iAP2 flow.
 - `Kconfig`, `SConscript` — RT-Thread/Luban-Lite build integration.
 - `examples/linux_sim/` — the foreground Linux receiver bench (mDNS + RTSP +
   Screen dump) described under “Linux simulator”.

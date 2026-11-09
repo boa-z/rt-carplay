@@ -219,14 +219,18 @@ authentication coprocessor on the RT-Thread I2C bus.  Enable it with:
 CONFIG_LPKG_RT_CARPLAY_LUBANLITE_MFI=y   # package mode
 CONFIG_RTCARPLAY_MFI=y                   # app mode (sdk_app Kconfig)
 CONFIG_RTCARPLAY_MFI_I2C_BUS="i2c0"
-CONFIG_RTCARPLAY_MFI_I2C_ADDR=0x6A
+CONFIG_RTCARPLAY_MFI_I2C_ADDR=0x10
 ```
 
-The bus/address defaults are the board evidence, not a guess: ZABlue's
-`config/rtl8733bs/zablue.properties` sets `HW_SECRUITY_I2C_ID=0` and
-`HW_SECRUITY_I2C_ADDR=0x6A`, and its comment records that probing `0x68`
-fails and makes the vendor library report "HW Security Init Error".  The
-board enables `i2c0` at 100 kHz (PD.6/PD.7 pinmux).
+The bus/address defaults are board evidence, not a guess.  The Apple 2.0C
+answers on `i2c0` at `0x10` (`0x11` also answers), verified on the board in
+the CarPlay PoC: probe register `0x4E` returns ID `0x00000200`, the
+certificate reads back and a 20-byte challenge produces a 128-byte
+signature.  The `0x6A` device on the same bus is the vendor RJGT204 device
+lock that ZABlue's `HW_SECRUITY_I2C_ID`/`HW_SECRUITY_I2C_ADDR` properties
+point at -- it is **not** the MFi coprocessor (the vendor comment that
+probing `0x68` fails belongs to the RJGT204 path).  The board enables
+`i2c0` at 100 kHz (PD.6/PD.7 pinmux).
 
 Transaction shape matters and is implemented as the part requires:
 
@@ -251,10 +255,9 @@ the probe result (the `carplay_iap2 status` command prints it).
 were verified on this board during the PoC (ID `0x00000200`, 31-byte probe,
 certificate read, 20-byte challenge signature).  The peripheral wrapper is
 build-only until `carplay_iap2 start` runs on the board; watch for
-`I/mfi: 2.0C at i2c0 0x6a: id=0x...`.  The RJGT204 clone's 2.0C
-compatibility and the full MFi exchange with a real phone are unverified.
-The private key never leaves the coprocessor: this port reads the
-certificate and requests signatures only.
+`I/mfi: 2.0C at i2c0 0x10: id=0x...`.  The full MFi exchange with a real
+phone is unverified.  The private key never leaves the coprocessor: this
+port reads the certificate and requests signatures only.
 
 ## mbedTLS configuration
 
@@ -322,7 +325,7 @@ independent.
    record is produced by `airplay_txt_build()` (`deviceid`, `features`,
    `flags`, `model`, `srcvers`, `protovers`, `pi`, `pk`).
 3. **MFi 2.0C** — run `carplay_iap2 start`; the probe must log
-   `I/mfi: 2.0C at i2c0 0x6a: id=0x...` (otherwise `carplay_iap2 status`
+   `I/mfi: 2.0C at i2c0 0x10: id=0x...` (otherwise `carplay_iap2 status`
    reports `coprocessor absent` and the session stops after identification).
    With a phone connected, `[iap2] MFi certificate sent` followed by
    `[iap2] MFi authenticated` confirms the exchange. The certificate is

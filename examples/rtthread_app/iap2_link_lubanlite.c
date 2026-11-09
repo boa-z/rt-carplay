@@ -179,9 +179,17 @@ static void link_event(iap2_session_event_t event, void *context)
 static const struct rtcp_mfi *link_mfi(void)
 {
 #if defined(RTCARPLAY_MFI)
-    int result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
+    int result = RTCP_EIO;
+
+    /* Two attempts: the 2.0C answers 0x32 to every register while the board
+     * is busy elsewhere (see the call site), so a single unlucky probe must
+     * not disable MFi for the whole session. */
+    for (int attempt = 0; attempt < 2; attempt++) {
+        result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
                                           RTCARPLAY_MFI_I2C_ADDR);
-    if (result == RTCP_OK) return rtcp_mfi_lubanlite();
+        if (result == RTCP_OK) return rtcp_mfi_lubanlite();
+        if (attempt == 0) rt_thread_mdelay(100);
+    }
     IAP2_LOG("MFi coprocessor unavailable rc=%d; the session will stop after "
              "identification", result);
 #else
@@ -191,7 +199,7 @@ static const struct rtcp_mfi *link_mfi(void)
     return NULL;
 }
 
-static int link_session_create(iap2_link_t *link)
+static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
 {
     carplay_app_iap2_info_t info;
     int result = carplay_app_iap2_info(&info);
@@ -220,7 +228,7 @@ static int link_session_create(iap2_link_t *link)
     iap2_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.identity = identity;
-    config.mfi = link_mfi();
+    config.mfi = mfi;
     config.tx = link_tx;
     config.get_wifi = link_get_wifi;
     config.get_airplay = link_get_airplay;
@@ -241,13 +249,20 @@ static void link_thread(void *parameter)
 {
     iap2_link_t *link = parameter;
 
+    /* Probe the coprocessor BEFORE the Bluetooth controller is enabled.
+     * Board-verified 2026-11-09: a probe issued right after the RTL8733BS
+     * firmware download reads 0x32 from every 2.0C register, while the same
+     * reads minutes later return the correct id 0x00000200 and cert 908.
+     * The BT bring-up is the disturbance, so probe while it is still idle. */
+    const struct rtcp_mfi *mfi = link_mfi();
+
     int result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
     if (result != RTCP_OK) {
         IAP2_LOG("Bluetooth enable failed rc=%d", result);
         goto done;
     }
 
-    result = link_session_create(link);
+    result = link_session_create(link, mfi);
     if (result != RTCP_OK) {
         IAP2_LOG("iAP2 session create failed rc=%d", result);
         goto done;

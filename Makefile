@@ -106,8 +106,13 @@ $(BUILD)/test_port_linux: tests/unit/test_port_linux.c $(PORT_LINUX_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(PORT_LINUX_LIB) -lpthread
 
 check: all
-	@for t in $(BINS); do echo "== $$t =="; ./$$t; done
-	./check-boundary.sh
+	@status=0; \
+	for t in $(BINS); do \
+	    echo "== $$t =="; \
+	    ./$$t || status=1; \
+	done; \
+	./check-boundary.sh || status=1; \
+	exit $$status
 
 clean:
 	rm -rf $(BUILD)

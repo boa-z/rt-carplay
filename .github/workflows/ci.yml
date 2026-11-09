@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: host tests (ASan/UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Fetch the pinned mbedTLS
+        run: ./scripts/fetch-mbedtls.sh
+      - name: Build and run the host suite
+        run: make -j"$(nproc)" check

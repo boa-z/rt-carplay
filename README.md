@@ -1,5 +1,7 @@
 # rt-carplay
 
+[![ci](https://github.com/boa-z/rt-carplay/actions/workflows/ci.yml/badge.svg)](https://github.com/boa-z/rt-carplay/actions/workflows/ci.yml)
+
 An independent, RT-Thread-first CarPlay receiver stack.  The protocol core
 builds and runs on a Linux host with no RT-Thread, Luban-Lite, or ArtInChip
 headers; platform ports live outside `core/`.

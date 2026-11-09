@@ -109,3 +109,22 @@ airplay_bplist_result_t airplay_bplist_build_empty_stream_setup_response(
     uint8_t *output,
     size_t output_capacity,
     size_t *output_len);
+
+/* One accepted stream in a SETUP response.  Screen streams answer with
+ * {type, dataPort}; audio streams add controlPort and streamConnectionID. */
+#define AIRPLAY_BPLIST_MAX_SETUP_STREAMS 4U
+
+typedef struct {
+    uint64_t stream_type;
+    uint16_t data_port;
+    uint16_t control_port; /* 0 omits controlPort (screen stream). */
+    bool has_connection_id;
+    uint64_t stream_connection_id;
+} airplay_bplist_stream_entry_t;
+
+airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
+    const airplay_bplist_stream_entry_t *entries,
+    size_t entry_count,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len);

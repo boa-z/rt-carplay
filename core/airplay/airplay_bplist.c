@@ -11,7 +11,7 @@
 
 #define BPLIST_HEADER_BYTES 8U
 #define BPLIST_TRAILER_BYTES 32U
-#define BPLIST_WRITER_MAX_OBJECTS 12U
+#define BPLIST_WRITER_MAX_OBJECTS 48U
 
 typedef struct {
     uint8_t marker;
@@ -530,18 +530,22 @@ static airplay_bplist_result_t build_setup_response(
     memcpy(output, magic, sizeof(magic));
     offset += sizeof(magic);
     if (object_count > BPLIST_WRITER_MAX_OBJECTS) return AIRPLAY_BPLIST_TOO_LARGE;
-    uint8_t object_offsets[BPLIST_WRITER_MAX_OBJECTS];
+    uint16_t object_offsets[BPLIST_WRITER_MAX_OBJECTS];
     for (uint8_t i = 0U; i < object_count; ++i) {
-        if (offset > UINT8_MAX) return AIRPLAY_BPLIST_TOO_LARGE;
-        object_offsets[i] = (uint8_t)offset;
+        if (offset > UINT16_MAX) return AIRPLAY_BPLIST_TOO_LARGE;
+        object_offsets[i] = (uint16_t)offset;
         if (!emit_write_object(&objects[i], 1U, output, output_capacity, &offset)) {
             return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
         }
     }
-    if (offset > UINT8_MAX) return AIRPLAY_BPLIST_TOO_LARGE;
+    if (offset > UINT16_MAX) return AIRPLAY_BPLIST_TOO_LARGE;
     size_t table_offset = offset;
+    /* A multi-stream SETUP response can exceed 255 bytes of objects; widen
+     * the offset table entries only when the document needs it. */
+    uint8_t offset_width = offset > UINT8_MAX ? 2U : 1U;
     for (uint8_t i = 0U; i < object_count; ++i) {
-        if (!write_be(output, output_capacity, &offset, object_offsets[i], 1U)) {
+        if (!write_be(output, output_capacity, &offset, object_offsets[i],
+                      offset_width)) {
             return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
         }
     }
@@ -549,7 +553,7 @@ static airplay_bplist_result_t build_setup_response(
         return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
     }
     memset(output + offset, 0, BPLIST_TRAILER_BYTES);
-    output[offset + 6U] = 1U; /* offset byte width */
+    output[offset + 6U] = offset_width;
     output[offset + 7U] = 1U; /* object reference byte width */
     size_t trailer_offset = offset + 8U;
     offset += BPLIST_TRAILER_BYTES;
@@ -627,4 +631,80 @@ airplay_bplist_result_t airplay_bplist_build_empty_stream_setup_response(
         {.kind = BPLIST_WRITE_ARRAY, .reference_count = 0U},
     };
     return build_setup_response(objects, 3U, output, output_capacity, output_len);
+}
+
+airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
+    const airplay_bplist_stream_entry_t *entries,
+    size_t entry_count,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len)
+{
+    if (entries == NULL || entry_count == 0U ||
+        entry_count > AIRPLAY_BPLIST_MAX_SETUP_STREAMS) {
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    }
+
+    bplist_write_object_t objects[BPLIST_WRITER_MAX_OBJECTS];
+    memset(objects, 0, sizeof(objects));
+    objects[0].kind = BPLIST_WRITE_DICTIONARY;
+    objects[0].references[0] = 1U;
+    objects[0].references[1] = 2U;
+    objects[0].reference_count = 2U;
+    objects[1].kind = BPLIST_WRITE_STRING;
+    objects[1].text = "streams";
+    objects[2].kind = BPLIST_WRITE_ARRAY;
+    objects[2].reference_count = (uint8_t)entry_count;
+
+    uint8_t count = 3U;
+    for (size_t i = 0U; i < entry_count; ++i) {
+        const airplay_bplist_stream_entry_t *entry = &entries[i];
+        if (entry->data_port == 0U) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+        uint8_t pairs = 2U; /* type, dataPort */
+        if (entry->control_port != 0U) ++pairs;
+        if (entry->has_connection_id) ++pairs;
+        if ((size_t)count + 1U + (size_t)pairs * 2U > BPLIST_WRITER_MAX_OBJECTS) {
+            return AIRPLAY_BPLIST_TOO_LARGE;
+        }
+
+        uint8_t dict_id = count++;
+        objects[2].references[i] = dict_id;
+        objects[dict_id].kind = BPLIST_WRITE_DICTIONARY;
+        objects[dict_id].reference_count = (uint8_t)(pairs * 2U);
+        const uint8_t key_id = (uint8_t)(dict_id + 1U);
+        const uint8_t value_id = (uint8_t)(dict_id + 1U + pairs);
+        for (uint8_t p = 0U; p < pairs; ++p) {
+            objects[dict_id].references[p] = (uint8_t)(key_id + p);
+            objects[dict_id].references[pairs + p] = (uint8_t)(value_id + p);
+        }
+
+        uint8_t p = 0U;
+        objects[key_id + p].kind = BPLIST_WRITE_STRING;
+        objects[key_id + p].text = "type";
+        objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
+        objects[value_id + p].number = entry->stream_type;
+        ++p;
+        objects[key_id + p].kind = BPLIST_WRITE_STRING;
+        objects[key_id + p].text = "dataPort";
+        objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
+        objects[value_id + p].number = entry->data_port;
+        ++p;
+        if (entry->control_port != 0U) {
+            objects[key_id + p].kind = BPLIST_WRITE_STRING;
+            objects[key_id + p].text = "controlPort";
+            objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
+            objects[value_id + p].number = entry->control_port;
+            ++p;
+        }
+        if (entry->has_connection_id) {
+            objects[key_id + p].kind = BPLIST_WRITE_STRING;
+            objects[key_id + p].text = "streamConnectionID";
+            objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
+            objects[value_id + p].number = entry->stream_connection_id;
+            ++p;
+        }
+        count = (uint8_t)(dict_id + 1U + pairs * 2U);
+    }
+
+    return build_setup_response(objects, count, output, output_capacity, output_len);
 }

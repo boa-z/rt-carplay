@@ -24,6 +24,11 @@ src = Glob('carplay_app.c')
 if GetDepend('RTCARPLAY_VIDEO'):
     src += Glob('video_sink_lubanlite.c')
 
+# The on-board audio path: decrypted AirPlay PCM -> "sound0" replay.  The
+# Kconfig also needs CONFIG_AIC_USING_AUDIO (which selects RT_USING_AUDIO).
+if GetDepend('RTCARPLAY_AUDIO'):
+    src += Glob('audio_sink_lubanlite.c')
+
 # Wireless iAP2 over the Zephyr RFCOMM transport (carplay_iap2 command).
 if GetDepend('RTCARPLAY_IAP2'):
     src += Glob('iap2_link_lubanlite.c')

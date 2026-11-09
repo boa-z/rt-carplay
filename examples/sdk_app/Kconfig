@@ -48,6 +48,21 @@ config RTCARPLAY_VIDEO
       counts screen frames).  Requires the VE (video engine) and DE (display
       engine) drivers.
 
+config RTCARPLAY_AUDIO
+    bool "Play the AirPlay audio stream"
+    default y
+    depends on RT_USING_AUDIO
+    help
+      Decrypt the AirPlay audio DataStream (ChaCha20-Poly1305), advertise the
+      PCM output capability in /info and feed the samples to the RT-Thread
+      "sound0" device (AIC internal codec) through its replay interface.
+      The codec is configured from the format the SETUP negotiates; the sink
+      only touches it when the first packet arrives.
+
+      Requires CONFIG_AIC_USING_AUDIO (which selects RT_USING_AUDIO) and the
+      board's PA/speaker wiring.  Without this option the receiver is
+      video-only and the controller starts no audio stream.
+
 # Library switches consumed by the rt-carplay SConscript.  Defined here only
 # for app mode; package mode defines them in the package Kconfig.
 

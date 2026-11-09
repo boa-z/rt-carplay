@@ -60,6 +60,62 @@ static const uint8_t k_unsupported_stream_setup_plist[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x39,
 };
 
+/* {"streams":[{"type":100,"streamConnectionID":777,"audioFormat":2048}]} */
+static const uint8_t k_audio_setup_plist[] = {
+    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
+    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd3, 0x04, 0x05,
+    0x06, 0x07, 0x08, 0x09, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12,
+    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63,
+    0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x5b, 0x61, 0x75, 0x64, 0x69, 0x6f,
+    0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x10, 0x64, 0x11, 0x03, 0x09, 0x11,
+    0x08, 0x00, 0x08, 0x0b, 0x13, 0x15, 0x1c, 0x21, 0x36, 0x42, 0x44, 0x47,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4a,
+};
+
+/* {"streams":[{"type":101,"streamConnectionID":778,"audioFormat":1024}]} */
+static const uint8_t k_audio_alt_setup_plist[] = {
+    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
+    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd3, 0x04, 0x05,
+    0x06, 0x07, 0x08, 0x09, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12,
+    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63,
+    0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x5b, 0x61, 0x75, 0x64, 0x69, 0x6f,
+    0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x10, 0x65, 0x11, 0x03, 0x0a, 0x11,
+    0x04, 0x00, 0x08, 0x0b, 0x13, 0x15, 0x1c, 0x21, 0x36, 0x42, 0x44, 0x47,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4a,
+};
+
+/* Screen (12345) plus main audio (779, 44.1 kHz stereo) in one SETUP. */
+static const uint8_t k_screen_and_audio_setup_plist[] = {
+    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
+    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa2, 0x03, 0x08, 0xd2, 0x04,
+    0x05, 0x06, 0x07, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12, 0x73,
+    0x74, 0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74,
+    0x69, 0x6f, 0x6e, 0x49, 0x44, 0x10, 0x6e, 0x11, 0x30, 0x39, 0xd3, 0x04,
+    0x05, 0x09, 0x0a, 0x0b, 0x0c, 0x5b, 0x61, 0x75, 0x64, 0x69, 0x6f, 0x46,
+    0x6f, 0x72, 0x6d, 0x61, 0x74, 0x10, 0x64, 0x11, 0x03, 0x0b, 0x11, 0x08,
+    0x00, 0x08, 0x0b, 0x13, 0x16, 0x1b, 0x20, 0x35, 0x37, 0x3a, 0x41, 0x4d,
+    0x4f, 0x52, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55,
+};
+
+/* {"streams":[{"type":100,"streamConnectionID":777}]}: audioFormat is absent. */
+static const uint8_t k_audio_missing_format_plist[] = {
+    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
+    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd2, 0x04, 0x05,
+    0x06, 0x07, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12, 0x73, 0x74,
+    0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69,
+    0x6f, 0x6e, 0x49, 0x44, 0x10, 0x64, 0x11, 0x03, 0x09, 0x08, 0x0b, 0x13,
+    0x15, 0x1a, 0x1f, 0x34, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x39,
+};
+
 typedef struct {
     unsigned event_starts;
     unsigned timing_starts;
@@ -67,7 +123,12 @@ typedef struct {
     unsigned timing_stops;
     unsigned screen_starts;
     unsigned screen_stops;
+    unsigned audio_starts;
+    unsigned audio_stops;
     uint64_t last_screen_connection_id;
+    uint16_t last_audio_type;
+    uint64_t last_audio_connection_id;
+    uint64_t last_audio_format_bits;
     uint16_t requested_timing_port;
 } test_ports_t;
 
@@ -171,6 +232,31 @@ static void test_stop_screen(void *context)
 {
     test_ports_t *ports = context;
     ports->screen_stops++;
+}
+
+static bool test_start_audio(const airplay_rtsp_pairing_t *pairing,
+                             uint16_t stream_type,
+                             uint64_t stream_connection_id,
+                             uint64_t audio_format_bits,
+                             uint16_t *data_port, uint16_t *control_port,
+                             void *context)
+{
+    (void)pairing;
+    test_ports_t *ports = context;
+    ports->audio_starts++;
+    ports->last_audio_type = stream_type;
+    ports->last_audio_connection_id = stream_connection_id;
+    ports->last_audio_format_bits = audio_format_bits;
+    *data_port = (uint16_t)(41000U + stream_type * 2U);
+    *control_port = (uint16_t)(41001U + stream_type * 2U);
+    return true;
+}
+
+static void test_stop_audio(uint16_t stream_type, void *context)
+{
+    test_ports_t *ports = context;
+    ports->audio_stops++;
+    ports->last_audio_type = stream_type;
 }
 
 static airplay_rtsp_request_t parse_request(const char *wire)
@@ -552,11 +638,223 @@ static void test_screen_key_lifecycle(void)
     assert(ports.event_stops == 1U && ports.timing_stops == 1U);
 }
 
+static void expect_stream_entry(const airplay_bplist_doc_t *doc,
+                                airplay_bplist_object_t streams, uint64_t index,
+                                uint64_t type, uint64_t data_port,
+                                uint64_t control_port, uint64_t connection_id)
+{
+    airplay_bplist_object_t entry;
+    airplay_bplist_object_t value;
+    uint64_t number = 0U;
+    assert(airplay_bplist_array_get(doc, streams, index, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(doc, entry, "type", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == type);
+    assert(airplay_bplist_dict_get(doc, entry, "dataPort", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == data_port);
+    if (control_port == 0U) {
+        assert(airplay_bplist_dict_get(doc, entry, "controlPort", &value) ==
+               AIRPLAY_BPLIST_NOT_FOUND);
+        return;
+    }
+    assert(airplay_bplist_dict_get(doc, entry, "controlPort", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == control_port);
+    assert(airplay_bplist_dict_get(doc, entry, "streamConnectionID", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == connection_id);
+}
+
+static void test_audio_stream_lifecycle(void)
+{
+    static const uint8_t identifier[] = "test-accessory";
+    static const uint8_t public_key[32] = {0};
+    test_ports_t ports = {0};
+    airplay_rtsp_session_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.pairing.pair_setup.pairing_code = "external-test-code";
+    config.pairing.pair_setup.accessory_identifier = identifier;
+    config.pairing.pair_setup.accessory_identifier_len = sizeof(identifier) - 1U;
+    config.pairing.pair_setup.accessory_public_key = public_key;
+    config.pairing.pair_setup.random = test_random;
+    config.pairing.pair_setup.sign_accessory = test_sign;
+    config.pairing.pair_setup.verify_controller = test_verify;
+    config.pairing.pair_setup.save_pairing = test_save;
+    config.pairing.pair_verify.accessory_identifier = identifier;
+    config.pairing.pair_verify.accessory_identifier_len = sizeof(identifier) - 1U;
+    config.pairing.pair_verify.random = test_random;
+    config.pairing.pair_verify.sign_accessory = test_sign;
+    config.pairing.pair_verify.verify_controller = test_verify;
+    config.pairing.pair_verify.lookup_controller = test_lookup;
+    config.info_plist = k_setup_plist;
+    config.info_plist_len = sizeof(k_setup_plist);
+    config.start_event = test_start_event;
+    config.start_timing = test_start_timing;
+    config.start_screen = test_start_screen;
+    config.start_audio = test_start_audio;
+    config.stop_event = test_stop_event;
+    config.stop_timing = test_stop_timing;
+    config.stop_screen = test_stop_screen;
+    config.stop_audio = test_stop_audio;
+    config.media_context = &ports;
+
+    airplay_rtsp_session_t *session = NULL;
+    assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_OK);
+    uint8_t response[AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES];
+    size_t response_len = 0U;
+    bool enable_cipher = false;
+
+    airplay_rtsp_request_t request = parse_request(
+        "SETUP /stream RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+    request.body = k_initial_setup_plist;
+    request.body_len = sizeof(k_initial_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+
+    /* A single audio stream SETUP answers with both ports and the ID. */
+    request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 2\r\n\r\n");
+    request.body = k_audio_setup_plist;
+    request.body_len = sizeof(k_audio_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(ports.audio_starts == 1U);
+    assert(ports.last_audio_type == 100U);
+    assert(ports.last_audio_connection_id == 777U);
+    assert(ports.last_audio_format_bits == 2048U);
+    assert(ports.screen_starts == 0U);
+    const uint8_t *plist = find_bytes(response, response_len, "bplist00");
+    assert(plist != NULL);
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    airplay_bplist_object_t streams;
+    airplay_bplist_type_t type;
+    uint64_t count = 0U;
+    assert(airplay_bplist_open(plist, response_len - (size_t)(plist - response),
+                               &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "streams", &streams) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_type(&doc, streams, &type, &count) ==
+           AIRPLAY_BPLIST_OK);
+    assert(type == AIRPLAY_BPLIST_ARRAY && count == 1U);
+    expect_stream_entry(&doc, streams, 0U, 100U, 41200U, 41201U, 777U);
+
+    /* Repeating the same SETUP reuses the running stream. */
+    request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 3\r\n\r\n");
+    request.body = k_audio_setup_plist;
+    request.body_len = sizeof(k_audio_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(ports.audio_starts == 1U && ports.audio_stops == 0U);
+
+    /* audioFormat is mandatory for an audio stream. */
+    request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 4\r\n\r\n");
+    request.body = k_audio_missing_format_plist;
+    request.body_len = sizeof(k_audio_missing_format_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "400 Bad Request"));
+    assert(ports.audio_starts == 1U);
+
+    /* Audio-only TEARDOWN leaves event and timing running. */
+    request = parse_request("TEARDOWN /stream RTSP/1.0\r\nCSeq: 5\r\n\r\n");
+    request.body = k_audio_setup_plist;
+    request.body_len = sizeof(k_audio_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(ports.audio_stops == 1U);
+    assert(ports.event_stops == 0U && ports.timing_stops == 0U);
+    assert(ports.screen_stops == 0U);
+
+    /* The torn-down connection ID may not be reused for a new key. */
+    request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 6\r\n\r\n");
+    request.body = k_audio_setup_plist;
+    request.body_len = sizeof(k_audio_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "503 Service Unavailable"));
+    assert(ports.audio_starts == 1U);
+
+    /* The alternate stream uses its own slot. */
+    request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 7\r\n\r\n");
+    request.body = k_audio_alt_setup_plist;
+    request.body_len = sizeof(k_audio_alt_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(ports.audio_starts == 2U);
+    assert(ports.last_audio_type == 101U);
+    assert(ports.last_audio_format_bits == 1024U);
+    plist = find_bytes(response, response_len, "bplist00");
+    assert(plist != NULL);
+    assert(airplay_bplist_open(plist, response_len - (size_t)(plist - response),
+                               &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "streams", &streams) ==
+           AIRPLAY_BPLIST_OK);
+    expect_stream_entry(&doc, streams, 0U, 101U, 41202U, 41203U, 778U);
+
+    /* Screen and audio can be accepted in one SETUP. */
+    request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 8\r\n\r\n");
+    request.body = k_screen_and_audio_setup_plist;
+    request.body_len = sizeof(k_screen_and_audio_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(response, response_len, "200 OK"));
+    assert(ports.screen_starts == 1U && ports.last_screen_connection_id == 12345U);
+    assert(ports.audio_starts == 3U && ports.last_audio_connection_id == 779U);
+    plist = find_bytes(response, response_len, "bplist00");
+    assert(plist != NULL);
+    assert(airplay_bplist_open(plist, response_len - (size_t)(plist - response),
+                               &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "streams", &streams) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_type(&doc, streams, &type, &count) ==
+           AIRPLAY_BPLIST_OK);
+    assert(type == AIRPLAY_BPLIST_ARRAY && count == 2U);
+    expect_stream_entry(&doc, streams, 0U, 110U, 49154U, 0U, 0U);
+    expect_stream_entry(&doc, streams, 1U, 100U, 41200U, 41201U, 779U);
+
+    /* Selecting audio by type stops the main stream but not the alt stream,
+     * the screen, or the transport endpoints. */
+    request = parse_request("TEARDOWN /stream RTSP/1.0\r\nCSeq: 9\r\n\r\n");
+    request.body = k_audio_setup_plist;
+    request.body_len = sizeof(k_audio_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(ports.audio_stops == 2U);
+    assert(ports.screen_stops == 0U);
+    assert(ports.event_stops == 0U && ports.timing_stops == 0U);
+
+    request = parse_request("TEARDOWN /stream RTSP/1.0\r\nCSeq: 10\r\n\r\n");
+    request.body = k_setup_plist;
+    request.body_len = sizeof(k_setup_plist);
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
+                                       &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(ports.screen_stops == 1U);
+    assert(ports.audio_stops == 2U);
+
+    airplay_rtsp_session_destroy(session);
+    assert(ports.audio_stops == 3U); /* the alt stream */
+}
+
 int main(void)
 {
     test_info_and_setup_gates();
     test_initial_setup_timing_and_event_ports();
     test_screen_key_lifecycle();
+    test_audio_stream_lifecycle();
     puts("airplay RTSP session host test passed (copy/borrow, RECORD before Screen SETUP, teardown gate, test-only signer)");
     return 0;
 }

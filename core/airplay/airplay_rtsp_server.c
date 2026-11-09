@@ -61,6 +61,7 @@ struct airplay_rtsp_server {
     airplay_event_port_t *event_port;
     airplay_timing_port_t *timing_port;
     airplay_screen_server_t *screen_server;
+    airplay_audio_stream_t *audio[AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
     bool event_connected;
     bool event_key_used;
     bool event_failed;
@@ -71,6 +72,7 @@ struct airplay_rtsp_server {
 static void server_stop_event(void *context);
 static void server_stop_timing(void *context);
 static void server_stop_screen(void *context);
+static void server_stop_audio(uint16_t stream_type, void *context);
 
 /* ------------------------------------------------------------------ */
 /* Media endpoints                                                     */
@@ -273,6 +275,104 @@ static void server_stop_screen(void *context)
     airplay_screen_server_t *screen_server = server->screen_server;
     server->screen_server = NULL;
     airplay_screen_server_stop(screen_server, server->net);
+}
+
+/* stream types 100/101/102 map to slots 0/1/2 */
+static int server_audio_slot(uint16_t stream_type)
+{
+    switch (stream_type) {
+    case AIRPLAY_AUDIO_STREAM_MAIN: return 0;
+    case AIRPLAY_AUDIO_STREAM_ALT: return 1;
+    case AIRPLAY_AUDIO_STREAM_HIGH: return 2;
+    default: return -1;
+    }
+}
+
+static int server_audio_pcm(uint16_t stream_type, const uint8_t *data,
+                            size_t len, const airplay_audio_format_t *format,
+                            uint32_t rtp_timestamp, uint64_t arrival_us,
+                            void *context)
+{
+    airplay_rtsp_server_t *server = context;
+    if (server == NULL || server->config.on_audio_pcm == NULL) return RTCP_OK;
+    return server->config.on_audio_pcm(stream_type, data, len, format,
+                                       rtp_timestamp, arrival_us,
+                                       server->config.audio_pcm_context);
+}
+
+static bool server_start_audio(const airplay_rtsp_pairing_t *pairing,
+                               uint16_t stream_type,
+                               uint64_t stream_connection_id,
+                               uint64_t audio_format_bits,
+                               uint16_t *data_port,
+                               uint16_t *control_port,
+                               void *context)
+{
+    airplay_rtsp_server_t *server = context;
+    if (server == NULL || data_port == NULL || control_port == NULL) return false;
+    int slot = server_audio_slot(stream_type);
+    if (slot < 0) return false;
+    if (server->audio[slot] != NULL) {
+        *data_port = airplay_audio_stream_get_data_port(server->audio[slot]);
+        *control_port = airplay_audio_stream_get_control_port(server->audio[slot]);
+        return *data_port != 0U && *control_port != 0U;
+    }
+    if (server->config.on_audio_pcm == NULL) {
+        RTCP_LOGW(TAG, "audio_setup=rejected reason=no_pcm_sink type=%u",
+                  (unsigned)stream_type);
+        return false;
+    }
+
+    uint8_t output_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES];
+    if (airplay_rtsp_pairing_derive_output_key(pairing, stream_connection_id,
+                                               output_key) !=
+        AIRPLAY_PAIR_VERIFY_OK) {
+        mbedtls_platform_zeroize(output_key, sizeof(output_key));
+        RTCP_LOGE(TAG, "audio_setup=key_derivation_failed connection_id=%llu",
+                  (unsigned long long)stream_connection_id);
+        return false;
+    }
+
+    airplay_audio_stream_config_t config;
+    memset(&config, 0, sizeof(config));
+    memcpy(config.output_key, output_key, sizeof(config.output_key));
+    config.stream_type = stream_type;
+    config.audio_format_bits = audio_format_bits;
+    config.on_pcm = server_audio_pcm;
+    config.context = server;
+    int result = airplay_audio_stream_start(server->os, server->net, &config,
+                                            &server->audio[slot]);
+    mbedtls_platform_zeroize(output_key, sizeof(output_key));
+    mbedtls_platform_zeroize(&config, sizeof(config));
+    if (result != RTCP_OK) {
+        RTCP_LOGE(TAG, "audio_setup=listener_failed type=%u rc=%d",
+                  (unsigned)stream_type, result);
+        server->audio[slot] = NULL;
+        return false;
+    }
+    *data_port = airplay_audio_stream_get_data_port(server->audio[slot]);
+    *control_port = airplay_audio_stream_get_control_port(server->audio[slot]);
+    if (*data_port == 0U || *control_port == 0U) {
+        server_stop_audio(stream_type, server);
+        return false;
+    }
+    RTCP_LOGI(TAG, "audio_setup=ready type=%u data_port=%u control_port=%u "
+                   "connection_id=%llu",
+              (unsigned)stream_type, (unsigned)*data_port,
+              (unsigned)*control_port,
+              (unsigned long long)stream_connection_id);
+    return true;
+}
+
+static void server_stop_audio(uint16_t stream_type, void *context)
+{
+    airplay_rtsp_server_t *server = context;
+    if (server == NULL) return;
+    int slot = server_audio_slot(stream_type);
+    if (slot < 0 || server->audio[slot] == NULL) return;
+    airplay_audio_stream_t *stream = server->audio[slot];
+    server->audio[slot] = NULL;
+    airplay_audio_stream_stop(stream, server->net);
 }
 
 /* ------------------------------------------------------------------ */
@@ -500,9 +600,11 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.start_screen = server_start_screen;
     session_config.start_event = server_start_event;
     session_config.start_timing = server_start_timing;
+    session_config.start_audio = server_start_audio;
     session_config.stop_screen = server_stop_screen;
     session_config.stop_event = server_stop_event;
     session_config.stop_timing = server_stop_timing;
+    session_config.stop_audio = server_stop_audio;
     session_config.media_context = server;
 
     if (airplay_rtsp_session_create_borrowing_info_plist(
@@ -649,12 +751,18 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
     int rtsp_fd = server->client_fd >= 0 ? server->client_fd
                                          : server->listener_fd;
 
-    struct rtcp_pollfd fds[4];
+    struct rtcp_pollfd fds[4 + 2 * AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
     int count = 0;
     int rtsp_index = -1;
     int event_index = -1;
     int timing_index = -1;
     int screen_index = -1;
+    int audio_data_index[AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
+    int audio_control_index[AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
+    for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
+        audio_data_index[slot] = -1;
+        audio_control_index[slot] = -1;
+    }
     if (rtsp_fd >= 0) {
         rtsp_index = count;
         fds[count].fd = rtsp_fd;
@@ -683,6 +791,26 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         fds[count].revents = 0;
         ++count;
     }
+    for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
+        airplay_audio_stream_t *stream = server->audio[slot];
+        if (stream == NULL) continue;
+        int data_fd = airplay_audio_stream_get_data_fd(stream);
+        int control_fd = airplay_audio_stream_get_control_fd(stream);
+        if (data_fd >= 0) {
+            audio_data_index[slot] = count;
+            fds[count].fd = data_fd;
+            fds[count].events = RTCP_POLLIN;
+            fds[count].revents = 0;
+            ++count;
+        }
+        if (control_fd >= 0) {
+            audio_control_index[slot] = count;
+            fds[count].fd = control_fd;
+            fds[count].events = RTCP_POLLIN;
+            fds[count].revents = 0;
+            ++count;
+        }
+    }
 
     int ready = count == 0 ? 0 : server->net->poll(fds, count, timeout_ms);
     if (ready < 0) {
@@ -702,6 +830,17 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
     }
     if (screen_index >= 0 && (fds[screen_index].revents & RTCP_POLLIN) != 0) {
         airplay_screen_server_poll(server->screen_server);
+    }
+    for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
+        if (server->audio[slot] == NULL) continue;
+        bool data_readable = audio_data_index[slot] >= 0 &&
+            (fds[audio_data_index[slot]].revents & RTCP_POLLIN) != 0;
+        bool control_readable = audio_control_index[slot] >= 0 &&
+            (fds[audio_control_index[slot]].revents & RTCP_POLLIN) != 0;
+        if (data_readable || control_readable) {
+            airplay_audio_stream_poll(server->audio[slot], data_readable,
+                                      control_readable);
+        }
     }
 
     if (rtsp_index >= 0 && (fds[rtsp_index].revents != 0)) {
@@ -723,6 +862,11 @@ void airplay_rtsp_server_stop(airplay_rtsp_server_t *server)
     if (server == NULL) return;
     server->stopping = true;
     server_teardown_connection(server, "server_stop");
+    for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
+        if (server->audio[slot] != NULL) {
+            server_stop_audio((uint16_t)(AIRPLAY_AUDIO_STREAM_MAIN + slot), server);
+        }
+    }
     if (server->listener_fd >= 0) {
         server->net->close(server->listener_fd);
         server->listener_fd = -1;

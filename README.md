@@ -25,11 +25,13 @@ this repo yet.
   Pair-Setup/Pair-Verify/SRP-6a, the MFiSAP responder, the `/info` binary
   plist writer and the RTSP session (info, SETUP, RECORD, teardown), and
   persistent pairing storage.  On top of those sit the poll-driven
-  endpoints — ControlCipher event channel, UDP timing, Screen DataStream —
-  and `airplay_rtsp_server`, a single-controller RTSP server that owns the
-  listener, the ControlCipher transition after Pair-Verify, the media
-  endpoints the session asks for and HID report output over the event
-  channel (the touch-input path).
+  endpoints — ControlCipher event channel, UDP timing, Screen DataStream and
+  the audio DataStreams (types 100/101/102: HKDF-SHA512 output key,
+  ChaCha20-Poly1305 RTP datagrams, 12-byte header + 16-byte tag + 8-byte
+  nonce tail) — and `airplay_rtsp_server`, a single-controller RTSP server
+  that owns the listener, the ControlCipher transition after Pair-Verify,
+  the media endpoints the session asks for and HID report output over the
+  event channel (the touch-input path).
 - `core/crypto/` — Ed25519 key/sign/verify wrapper over the vendored
   orlp/ed25519 (zlib), the software identity for Pair-Setup/Pair-Verify.
 - `third_party/ed25519/` — unmodified orlp/ed25519 sources and its LICENSE.
@@ -54,7 +56,9 @@ this repo yet.
   Screen dump) described under “Linux simulator”.
 - `examples/rtthread_app/` — the RT-Thread/Luban-Lite receiver application
   (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch), with an
-  on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), the
+  on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), an
+  AirPlay PCM -> `sound0` audio sink (`audio_sink_lubanlite.c`: ring buffer
+  plus writer thread, lazy codec configure), the
   `carplay_bt` RFCOMM bring-up command, the `carplay_iap2` wireless iAP2
   session pump (`iap2_link_lubanlite.c`: identification, Wi-Fi config,
   CarPlay invite over the same transport) and its MSH commands;
@@ -63,8 +67,9 @@ this repo yet.
 - `tests/` — fake-bus MFi test plus host unit tests, all compiled with
   ASan/UBSan.  The end-to-end test runs a real controller implementation
   against `airplay_rtsp_server` on loopback: SRP-6a Pair-Setup, X25519
-  Pair-Verify, the ControlCipher transition, SETUP/RECORD and encrypted
-  Screen DataStream frames.
+  Pair-Verify, the ControlCipher transition, SETUP/RECORD, encrypted Screen
+  DataStream frames and an encrypted audio DataStream packet (HKDF output
+  key, ChaCha20-Poly1305 RTP, PCM verified by the sink callback).
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.
 
 ## Build and test
@@ -96,8 +101,9 @@ ctest --test-dir build --output-on-failure
 `build/rt-carplay-sim` is an end-to-end bench built by `make`: it advertises
 `_airplay._tcp` over mDNS and serves the AirPlay RTSP endpoint with a
 software Ed25519 identity.  A controller on the same LAN can pair and send
-its Screen DataStream; the H.264 payload is written as an Annex-B dump.
-There is no video or audio sink.
+its Screen and audio DataStreams; the H.264 payload is written as an Annex-B
+dump and the decrypted audio PCM is counted and discarded (there is no
+playback device on the host).
 
 ```sh
 ./build/rt-carplay-sim --ip 192.168.1.20 \
@@ -105,15 +111,21 @@ There is no video or audio sink.
     --dump-h264 ./screen.h264
 ```
 
-`--name`, `--model`, `--device-id`, `--pair-code`, `--port`, `--no-dump`
-and `--help` are also available.  The identity seed is generated on first
+`--name`, `--model`, `--device-id`, `--pair-code`, `--port`, `--no-dump`,
+`--no-audio` and `--help` are also available.  Audio is advertised in
+`/info` by default; `--no-audio` leaves the receiver video-only.  The identity seed is generated on first
 run (mode 0600); delete it to rotate the accessory key.  The pairing PIN is
 static (`3939`) because this is a protocol bench, not a product, and the
 process stays in the foreground until Ctrl-C.
 
 Verified on the host: mDNS discovery (`PTR`/`SRV`/`TXT`/`A` for
-`_airplay._tcp.local`) and `GET /info` returning the binary plist.  Pairing
-and Screen streaming still need a real controller.
+`_airplay._tcp.local`) and `GET /info` returning the binary plist.  With
+audio enabled the served document is 4153 bytes, feature mask
+`0x615653aee2`, with 8 `audioFormats` and 9 `audioLatencies` entries (checked
+by decoding the socket response with Python plistlib).  The socket-level test
+suite also streams an encrypted audio RTP packet through the real server and
+checks the decrypted PCM.  Pairing with a physical controller still needs the
+hardware.
 
 ## License
 

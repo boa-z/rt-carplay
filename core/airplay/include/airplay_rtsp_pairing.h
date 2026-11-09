@@ -47,6 +47,14 @@ airplay_pair_verify_result_t airplay_rtsp_pairing_get_event_keys(
     const airplay_rtsp_pairing_t *session,
     airplay_pair_verify_event_keys_t *out_keys);
 
+/* Derives the per-DataStream output key from the Pair-Verify shared secret
+ * and the SETUP streamConnectionID.  The derivation is identical for screen
+ * and audio streams; the names mirror the call sites. */
+airplay_pair_verify_result_t airplay_rtsp_pairing_derive_output_key(
+    const airplay_rtsp_pairing_t *session,
+    uint64_t stream_connection_id,
+    uint8_t output_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES]);
+
 airplay_pair_verify_result_t airplay_rtsp_pairing_derive_screen_output_key(
     const airplay_rtsp_pairing_t *session,
     uint64_t stream_connection_id,

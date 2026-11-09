@@ -12,6 +12,7 @@ stay in `core/` and `port/`.
 | Wi-Fi | SoftAP from the config, then the Apple vendor IE, then DHCP |
 | Discovery | `_airplay._tcp` via `mdns_responder` (TXT from `airplay_txt_build`) |
 | AirPlay | `airplay_rtsp_server` on port 7000 with the `/info` plist |
+| Audio | decrypted PCM -> ring buffer -> `sound0` writer thread (RTCARPLAY_AUDIO) |
 | Input | `carplay_touch` queues events; the poll thread sends HID reports |
 
 The pairing PIN is generated from the CE TRNG at each start and printed on
@@ -47,7 +48,12 @@ CONFIG_AIC_USING_CE=y          # CE TRNG for the identity and pairing PIN
 CONFIG_LWIP_USING_DHCPD=y
 CONFIG_RT_USING_WIFI=y
 CONFIG_RT_USING_NETDEV=y
+CONFIG_AIC_USING_AUDIO=y       # selects RT_USING_AUDIO; registers "sound0"
+CONFIG_RTCARPLAY_AUDIO=y       # default on when RT_USING_AUDIO is set
 ```
+
+`CONFIG_AIC_AUDIO_EN_PIN_LOW`/`_HIGH` and the SPK choice belong to the board
+target; demo128-nand-carplay uses `AIC_AUDIO_EN_PIN_LOW` with `AIC_AUDIO_SPK_1`.
 
 Bluetooth (wireless iAP2 transport, optional for the AirPlay receiver):
 
@@ -71,7 +77,7 @@ the duplicate include.
 
 ```
 carplay_start                 # bring the receiver up, prints the PIN
-carplay_status                # running/stopped, display size, PIN
+carplay_status                # running/stopped, display size, PIN, audio counters
 carplay_touch down 640 240    # inject touch in display pixels
 carplay_touch move 700 260
 carplay_touch up 700 260
@@ -125,6 +131,35 @@ headless and only counts frames.
 Known bring-up notes: video memory comes from the VE/DE pools, so the frame
 count in use depends on the controller's H.264 profile; the first hardware
 run should watch `[carplay-vid]` messages for decoder resets and errors.
+
+## Audio output
+
+With `CONFIG_RTCARPLAY_AUDIO=y` (default when `RT_USING_AUDIO` is on) the
+application wires `airplay_rtsp_server_config.on_audio_pcm` to
+`audio_sink_lubanlite.c` and advertises PCM audio in `/info` (feature bits
+plus the `audioFormats`/`audioLatencies` arrays).  The RTSP session accepts
+audio stream types 100/101/102 in SETUP, derives the per-stream key with
+HKDF-SHA512 and decrypts the ChaCha20-Poly1305 RTP datagrams.
+
+The sink has two threads by design:
+
+- the AirPlay poll thread only copies each decrypted packet into a 64 KB ring
+  and wakes the writer -- it never blocks on the codec;
+- the writer thread owns `sound0`: on the first packet it issues
+  `AUDIO_CTL_CONFIGURE` (output, negotiated rate/channels, 16-bit),
+  `AUDIO_CTL_START` with `AUDIO_STREAM_REPLAY`, waits 200 ms for the power
+  amplifier (aplay's value) and then feeds `rt_device_write()`.  A later SETUP
+  that negotiates another rate/channels reconfigures the codec in place.
+
+If the ring overflows (codec stall), whole packets are dropped and counted;
+`carplay_status` prints packets, replay starts, dropped bytes and write
+errors.  When `sound0` is missing the application logs
+`audio sink unavailable` and continues video-only -- `/info` then does not
+advertise audio, so a controller starts no audio stream.
+
+`airplay_audio_pcm_cb_t` delivers signed 16-bit little-endian interleaved
+PCM.  Opus and AAC are not advertised and are rejected at SETUP, so the
+sender always negotiates LPCM.
 
 ## Bluetooth transport and wireless iAP2
 
@@ -218,8 +253,21 @@ path is independent of MFi.
   board should log `I/mfi: 2.0C at i2c0 0x6a: id=0x00000200 ...` and
   `MFi certificate sent`, followed by `MFi authenticated` when a phone
   connects.
+- **Audio (2026-11-08)**: the audio DataStream is host-verified end to end.
+  `test_airplay_audio_stream` covers the format table, start validation,
+  decrypting a real ChaCha20-Poly1305 datagram, rejecting tampered/short
+  datagrams and draining the control port; `test_airplay_rtsp_session` covers
+  multi-stream SETUP (screen+audio in one request, alt stream, key reuse 503,
+  audio-only TEARDOWN); the socket-level pairing test now sends an encrypted
+  audio RTP packet through the real server and checks the decrypted PCM and
+  format.  The SDK build links `carplay_audio_sink_start/pcm/stop/stats`,
+  `airplay_audio_stream_start/poll/stop`, `sound0` and `RT_USING_AUDIO`
+  (image 4,026,880 bytes, zero warnings).  Build-only: the codec has not
+  played a sample; the first board run with a controller should log
+  `[carplay-aud] playback <rate> Hz <ch> ch 16-bit` and `carplay_status`
+  should show growing packet counters.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input, the CE TRNG unit assignment, the Bluetooth
-  H5/RFCOMM path, the MFi exchange with a real phone and the iAP2 session all
-  need the hardware run.  Treat the first boot as a bring-up session and
-  watch the console log.
+  H5/RFCOMM path, the MFi exchange with a real phone, the iAP2 session and
+  audio playback all need the hardware run.  Treat the first boot as a
+  bring-up session and watch the console log.

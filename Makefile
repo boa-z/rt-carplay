@@ -35,7 +35,8 @@ TESTS := test_mfi2c \
          test_iap2_parameter test_iap2_session \
          test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
          test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist \
-         test_airplay_control_stream test_airplay_screen_stream test_airplay_mfi_sap \
+         test_airplay_control_stream test_airplay_screen_stream \
+         test_airplay_audio_stream test_airplay_mfi_sap \
          test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify \
          test_airplay_rtsp_pairing test_airplay_rtsp_session \
          test_airplay_pairing_store \
@@ -49,7 +50,8 @@ TESTS := test_mfi2c \
 # These tests drive the poll seams through the POSIX port.
 PORT_TESTS := test_airplay_control_port test_airplay_timing_port \
               test_airplay_event_port test_airplay_screen_server \
-              test_airplay_rtsp_server test_airplay_pairing_e2e
+              test_airplay_audio_stream test_airplay_rtsp_server \
+              test_airplay_pairing_e2e
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 

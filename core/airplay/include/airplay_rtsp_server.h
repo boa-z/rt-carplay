@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "airplay_audio.h"
 #include "airplay_rtsp_session.h"
 #include "airplay_screen.h"
 #include "rtcp/net.h"
@@ -12,6 +13,7 @@
 
 #define AIRPLAY_RTSP_DEFAULT_PORT 7000U
 #define AIRPLAY_RTSP_SERVER_SCREEN_MAX_BODY_BYTES (512U * 1024U)
+#define AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS 3U
 
 /*
  * Single-controller AirPlay RTSP server.  It owns the listening socket, the
@@ -44,6 +46,11 @@ typedef struct {
     /* Decoded Screen frames (Annex-B H.264, borrowed until return). */
     airplay_screen_message_cb_t on_screen_message;
     void *screen_message_context;
+
+    /* Decrypted LPCM audio (little-endian int16, borrowed until return).
+     * NULL disables audio: audio SETUPs are then refused. */
+    airplay_audio_pcm_cb_t on_audio_pcm;
+    void *audio_pcm_context;
 
     /* Event-channel connect/disconnect notifications. */
     airplay_rtsp_event_state_cb_t on_event_state;

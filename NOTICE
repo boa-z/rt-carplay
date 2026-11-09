@@ -28,6 +28,20 @@ Third-party protocol code currently included:
   contributors).  The original notices are retained at the top of every
   ported file.
 
+- The AirPlay audio receive path (`core/airplay/airplay_audio_stream.c`, the
+  audio declarations in `core/airplay/airplay_info_plist.c` and the
+  `airplay_audio.h` interface) is a C translation of the GPL-3.0
+  `youcci/playport` project (Kotlin: `AudioStream.kt`, `AirPlayInfoPlist.kt`,
+  `AirPlaySession.kt`, `CarPlayMediaEngine.kt`, `web/src/audio.ts`), used
+  with attribution under the same license.  The reproduced behaviour: audio
+  stream types 100/101/102, the `DataStream-Salt<id>` HKDF-SHA512 output
+  key, the RTP layout (12-byte header + ChaCha20-Poly1305 ciphertext +
+  16-byte tag + 8-byte little-endian nonce tail, AAD = header bytes 4..12),
+  the int16 little-endian PCM payload and the `audioFormats` /
+  `audioLatencies` /info declarations.  playport ships no per-file copyright
+  header; the upstream repository and its GPL-3.0 license are the attribution
+  reference.
+
 When further modules are ported, keep their notices here and in the source
 files.  In particular:
 

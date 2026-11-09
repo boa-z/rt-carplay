@@ -11,10 +11,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIRPLAY_INFO_PLIST_MAX_BYTES 4096U
+#define AIRPLAY_INFO_PLIST_MAX_BYTES 6144U
 
 /* DiPlay CarPlay feature mask with audio-output bits cleared (no audio sink). */
 #define AIRPLAY_INFO_DEFAULT_FEATURES 0x615203a4e2ULL
+/* The audio-output capability bits reported by the CarPlay senders. */
+#define AIRPLAY_INFO_AUDIO_FEATURES 0x4500a00ULL
+#define AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO \
+    (AIRPLAY_INFO_DEFAULT_FEATURES | AIRPLAY_INFO_AUDIO_FEATURES)
 #define AIRPLAY_INFO_DEFAULT_STATUS_FLAGS 4U
 #define AIRPLAY_INFO_DEFAULT_SOURCE_VERSION "950.7.1"
 #define AIRPLAY_INFO_DEFAULT_MODEL "ArtInChip"
@@ -35,6 +39,11 @@ typedef struct {
     uint16_t height_physical_mm;/* 0 defaults to 120. */
     uint8_t max_fps;            /* 0 defaults to 10. */
     bool right_hand_drive;
+    /* Advertise the PCM audio sink.  Sets the audio feature bits and emits
+     * audioFormats/audioLatencies; leave false when no audio device exists,
+     * otherwise the sender opens a stream nobody consumes. */
+    bool audio_output;
+    uint32_t audio_sample_rate; /* 0 defaults to 44100; 48000 selects 48 kHz. */
 } airplay_info_plist_config_t;
 
 /*

@@ -5,8 +5,10 @@
  *
  * It advertises _airplay._tcp over mDNS and serves the AirPlay RTSP endpoint
  * with a software Ed25519 identity, so a controller on the same LAN can
- * pair and stream its Screen DataStream.  Decoded H.264 is written to an
- * Annex-B dump when --dump-h264 is supplied; there is no video/audio sink.
+ * pair and stream its Screen and audio DataStreams.  Decoded H.264 is
+ * written to an Annex-B dump when --dump-h264 is supplied; decrypted PCM is
+ * counted and discarded.  Audio is advertised in /info unless --no-audio is
+ * given; there is no video/audio output device.
  *
  * This is a protocol bench, not a product: the pairing code is static and
  * the process must stay in the foreground.
@@ -56,6 +58,8 @@ typedef struct {
     FILE *h264;
     unsigned frames;
     unsigned video_bytes;
+    unsigned audio_packets;
+    unsigned audio_bytes;
 } sim_t;
 
 static volatile sig_atomic_t g_stop;
@@ -79,7 +83,8 @@ static void usage(const char *program)
             "  --seed-file PATH     Ed25519 seed (default \"%s\")\n"
             "  --pairing-store PATH controller table (default \"%s\")\n"
             "  --dump-h264 PATH     write the Screen stream (default \"%s\")\n"
-            "  --no-dump            do not write H.264\n",
+            "  --no-dump            do not write H.264\n"
+            "  --no-audio           do not advertise or accept audio\n",
             program, DEFAULT_NAME, DEFAULT_MODEL, DEFAULT_DEVICE_ID,
             DEFAULT_PAIR_CODE, (unsigned)AIRPLAY_RTSP_DEFAULT_PORT,
             DEFAULT_SEED_FILE, DEFAULT_PAIRING_STORE, DEFAULT_DUMP_FILE);
@@ -253,6 +258,34 @@ static int on_screen_message(airplay_screen_message_type_t type,
     return RTCP_OK;
 }
 
+/* Audio bench sink: decrypt, count, discard.  A real receiver hands the PCM
+ * to its codec; here the point is proving the DataStream path end to end. */
+static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
+                        const airplay_audio_format_t *format,
+                        uint32_t rtp_timestamp, uint64_t arrival_us,
+                        void *context)
+{
+    (void)data;
+    (void)rtp_timestamp;
+    (void)arrival_us;
+    sim_t *sim = context;
+    if (format == NULL) return RTCP_EINVAL;
+    if (sim->audio_packets == 0U) {
+        fprintf(stderr,
+                "audio: stream %u, %u Hz, %u channel(s), first packet %u "
+                "bytes\n",
+                (unsigned)stream_type, (unsigned)format->sample_rate,
+                (unsigned)format->channels, (unsigned)len);
+    }
+    ++sim->audio_packets;
+    sim->audio_bytes += (unsigned)len;
+    if (sim->audio_packets % 500U == 0U) {
+        fprintf(stderr, "audio: %u packets, %u bytes\n", sim->audio_packets,
+                sim->audio_bytes);
+    }
+    return RTCP_OK;
+}
+
 static void on_event_state(bool connected, void *context)
 {
     (void)context;
@@ -312,6 +345,7 @@ int main(int argc, char **argv)
     const char *ip_option = NULL;
     unsigned port = AIRPLAY_RTSP_DEFAULT_PORT;
     bool dump = true;
+    bool audio = true;
 
     for (int i = 1; i < argc; ++i) {
         const char *argument = argv[i];
@@ -320,6 +354,8 @@ int main(int argc, char **argv)
             return 0;
         } else if (strcmp(argument, "--no-dump") == 0) {
             dump = false;
+        } else if (strcmp(argument, "--no-audio") == 0) {
+            audio = false;
         } else if (strcmp(argument, "--name") == 0 && i + 1 < argc) {
             name = argv[++i];
         } else if (strcmp(argument, "--model") == 0 && i + 1 < argc) {
@@ -404,6 +440,8 @@ int main(int argc, char **argv)
     info.width_pixels = 1920U;
     info.height_pixels = 1080U;
     info.max_fps = 30U;
+    info.audio_output = audio;
+    info.audio_sample_rate = 44100U;
     size_t info_len = 0U;
     if (!airplay_info_plist_build(&info, info_plist, sizeof(info_plist),
                                   &info_len) ||
@@ -430,6 +468,8 @@ int main(int argc, char **argv)
     server_config.port = (uint16_t)port;
     server_config.on_screen_message = on_screen_message;
     server_config.screen_message_context = &sim;
+    server_config.on_audio_pcm = audio ? on_audio_pcm : NULL;
+    server_config.audio_pcm_context = &sim;
     server_config.on_event_state = on_event_state;
 
     airplay_rtsp_server_t *server = NULL;
@@ -487,11 +527,13 @@ int main(int argc, char **argv)
             "  device id   : %s\n"
             "  pairing PIN : %s\n"
             "  H.264 dump  : %s\n"
+            "  audio       : %s\n"
             "Open Screen Mirroring on the controller and pick \"%s\".  "
             "Enter the PIN if asked.  Ctrl-C stops.\n",
             name, ipv4[0], ipv4[1], ipv4[2], ipv4[3],
             (unsigned)airplay_rtsp_server_get_port(server), model, device_id,
-            pair_code, dump ? dump_path : "(disabled)", name);
+            pair_code, dump ? dump_path : "(disabled)",
+            audio ? "advertised (PCM counted, not played)" : "disabled", name);
 
     while (!g_stop) {
         /* mDNS waits briefly; the RTSP poll is non-blocking so Screen frames
@@ -500,7 +542,8 @@ int main(int argc, char **argv)
         (void)airplay_rtsp_server_poll(server, 0);
     }
 
-    fprintf(stderr, "\nstopping: %u screen frames received\n", sim.frames);
+    fprintf(stderr, "\nstopping: %u screen frames, %u audio packets received\n",
+            sim.frames, sim.audio_packets);
     mdns_responder_close(mdns, &rtcp_net_linux);
     mdns_responder_destroy(mdns);
     airplay_rtsp_server_stop(server);

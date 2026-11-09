@@ -17,8 +17,11 @@
 
 #define TAG "info_plist"
 
-#define IP_MAX_OBJECTS 192U
-#define IP_REF_BYTES 1U /* IP_MAX_OBJECTS < 256 */
+/* The audio capability arrays push the document past 255 objects, so object
+ * references are two bytes wide.  384 leaves headroom above the current ~290
+ * objects (145 for the display/input document plus ~145 audio entries). */
+#define IP_MAX_OBJECTS 384U
+#define IP_REF_BYTES 2U /* IP_MAX_OBJECTS < 65536 */
 
 #define IP_MARKER_INT 0x10U
 #define IP_MARKER_REAL 0x23U
@@ -289,11 +292,13 @@ static uint32_t ip_emit_array(ip_writer_t *w, const uint32_t *refs, size_t count
     return ip_emit_container(w, IP_MARKER_ARRAY, count, refs, count);
 }
 
+#define IP_MAX_DICT_ENTRIES 20U
+
 static uint32_t ip_emit_dict(ip_writer_t *w, const uint32_t *keys,
                              const uint32_t *values, size_t count)
 {
-    uint32_t refs[2U * 16U];
-    if (count > 16U) {
+    uint32_t refs[2U * IP_MAX_DICT_ENTRIES];
+    if (count > IP_MAX_DICT_ENTRIES) {
         w->ok = false;
         return 0U;
     }
@@ -308,8 +313,8 @@ static uint32_t ip_emit_dict(ip_writer_t *w, const uint32_t *keys,
 static uint32_t ip_emit_literal_dict(ip_writer_t *w, const char *const *keys,
                                      const uint32_t *values, size_t count)
 {
-    uint32_t key_ids[16];
-    if (count > 16U) {
+    uint32_t key_ids[IP_MAX_DICT_ENTRIES];
+    if (count > IP_MAX_DICT_ENTRIES) {
         w->ok = false;
         return 0U;
     }
@@ -382,6 +387,83 @@ static uint32_t emit_extended_features(ip_writer_t *w)
     refs[0] = ip_emit_string(w, "vocoderInfo");
     refs[1] = ip_emit_string(w, "enhancedRequestCarUI");
     return ip_emit_array(w, refs, 2U);
+}
+
+/* Ported from the GPL-3.0 playport /info audio declarations
+ * (AirPlayInfoPlist.kt): the same latency table keeps the CarPlay sender from
+ * refusing the session for a missing stream description. */
+static uint32_t emit_audio_latency(ip_writer_t *w, int64_t type,
+                                   const char *audio_type)
+{
+    if (audio_type == NULL) {
+        static const char *const keys[] = {
+            "type", "inputLatencyMicros", "outputLatencyMicros",
+        };
+        uint32_t values[3];
+        values[0] = ip_emit_int(w, type);
+        values[1] = ip_emit_int(w, 0);
+        values[2] = ip_emit_int(w, 0);
+        return ip_emit_literal_dict(w, keys, values, 3U);
+    }
+    static const char *const keys[] = {
+        "type", "audioType", "inputLatencyMicros", "outputLatencyMicros",
+    };
+    uint32_t values[4];
+    values[0] = ip_emit_int(w, type);
+    values[1] = ip_emit_string(w, audio_type);
+    values[2] = ip_emit_int(w, 0);
+    values[3] = ip_emit_int(w, 0);
+    return ip_emit_literal_dict(w, keys, values, 4U);
+}
+
+static uint32_t emit_audio_latencies(ip_writer_t *w)
+{
+    uint32_t refs[9];
+    refs[0] = emit_audio_latency(w, 100, NULL);
+    refs[1] = emit_audio_latency(w, 100, "default");
+    refs[2] = emit_audio_latency(w, 100, "media");
+    refs[3] = emit_audio_latency(w, 100, "telephony");
+    refs[4] = emit_audio_latency(w, 100, "speechRecognition");
+    refs[5] = emit_audio_latency(w, 100, "alert");
+    refs[6] = emit_audio_latency(w, 101, NULL);
+    refs[7] = emit_audio_latency(w, 101, "default");
+    refs[8] = emit_audio_latency(w, 102, "default");
+    return ip_emit_array(w, refs, 9U);
+}
+
+static uint32_t emit_audio_format(ip_writer_t *w, int64_t type,
+                                  const char *audio_type, uint64_t formats)
+{
+    static const char *const keys[] = {
+        "type", "audioType", "audioOutputFormats",
+    };
+    uint32_t values[3];
+    values[0] = ip_emit_int(w, type);
+    values[1] = ip_emit_string(w, audio_type);
+    values[2] = ip_emit_int(w, (int64_t)formats);
+    return ip_emit_literal_dict(w, keys, values, 3U);
+}
+
+static uint32_t emit_audio_formats(ip_writer_t *w,
+                                   const airplay_info_plist_config_t *config)
+{
+    /* LPCM only: the sink feeds int16 samples to the board codec, so no Opus
+     * or AAC-LC bit is advertised.  Types are the CarPlay stream types the
+     * RTSP layer accepts (100 main, 101 alt). */
+    const bool is48 = config->audio_sample_rate == 48000U;
+    const uint64_t pcm = 0x3fcULL | (is48 ? 0xc000ULL : 0xc00ULL);
+    const uint64_t pcm_mono = 0x154ULL | (is48 ? 0x4000ULL : 0x400ULL);
+
+    uint32_t refs[8];
+    refs[0] = emit_audio_format(w, 100, "compatibility", pcm);
+    refs[1] = emit_audio_format(w, 101, "compatibility", pcm);
+    refs[2] = emit_audio_format(w, 100, "default", pcm);
+    refs[3] = emit_audio_format(w, 100, "alert", pcm);
+    refs[4] = emit_audio_format(w, 100, "media", pcm);
+    refs[5] = emit_audio_format(w, 100, "telephony", pcm_mono);
+    refs[6] = emit_audio_format(w, 100, "speechRecognition", pcm_mono);
+    refs[7] = emit_audio_format(w, 101, "default", pcm);
+    return ip_emit_array(w, refs, 8U);
 }
 
 static uint32_t emit_safe_area(ip_writer_t *w, uint16_t width, uint16_t height)
@@ -476,12 +558,14 @@ static uint32_t emit_root(ip_writer_t *w,
                           const uint8_t *descriptor,
                           size_t descriptor_len)
 {
-    static const char *const keys[] = {
+    static const char *const base_keys[] = {
         "sourceVersion", "features", "statusFlags", "model", "manufacturer",
         "deviceID", "bluetoothIDs", "name", "rightHandDrive",
         "keepAliveLowPower", "keepAliveSendStatsAsBody", "modes",
         "extendedFeatures", "displays", "hidDevices",
     };
+    const char *keys[17];
+    memcpy(keys, base_keys, sizeof(base_keys));
 
     uint32_t bluetooth;
     if (config->bluetooth_id != NULL && config->bluetooth_id[0] != '\0') {
@@ -497,13 +581,16 @@ static uint32_t emit_root(ip_writer_t *w,
     uint32_t modes = emit_modes(w);
     uint32_t extended = emit_extended_features(w);
 
-    uint32_t values[15];
+    uint32_t values[17];
     values[0] = ip_emit_string(w, config->source_version != NULL
                                       ? config->source_version
                                       : AIRPLAY_INFO_DEFAULT_SOURCE_VERSION);
-    values[1] = ip_emit_int(w, (int64_t)(config->features != 0U
-                                             ? config->features
-                                             : AIRPLAY_INFO_DEFAULT_FEATURES));
+    uint64_t features = config->features;
+    if (features == 0U) {
+        features = config->audio_output ? AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO
+                                        : AIRPLAY_INFO_DEFAULT_FEATURES;
+    }
+    values[1] = ip_emit_int(w, (int64_t)features);
     values[2] = ip_emit_int(w, config->status_flags != 0U
                                    ? config->status_flags
                                    : AIRPLAY_INFO_DEFAULT_STATUS_FLAGS);
@@ -523,8 +610,16 @@ static uint32_t emit_root(ip_writer_t *w,
     values[12] = extended;
     values[13] = displays;
     values[14] = hids;
+    size_t entry_count = 15U;
+    if (config->audio_output) {
+        keys[15] = "audioLatencies";
+        values[15] = emit_audio_latencies(w);
+        keys[16] = "audioFormats";
+        values[16] = emit_audio_formats(w, config);
+        entry_count = 17U;
+    }
 
-    return ip_emit_literal_dict(w, keys, values, 15U);
+    return ip_emit_literal_dict(w, keys, values, entry_count);
 }
 
 bool airplay_info_plist_build(const airplay_info_plist_config_t *config,

@@ -214,12 +214,93 @@ static void test_builds_setup_responses(void)
                49152U, 49153U, output, 16U, &output_len) == AIRPLAY_BPLIST_OUTPUT_TOO_SMALL);
 }
 
+static void test_builds_multi_stream_setup_response(void)
+{
+    uint8_t output[512];
+    size_t output_len = 0U;
+    airplay_bplist_stream_entry_t entries[4] = {
+        {.stream_type = 110U, .data_port = 40000U},
+        {.stream_type = 100U, .data_port = 40002U, .control_port = 40003U,
+         .has_connection_id = true, .stream_connection_id = 777U},
+        {.stream_type = 101U, .data_port = 40004U, .control_port = 40005U,
+         .has_connection_id = true, .stream_connection_id = 778U},
+        {.stream_type = 102U, .data_port = 40006U, .control_port = 40007U,
+         .has_connection_id = true, .stream_connection_id = 779U},
+    };
+    assert(airplay_bplist_build_streams_setup_response(
+               entries, 4U, output, sizeof(output), &output_len) ==
+           AIRPLAY_BPLIST_OK);
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    airplay_bplist_object_t streams;
+    airplay_bplist_object_t stream;
+    airplay_bplist_object_t value;
+    airplay_bplist_type_t type;
+    uint64_t count = 0U;
+    uint64_t number = 0U;
+    assert(airplay_bplist_open(output, output_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "streams", &streams) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_type(&doc, streams, &type, &count) ==
+           AIRPLAY_BPLIST_OK);
+    assert(type == AIRPLAY_BPLIST_ARRAY && count == 4U);
+
+    assert(airplay_bplist_array_get(&doc, streams, 0U, &stream) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, stream, "type", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == 110U);
+    assert(airplay_bplist_dict_get(&doc, stream, "controlPort", &value) ==
+           AIRPLAY_BPLIST_NOT_FOUND);
+
+    assert(airplay_bplist_array_get(&doc, streams, 1U, &stream) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, stream, "dataPort", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == 40002U);
+    assert(airplay_bplist_dict_get(&doc, stream, "controlPort", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == 40003U);
+    assert(airplay_bplist_dict_get(&doc, stream, "streamConnectionID", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == 777U);
+
+    assert(airplay_bplist_array_get(&doc, streams, 3U, &stream) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, stream, "type", &value) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, value, &number) == AIRPLAY_BPLIST_OK);
+    assert(number == 102U);
+
+    /* One entry still round-trips, and invalid inputs are refused. */
+    assert(airplay_bplist_build_streams_setup_response(
+               entries, 1U, output, sizeof(output), &output_len) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_open(output, output_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_build_streams_setup_response(
+               NULL, 1U, output, sizeof(output), &output_len) ==
+           AIRPLAY_BPLIST_INVALID_ARGUMENT);
+    assert(airplay_bplist_build_streams_setup_response(
+               entries, 0U, output, sizeof(output), &output_len) ==
+           AIRPLAY_BPLIST_INVALID_ARGUMENT);
+    airplay_bplist_stream_entry_t bad = {.stream_type = 110U, .data_port = 0U};
+    assert(airplay_bplist_build_streams_setup_response(
+               &bad, 1U, output, sizeof(output), &output_len) ==
+           AIRPLAY_BPLIST_INVALID_ARGUMENT);
+}
+
 int main(void)
 {
     test_setup_stream_lookup();
     test_main_display_size();
     test_rejects_malformed_documents();
     test_builds_setup_responses();
+    test_builds_multi_stream_setup_response();
     puts("airplay binary plist host test passed");
     return 0;
 }

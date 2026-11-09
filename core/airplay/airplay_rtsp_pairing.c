@@ -171,7 +171,7 @@ airplay_pair_verify_result_t airplay_rtsp_pairing_get_event_keys(
     return airplay_pair_verify_get_event_keys(session->pair_verify, out_keys);
 }
 
-airplay_pair_verify_result_t airplay_rtsp_pairing_derive_screen_output_key(
+airplay_pair_verify_result_t airplay_rtsp_pairing_derive_output_key(
     const airplay_rtsp_pairing_t *session,
     uint64_t stream_connection_id,
     uint8_t output_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES])
@@ -179,6 +179,15 @@ airplay_pair_verify_result_t airplay_rtsp_pairing_derive_screen_output_key(
     if (session == NULL) return AIRPLAY_PAIR_VERIFY_INVALID_ARGUMENT;
     return airplay_pair_verify_derive_screen_output_key(
         session->pair_verify, stream_connection_id, output_key);
+}
+
+airplay_pair_verify_result_t airplay_rtsp_pairing_derive_screen_output_key(
+    const airplay_rtsp_pairing_t *session,
+    uint64_t stream_connection_id,
+    uint8_t output_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES])
+{
+    return airplay_rtsp_pairing_derive_output_key(session, stream_connection_id,
+                                                  output_key);
 }
 
 void airplay_rtsp_pairing_destroy(airplay_rtsp_pairing_t *session)

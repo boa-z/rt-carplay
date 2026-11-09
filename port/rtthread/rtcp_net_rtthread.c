@@ -19,9 +19,11 @@
 
 #include "rtcp/rtcp.h"
 
-/* Upper bound for one poll() batch; stack cost is sizeof(struct pollfd) each. */
+/* Upper bound for one poll() batch; stack cost is sizeof(struct pollfd) each.
+ * The AirPlay server polls RTSP, event, timing, screen and three audio
+ * data/control pairs, so 12 leaves a little headroom. */
 #ifndef RTCP_NET_POLL_MAX
-#define RTCP_NET_POLL_MAX 8
+#define RTCP_NET_POLL_MAX 12
 #endif
 
 static int listen_socket(uint16_t port)

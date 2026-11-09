@@ -181,6 +181,55 @@ int main(void)
     assert(type == AIRPLAY_BPLIST_UNICODE_STRING);
     assert(count == 6U); /* "CAR " + two UTF-16 code units */
 
+    /* Audio advertisement: the feature bits change and both capability
+     * arrays are present, PCM-only (no Opus/AAC). */
+    airplay_info_plist_config_t audio = k_config;
+    audio.audio_output = true;
+    audio.audio_sample_rate = 48000;
+    assert(airplay_info_plist_build(&audio, plist, sizeof(plist), &plist_len));
+    assert(airplay_bplist_open(plist, plist_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, root, "features", AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO);
+
+    airplay_bplist_object_t object;
+    airplay_bplist_type_t object_type;
+    uint64_t item_count = 0U;
+    assert(airplay_bplist_dict_get(&doc, root, "audioFormats", &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_type(&doc, object, &object_type, &item_count) ==
+           AIRPLAY_BPLIST_OK);
+    assert(object_type == AIRPLAY_BPLIST_ARRAY && item_count == 8U);
+    airplay_bplist_object_t entry;
+    assert(airplay_bplist_array_get(&doc, object, 0U, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, entry, "type", 100U);
+    expect_string(&doc, entry, "audioType", "compatibility");
+    expect_uint(&doc, entry, "audioOutputFormats", 0x3fcULL | 0xc000ULL);
+    assert(airplay_bplist_array_get(&doc, object, 5U, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    expect_string(&doc, entry, "audioType", "telephony");
+    expect_uint(&doc, entry, "audioOutputFormats", 0x154ULL | 0x4000ULL);
+
+    assert(airplay_bplist_dict_get(&doc, root, "audioLatencies", &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_type(&doc, object, &object_type, &item_count) ==
+           AIRPLAY_BPLIST_OK);
+    assert(object_type == AIRPLAY_BPLIST_ARRAY && item_count == 9U);
+    assert(airplay_bplist_array_get(&doc, object, 8U, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, entry, "type", 102U);
+    expect_uint(&doc, entry, "outputLatencyMicros", 0U);
+
+    audio.audio_sample_rate = 44100;
+    assert(airplay_info_plist_build(&audio, plist, sizeof(plist), &plist_len));
+    assert(airplay_bplist_open(plist, plist_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "audioFormats", &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, object, 0U, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, entry, "audioOutputFormats", 0x3fcULL | 0xc00ULL);
+
     /* Bounds and argument validation. */
     size_t unused = 0U;
     uint8_t tiny[64];

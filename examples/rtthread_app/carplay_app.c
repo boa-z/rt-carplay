@@ -33,6 +33,10 @@
 #include "video_sink_lubanlite.h"
 #endif
 
+#if defined(RTCARPLAY_AUDIO)
+#include "audio_sink_lubanlite.h"
+#endif
+
 #if defined(RTCARPLAY_IAP2)
 #include "iap2_link_lubanlite.h"
 #endif
@@ -44,6 +48,13 @@
 #endif
 #ifndef CARPLAY_APP_DEFAULT_HEIGHT
 #define CARPLAY_APP_DEFAULT_HEIGHT 480U
+#endif
+
+/* Advertised PCM sample rate.  The sink configures the codec from the format
+ * the SETUP actually negotiates; this only selects which capability mask the
+ * /info plist publishes (44.1 kHz or 48 kHz). */
+#ifndef CARPLAY_APP_AUDIO_SAMPLE_RATE
+#define CARPLAY_APP_AUDIO_SAMPLE_RATE 44100U
 #endif
 
 #define DEFAULT_NAME "rt-carplay"
@@ -136,6 +147,10 @@ typedef struct {
     bool store_initialized;
 #if defined(RTCARPLAY_VIDEO)
     bool video_started;
+#endif
+#if defined(RTCARPLAY_AUDIO)
+    bool audio_started;
+    unsigned audio_packets;
 #endif
 } app_state_t;
 
@@ -317,6 +332,28 @@ static int on_screen_message(airplay_screen_message_type_t type,
     return RTCP_OK;
 }
 
+#if defined(RTCARPLAY_AUDIO)
+static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
+                        const airplay_audio_format_t *format,
+                        uint32_t rtp_timestamp, uint64_t arrival_us,
+                        void *context)
+{
+    (void)rtp_timestamp;
+    (void)arrival_us;
+    app_state_t *app = context;
+    if (!app->audio_started || app->shutting_down) return RTCP_OK;
+    if (format == NULL) return RTCP_EINVAL;
+    if (app->audio_packets == 0U) {
+        APP_LOG("audio stream=%u %u Hz %u ch first packet %u bytes",
+                (unsigned)stream_type, (unsigned)format->sample_rate,
+                (unsigned)format->channels, (unsigned)len);
+    }
+    ++app->audio_packets;
+    return carplay_audio_sink_pcm(format->sample_rate, format->channels, data,
+                                  len);
+}
+#endif
+
 static void on_event_state(bool connected, void *context)
 {
     app_state_t *app = context;
@@ -419,6 +456,13 @@ static void shutdown_stack(app_state_t *app)
         airplay_rtsp_server_stop(app->server);
         app->server = NULL;
     }
+#if defined(RTCARPLAY_AUDIO)
+    /* After the server: no PCM callback can run once it is stopped. */
+    if (app->audio_started) {
+        carplay_audio_sink_stop();
+        app->audio_started = false;
+    }
+#endif
     if (app->store_initialized) {
         airplay_pairing_store_deinit();
         app->store_initialized = false;
@@ -606,6 +650,14 @@ static int build_announcement_data(app_state_t *app)
     info.width_pixels = app->width;
     info.height_pixels = app->height;
     info.max_fps = 30U;
+#if defined(RTCARPLAY_AUDIO)
+    if (app->audio_started) {
+        /* Publish the PCM capability arrays only when a sink can play them,
+         * so a controller never negotiates an undecodable audio format. */
+        info.audio_output = true;
+        info.audio_sample_rate = CARPLAY_APP_AUDIO_SAMPLE_RATE;
+    }
+#endif
     if (!airplay_info_plist_build(&info, app->info_plist,
                                   sizeof(app->info_plist),
                                   &app->info_plist_len) ||
@@ -703,6 +755,18 @@ int carplay_app_start(const carplay_app_config_t *config)
     }
     app->store_initialized = true;
 
+#if defined(RTCARPLAY_AUDIO)
+    /* Start the sink before /info is built: its presence decides whether the
+     * receiver advertises audio output.  The codec itself stays untouched
+     * until the first PCM packet. */
+    result = carplay_audio_sink_start();
+    if (result != RTCP_OK) {
+        APP_LOG("audio sink unavailable rc=%d; running without audio", result);
+    } else {
+        app->audio_started = true;
+    }
+#endif
+
     result = build_announcement_data(app);
     if (result != RTCP_OK) {
         shutdown_stack(app);
@@ -721,6 +785,12 @@ int carplay_app_start(const carplay_app_config_t *config)
     server_config.screen_message_context = app;
     server_config.on_event_state = on_event_state;
     server_config.event_state_context = app;
+#if defined(RTCARPLAY_AUDIO)
+    if (app->audio_started) {
+        server_config.on_audio_pcm = on_audio_pcm;
+        server_config.audio_pcm_context = app;
+    }
+#endif
     result = airplay_rtsp_server_start(&server_config, &app->server);
     if (result != RTCP_OK) {
         APP_LOG("RTSP server start failed rc=%d", result);
@@ -946,6 +1016,14 @@ static int cmd_carplay_status(int argc, char **argv)
                carplay_app_pairing_code()[0] != '\0'
                    ? carplay_app_pairing_code()
                    : "-");
+#if defined(RTCARPLAY_AUDIO)
+    unsigned packets = 0U, dropped = 0U, errors = 0U, replays = 0U;
+    carplay_audio_sink_stats(&packets, &dropped, &errors, &replays);
+    rt_kprintf("carplay audio: %s, %u packets, %u replay(s), %u dropped "
+               "bytes, %u write errors\n",
+               carplay_audio_sink_is_running() ? "ready" : "stopped", packets,
+               replays, dropped, errors);
+#endif
     return 0;
 }
 

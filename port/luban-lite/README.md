@@ -308,3 +308,11 @@ independent.
    `rtcp_lubanlite_random()` twice): both calls must succeed, the two hex
    dumps must differ, and no poll timeout may appear in the log. This
    confirms the unit-3 inference above.
+6. **Audio playback** — with `CONFIG_AIC_USING_AUDIO=y` and
+   `CONFIG_RTCARPLAY_AUDIO=y`, start a phone session: the log must show
+   `[carplay-aud] playback <rate> Hz <ch> ch 16-bit`, `carplay_status` must
+   show a growing packet counter, and the speaker must play the CarPlay
+   audio. If `[carplay-aud] sound0 not found` appears, the audio driver is
+   not registered; if packets grow but nothing is audible, check the PA
+   enable pin/level (`AIC_AUDIO_EN_PIN_*`, `AIC_AUDIO_SPK_*`) and the codec
+   wiring in the board target.

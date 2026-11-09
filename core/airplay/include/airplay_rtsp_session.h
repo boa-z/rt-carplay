@@ -7,8 +7,10 @@
 
 #include "airplay_rtsp_pairing.h"
 
-#define AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES 3500U
-#define AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES 4096U
+/* The audio advertisement (audioFormats/audioLatencies) grows /info to about
+ * 4.2 KB; keep this in step with AIRPLAY_INFO_PLIST_MAX_BYTES. */
+#define AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES 6144U
+#define AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES 8192U
 
 typedef struct airplay_rtsp_session airplay_rtsp_session_t;
 
@@ -26,6 +28,19 @@ typedef bool (*airplay_rtsp_start_timing_cb_t)(
     uint16_t peer_port,
     uint16_t *bound_port,
     void *context);
+/* audio_format_bits is the sender's SETUP audioFormat value.  A false return
+ * rejects the SETUP with 503.  stream_type is 100 (main), 101 (alt) or 102
+ * (high). */
+typedef bool (*airplay_rtsp_start_audio_cb_t)(
+    const airplay_rtsp_pairing_t *pairing,
+    uint16_t stream_type,
+    uint64_t stream_connection_id,
+    uint64_t audio_format_bits,
+    uint16_t *data_port,
+    uint16_t *control_port,
+    void *context);
+typedef void (*airplay_rtsp_stop_audio_cb_t)(uint16_t stream_type,
+                                             void *context);
 typedef void (*airplay_rtsp_stop_media_cb_t)(void *context);
 
 typedef struct {
@@ -36,9 +51,11 @@ typedef struct {
     airplay_rtsp_start_screen_cb_t start_screen;
     airplay_rtsp_start_event_cb_t start_event;
     airplay_rtsp_start_timing_cb_t start_timing;
+    airplay_rtsp_start_audio_cb_t start_audio;
     airplay_rtsp_stop_media_cb_t stop_screen;
     airplay_rtsp_stop_media_cb_t stop_event;
     airplay_rtsp_stop_media_cb_t stop_timing;
+    airplay_rtsp_stop_audio_cb_t stop_audio;
     void *media_context;
 } airplay_rtsp_session_config_t;
 

@@ -106,6 +106,30 @@ static int capture_screen(airplay_screen_message_type_t type, uint8_t *annex_b,
     return RTCP_OK;
 }
 
+static unsigned audio_packets;
+static uint8_t audio_pcm[256];
+static size_t audio_pcm_len;
+static uint16_t audio_packets_stream_type;
+static airplay_audio_format_t audio_packet_format;
+static uint32_t audio_packet_timestamp;
+
+static int capture_audio(uint16_t stream_type, const uint8_t *data, size_t len,
+                         const airplay_audio_format_t *format,
+                         uint32_t rtp_timestamp, uint64_t arrival_us,
+                         void *context)
+{
+    (void)arrival_us;
+    (void)context;
+    ++audio_packets;
+    assert(len <= sizeof(audio_pcm));
+    memcpy(audio_pcm, data, len);
+    audio_pcm_len = len;
+    audio_packets_stream_type = stream_type;
+    audio_packet_format = *format;
+    audio_packet_timestamp = rtp_timestamp;
+    return RTCP_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* Providers                                                          */
 /* ------------------------------------------------------------------ */
@@ -967,6 +991,85 @@ static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
     return bplist_finish(output, at, offsets, 8U, 2U);
 }
 
+/* {"streams": [{"type": 100, "streamConnectionID": id,
+ *               "audioFormat": bits}]} */
+static size_t build_bplist_audio_setup(uint8_t *output, size_t capacity,
+                                       uint64_t connection_id,
+                                       uint64_t format_bits)
+{
+    assert(capacity >= 192U);
+    memcpy(output, "bplist00", 8U);
+    size_t offsets[10];
+    size_t at = 8U;
+
+    offsets[0] = at;
+    output[at++] = 0xd1U; /* dictionary, one entry */
+    output[at++] = 0x01U;
+    output[at++] = 0x02U;
+
+    offsets[1] = at;
+    output[at++] = 0x57U;
+    memcpy(output + at, "streams", 7U);
+    at += 7U;
+
+    offsets[2] = at;
+    output[at++] = 0xa1U; /* array, one element */
+    output[at++] = 0x03U;
+
+    offsets[3] = at;
+    output[at++] = 0xd3U; /* dictionary, three entries */
+    output[at++] = 0x04U;
+    output[at++] = 0x05U;
+    output[at++] = 0x06U;
+    output[at++] = 0x07U;
+    output[at++] = 0x08U;
+    output[at++] = 0x09U;
+
+    offsets[4] = at;
+    output[at++] = 0x54U;
+    memcpy(output + at, "type", 4U);
+    at += 4U;
+
+    offsets[5] = at;
+    output[at++] = 0x5fU; /* 18-character string */
+    output[at++] = 0x10U;
+    output[at++] = 18U;
+    memcpy(output + at, "streamConnectionID", 18U);
+    at += 18U;
+
+    offsets[6] = at;
+    output[at++] = 0x5bU;
+    memcpy(output + at, "audioFormat", 11U);
+    at += 11U;
+
+    offsets[7] = at;
+    output[at++] = 0x10U;
+    output[at++] = 100U;
+
+    offsets[8] = at;
+    output[at++] = 0x13U; /* eight-byte integer */
+    write_be64(output + at, connection_id);
+    at += 8U;
+
+    offsets[9] = at;
+    if (format_bits <= 0xffU) {
+        output[at++] = 0x10U;
+        output[at++] = (uint8_t)format_bits;
+    } else if (format_bits <= 0xffffU) {
+        output[at++] = 0x11U;
+        output[at++] = (uint8_t)(format_bits >> 8U);
+        output[at++] = (uint8_t)format_bits;
+    } else {
+        output[at++] = 0x12U;
+        output[at++] = (uint8_t)(format_bits >> 24U);
+        output[at++] = (uint8_t)(format_bits >> 16U);
+        output[at++] = (uint8_t)(format_bits >> 8U);
+        output[at++] = (uint8_t)format_bits;
+    }
+
+    return bplist_finish(output, at, offsets, 10U, 2U);
+}
+
 static uint16_t response_port(const response_t *response, const char *key)
 {
     airplay_bplist_doc_t doc;
@@ -1003,6 +1106,28 @@ static uint16_t response_data_port(const response_t *response)
     assert(airplay_bplist_get_uint(&doc, object, &port) == AIRPLAY_BPLIST_OK);
     assert(port != 0U && port <= UINT16_MAX);
     return (uint16_t)port;
+}
+
+static uint64_t response_stream_uint(const response_t *response, uint64_t index,
+                                     const char *key)
+{
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    airplay_bplist_object_t streams;
+    airplay_bplist_object_t entry;
+    airplay_bplist_object_t object;
+    uint64_t value = 0U;
+    assert(airplay_bplist_open(response->body, response->body_len, &doc) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "streams", &streams) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, streams, index, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, entry, key, &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, object, &value) == AIRPLAY_BPLIST_OK);
+    return value;
 }
 
 static uint16_t run_initial_setup(airplay_rtsp_server_t *server,
@@ -1202,6 +1327,92 @@ static void run_screen_stream(airplay_rtsp_server_t *server, client_t *client,
 }
 
 
+static void write_be32(uint8_t *output, uint32_t value)
+{
+    output[0] = (uint8_t)(value >> 24U);
+    output[1] = (uint8_t)(value >> 16U);
+    output[2] = (uint8_t)(value >> 8U);
+    output[3] = (uint8_t)value;
+}
+
+/* One SETUP plus one encrypted RTP datagram through the real server poll
+ * loop, proving the audio endpoint is bound, keyed and wired to the sink. */
+static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
+                             const uint8_t shared_secret[KEY_BYTES],
+                             uint32_t *cseq)
+{
+    static const uint64_t connection_id = UINT64_C(0x0102030405060708);
+    static const uint64_t format_bits = 0x800U; /* 44.1 kHz stereo LPCM */
+    uint8_t request[512];
+    uint8_t body[256];
+    response_t response;
+    size_t body_len = build_bplist_audio_setup(body, sizeof(body), connection_id,
+                                               format_bits);
+    size_t request_len = build_request(request, sizeof(request), "SETUP",
+                                       "/stream", PLIST_TYPE, (*cseq)++, body,
+                                       body_len);
+    client_exchange(server, client, request, request_len, &response);
+    uint16_t data_port = (uint16_t)response_stream_uint(&response, 0U, "dataPort");
+    uint16_t control_port =
+        (uint16_t)response_stream_uint(&response, 0U, "controlPort");
+    assert(data_port != 0U && control_port != 0U);
+    assert(response_stream_uint(&response, 0U, "streamConnectionID") ==
+           connection_id);
+
+    uint8_t output_key[KEY_BYTES];
+    assert(airplay_screen_derive_output_key(shared_secret, KEY_BYTES,
+                                            connection_id, output_key) ==
+           RTCP_OK);
+
+    int fd = rtcp_net_linux.udp_open(0U, false);
+    assert(fd >= 0);
+    rtcp_addr_t address = {0};
+    address.family = RTCP_AF_INET;
+    address.addr[0] = 127U;
+    address.addr[3] = 1U;
+    address.port = data_port;
+
+    static const uint8_t pcm[] = {
+        0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
+    };
+    uint8_t header[AIRPLAY_AUDIO_RTP_HEADER_BYTES] = {0x80U, 0x60U, 0x00U, 0x01U};
+    write_be32(header + 4U, 4800U);
+    write_be32(header + 8U, 0x11223344U);
+    uint8_t nonce[12] = {0};
+    nonce[4] = 1U; /* little-endian 64-bit counter, value 1 */
+
+    mbedtls_chachapoly_context cipher;
+    mbedtls_chachapoly_init(&cipher);
+    assert(mbedtls_chachapoly_setkey(&cipher, output_key) == 0);
+    uint8_t wire[AIRPLAY_AUDIO_OVERHEAD_BYTES + sizeof(pcm)];
+    memcpy(wire, header, sizeof(header));
+    assert(mbedtls_chachapoly_encrypt_and_tag(
+               &cipher, sizeof(pcm), nonce, header + 4U, 8U, pcm,
+               wire + AIRPLAY_AUDIO_RTP_HEADER_BYTES,
+               wire + AIRPLAY_AUDIO_RTP_HEADER_BYTES + sizeof(pcm)) == 0);
+    mbedtls_chachapoly_free(&cipher);
+    const size_t nonce_at = sizeof(wire) - AIRPLAY_AUDIO_NONCE_BYTES;
+    memcpy(wire + nonce_at, nonce + 4U, AIRPLAY_AUDIO_NONCE_BYTES);
+
+    assert(rtcp_net_linux.udp_sendto(fd, &address, wire, sizeof(wire)) ==
+           (int)sizeof(wire));
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (audio_packets == 0U &&
+           rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        airplay_rtsp_server_poll(server, 10);
+    }
+    assert(audio_packets == 1U);
+    assert(audio_packets_stream_type == 100U);
+    assert(audio_pcm_len == sizeof(pcm));
+    assert(memcmp(audio_pcm, pcm, sizeof(pcm)) == 0);
+    assert(audio_packet_format.sample_rate == 44100U);
+    assert(audio_packet_format.channels == 2U);
+    assert(audio_packet_timestamp == 4800U);
+
+    rtcp_net_linux.close(fd);
+    mbedtls_platform_zeroize(output_key, sizeof(output_key));
+}
+
 /* ------------------------------------------------------------------ */
 /* main                                                               */
 /* ------------------------------------------------------------------ */
@@ -1233,6 +1444,7 @@ int main(void)
     config.info_plist = info_plist;
     config.info_plist_len = info_len;
     config.on_screen_message = capture_screen;
+    config.on_audio_pcm = capture_audio;
     config.on_event_state = capture_event_state;
 
     airplay_rtsp_server_t *server = NULL;
@@ -1248,6 +1460,9 @@ int main(void)
     uint32_t cseq = 30U;
     uint16_t event_port = run_initial_setup(server, &client, &cseq);
     run_event_channel(server, shared_secret, event_port);
+    /* Audio runs before the screen stream: closing the screen socket ends the
+     * session, so the RTSP connection must still be up for the audio SETUP. */
+    run_audio_stream(server, &client, shared_secret, &cseq);
     run_screen_stream(server, &client, shared_secret, &cseq);
     mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
     run_tampered_frame(server, &client);

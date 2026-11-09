@@ -351,6 +351,13 @@ MFi.
   `rt_wlan_start_ap_adv()` + `rt_wlan_ap_is_active()`), disables STA
   auto-reconnect, and the app reads the MAC only after the AP is active
   (the seed-derived device id is used until then).  Retest pending.
+- **iOS Screen Mirroring is not the supported path (2026-11-09)**: the
+  `_airplay._tcp` TXT record advertises `features=0x5203a4e2,0x61`, with the
+  Video (bit 0) and VideoFairPlay (bit 2) flags clear, and the stack has no
+  `/fp-setup` FairPlay handler.  iOS therefore hides the receiver from the
+  Control Center Screen Mirroring list (the phone hears the mDNS responses
+  but shows no device).  CarPlay is reached over Bluetooth/iAP2 through
+  `carplay_iap2`, not through AirPlay screen mirroring.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input, the CE TRNG fix (unit resolved, retest pending),
   the Bluetooth H5/RFCOMM path, the MFi exchange with a real phone, the iAP2

@@ -630,11 +630,12 @@ static int build_identity(app_state_t *app, const char *pair_code,
         APP_LOG("generated a new Ed25519 identity in %s", seed_path);
     }
     bool ok = airplay_ed25519_keypair_from_seed(seed, &app->keypair);
-    if (ok && !format_device_id_from_mac(app)) {
-        APP_LOG("cannot read the Wi-Fi MAC; deriving the device id from the "
-                "identity seed");
-        ok = format_device_id_from_seed(app, seed);
-    }
+    /* The Realtek MAC is only readable after the WLAN device is registered
+     * and the AP is up, which happens in start_wifi().  Use the stable
+     * seed-derived identity until then and refine it once the AP is
+     * active; querying the driver earlier leaves its wext path on a DOWN
+     * netif and is not needed. */
+    if (ok) ok = format_device_id_from_seed(app, seed);
     memset(seed, 0, sizeof(seed));
     if (!ok) return RTCP_EIO;
 
@@ -679,6 +680,16 @@ static int start_wifi(app_state_t *app)
     }
     APP_LOG("SoftAP %s ip=%u.%u.%u.%u", app->ssid, app->ipv4[0], app->ipv4[1],
             app->ipv4[2], app->ipv4[3]);
+
+    /* The AP is active now, so the driver can report its MAC.  Prefer it
+     * over the seed-derived fallback chosen in build_identity(). */
+    if (format_device_id_from_mac(app)) {
+        app->accessory_identifier_len = strlen(app->device_id);
+        memcpy(app->accessory_identifier, app->device_id,
+               app->accessory_identifier_len);
+    } else {
+        APP_LOG("cannot read the Wi-Fi MAC; keeping the seed-derived device id");
+    }
 
     result = rtcp_wifi_lubanlite_start_dhcpd();
     if (result != RTCP_OK && result != RTCP_ENOTSUP) {

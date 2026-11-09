@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <wifi_conf.h>
 #include <wifi_util.h>
+#include <wlan_mgnt.h>
 
 #if defined(RT_USING_LWIP)
 #include <lwip/netif.h>
@@ -35,35 +36,61 @@
 #endif
 #endif
 
+#define AP_START_WAIT_MS 15000U
+
 static const char *s_ifname = "wlan0";
 
+/*
+ * Start the AP through the RT-Thread WLAN framework.  Do NOT call
+ * wifi_on()/wifi_start_ap() directly: those skip rt_wlan_dev_init() ->
+ * aic_realtek_init() -> realtek_init(), which is the only path that
+ * registers the Realtek SDIO driver.  A direct wifi_on() with no SDIO
+ * function registered crashes in rtw_drv_probe()/rt_mutex_take (board
+ * evidence: mcause=4, mtval=0x108000177, "get wifi sdio function fail").
+ */
 static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
 {
     if (ssid == NULL || ssid[0] == '\0') return RTCP_EINVAL;
 
-    int security = RTW_SECURITY_WPA2_AES_PSK;
-    int pass_len = 0;
-    if (pass == NULL || pass[0] == '\0') {
-        security = RTW_SECURITY_OPEN;
-        pass = "";
-    } else {
-        pass_len = (int)strlen(pass);
+    struct rt_wlan_info info;
+    memset(&info, 0, sizeof(info));
+    int is_open = (pass == NULL || pass[0] == '\0');
+    info.security = is_open ? SECURITY_OPEN : SECURITY_WPA2_AES_PSK;
+    info.band = (channel > 13U) ? RT_802_11_BAND_5GHZ
+                                : RT_802_11_BAND_2_4GHZ;
+    info.channel = (rt_int16_t)channel;
+    info.ssid.len = (rt_uint8_t)strlen(ssid);
+    if (info.ssid.len > RT_WLAN_SSID_MAX_LENGTH) {
+        info.ssid.len = RT_WLAN_SSID_MAX_LENGTH;
+    }
+    memcpy(info.ssid.val, ssid, info.ssid.len);
+
+    /* The STA auto-reconnect work keeps a delayed work item linked in the
+     * kernel Timer object list and must not run in AP-only mode. */
+    rt_wlan_config_autoreconnect(RT_FALSE);
+
+    if (rt_wlan_ap_is_active()) {
+        rt_wlan_ap_stop();
+        rt_thread_mdelay(200);
     }
 
-    if (!wifi_is_up(RTW_AP_INTERFACE)) {
-        if (wifi_on(RTW_MODE_AP) != RTW_SUCCESS) return RTCP_EIO;
-    }
-    if (wifi_start_ap((char *)ssid, security, (char *)pass,
-                      (int)strlen(ssid), pass_len,
-                      (int)channel) != RTW_SUCCESS) {
+    if (rt_wlan_set_mode(RT_WLAN_DEVICE_AP_NAME, RT_WLAN_AP) != RT_EOK) {
         return RTCP_EIO;
     }
-    return RTCP_OK;
+    if (rt_wlan_start_ap_adv(&info, is_open ? RT_NULL : pass) != RT_EOK) {
+        return RTCP_EIO;
+    }
+
+    for (unsigned waited = 0U; waited < AP_START_WAIT_MS; waited += 100U) {
+        if (rt_wlan_ap_is_active()) return RTCP_OK;
+        rt_thread_mdelay(100);
+    }
+    return RTCP_ETIMEDOUT;
 }
 
 static int wifi_ap_stop(void)
 {
-    return wifi_off() == RTW_SUCCESS ? RTCP_OK : RTCP_EIO;
+    return rt_wlan_ap_stop() == RT_EOK ? RTCP_OK : RTCP_EIO;
 }
 
 static int wifi_set_vendor_ie(const uint8_t *ie, size_t len)

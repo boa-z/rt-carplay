@@ -336,7 +336,18 @@ path is independent of MFi.
   (`packages/artinchip/aic-authorization/authorization/rng.c`) uses
   `hal_crypto_start_hash()` and the `ALG_HASH_ACCELERATOR` bit, with
   `data.in_len = 4`; the port now matches it and zeroes the output on
-  failure.  The board retest of this fix is pending.
+  failure.  The retest then passed (`carplay_randtest: OK, distinct output`).
+- **Second board run (2026-11-09)**: `carplay_start` crashed while bringing
+  up Wi-Fi (`CPU Exception NO.4`, `mcause=4`, `mtval=0x108000177`,
+  `mepc=rt_mutex_take+0x2c`, `gspi_dvobj_init: get wifi sdio function
+  fail`).  The seam called `wifi_on()` directly, which skips
+  `rt_wlan_dev_init()`/`realtek_init()` and therefore leaves the SDIO driver
+  unregistered; this is the same crash the `poc/carplay-oss` phase-1 report
+  documents.  The seam now uses the framework path
+  (`rt_wlan_set_mode(RT_WLAN_DEVICE_AP_NAME, RT_WLAN_AP)` +
+  `rt_wlan_start_ap_adv()` + `rt_wlan_ap_is_active()`), disables STA
+  auto-reconnect, and the app reads the MAC only after the AP is active
+  (the seed-derived device id is used until then).  Retest pending.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input, the CE TRNG fix (unit resolved, retest pending),
   the Bluetooth H5/RFCOMM path, the MFi exchange with a real phone, the iAP2

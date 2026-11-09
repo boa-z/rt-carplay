@@ -26,10 +26,22 @@ stacks, 4-byte lwIP alignment, 4 KB WLAN workqueue).
 
 | `rtcp_wifi` call | Luban-Lite call |
 |------------------|-----------------|
-| `ap_start(ssid, pass, channel)` | `wifi_on(RTW_MODE_AP)` when down, then `wifi_start_ap()` |
-| `ap_stop()` | `wifi_off()` |
+| `ap_start(ssid, pass, channel)` | `rt_wlan_config_autoreconnect(RT_FALSE)`, `rt_wlan_set_mode(RT_WLAN_DEVICE_AP_NAME, RT_WLAN_AP)`, `rt_wlan_start_ap_adv()`, poll `rt_wlan_ap_is_active()` |
+| `ap_stop()` | `rt_wlan_ap_stop()` |
 | `set_vendor_ie(ie, len)` | `wext_del_custom_ie()` then `wext_add_custom_ie()` with `PROBE_RSP \| BEACON` |
 | `sta_info()` | not exposed by the driver API, returns `RTCP_ENOTSUP` |
+
+The AP must be started through the RT-Thread WLAN framework, never by
+calling `wifi_on()`/`wifi_start_ap()` directly.  Only `rt_wlan_set_mode()`
+runs `rt_wlan_dev_init()` → `aic_realtek_init()` → `realtek_init()`, which
+registers the Realtek SDIO driver.  With a direct `wifi_on()` the SDIO
+function is unregistered (`gspi_dvobj_init: get wifi sdio function fail`)
+and the driver crashes in `rtw_drv_probe()` → `rt_mutex_take()` (board
+evidence 2026-11-09: `mcause=4`, `mtval=0x108000177`,
+`mepc=rt_mutex_take+0x2c`).  The framework path also follows the
+board-verified `poc/carplay-oss` phase-1 sequence, including disabling the
+STA auto-reconnect work that would otherwise churn a linked Timer object in
+AP-only mode.
 
 The Apple AirPlay vendor IE is `DD 08 00 A0 40 00 00 02 00 22`
 (`core/discovery/airplay_vendor_ie.c`). The driver keeps a single custom-IE

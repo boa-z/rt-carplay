@@ -31,6 +31,10 @@
 #define SINK_WAKE_TIMEOUT_MS 50U
 #define SINK_AMP_SETTLE_MS 200U /* aplay's power-amplifier settle value */
 #define SINK_LOG_EVERY_PACKETS 500U
+/* A sender streams continuously (silence is zero PCM), so a gap this long
+ * means the stream stopped or the phone reconnected: drop the stale tail
+ * instead of playing it into the next stream. */
+#define SINK_STREAM_GAP_MS 500U
 
 typedef struct {
     rt_device_t dev;
@@ -48,6 +52,7 @@ typedef struct {
     uint32_t rate;
     uint8_t channels;
     bool format_valid;
+    rt_tick_t last_tick;
 
     /* Device format, owned by the writer thread. */
     uint32_t device_rate;
@@ -351,12 +356,20 @@ int carplay_audio_sink_pcm(uint32_t sample_rate, uint8_t channels,
     if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK) {
         return RTCP_ESTATE;
     }
+    rt_tick_t now = rt_tick_get();
+    bool gap = sink->format_valid &&
+               (rt_tick_t)(now - sink->last_tick) >
+                   rt_tick_from_millisecond(SINK_STREAM_GAP_MS);
     if (!sink->format_valid || sample_rate != sink->rate ||
-        channels != sink->channels) {
-        /* A new stream layout: discard whatever was queued for the old
-         * one instead of playing it at the wrong rate. */
+        channels != sink->channels || gap) {
+        /* A new stream (or a new layout): discard whatever was queued for
+         * the old one instead of playing it into the new stream. */
         if (sink->format_valid && sink->used != 0U) {
-            rt_kprintf("[" TAG "] format changed, flushing %u queued bytes\n",
+            rt_kprintf("[" TAG "] %s, flushing %u queued bytes\n",
+                       gap && sample_rate == sink->rate &&
+                               channels == sink->channels
+                           ? "stream restarted"
+                           : "format changed",
                        (unsigned)sink->used);
         }
         ring_flush(sink);
@@ -364,6 +377,7 @@ int carplay_audio_sink_pcm(uint32_t sample_rate, uint8_t channels,
         sink->channels = channels;
         sink->format_valid = true;
     }
+    sink->last_tick = now;
     if (ring_push(sink, data, len) == len) {
         ++sink->packets;
         accepted = true;

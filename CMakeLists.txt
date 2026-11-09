@@ -80,6 +80,7 @@ if(RTCP_BUILD_TESTS)
         test_airplay_control_cipher test_airplay_control_port
         test_airplay_timing_port test_airplay_event_port
         test_airplay_screen_server test_airplay_rtsp_server
+        test_airplay_audio_stream
         test_airplay_pairing_e2e test_airplay_ed25519
         test_discovery test_mdns_responder test_port_linux test_input_bridge
         test_media_timestamp
@@ -88,7 +89,8 @@ if(RTCP_BUILD_TESTS)
     set(RTCP_PORT_TESTS
         test_port_linux test_airplay_control_port test_airplay_timing_port
         test_airplay_event_port test_airplay_screen_server
-        test_airplay_rtsp_server test_airplay_pairing_e2e)
+        test_airplay_rtsp_server test_airplay_audio_stream
+        test_airplay_pairing_e2e)
 
     foreach(name ${RTCP_TESTS})
         if(name STREQUAL "test_mfi2c")

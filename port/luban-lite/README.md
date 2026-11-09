@@ -12,7 +12,13 @@ RT-Thread port:
 | `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite`, `rtcp_bt_lubanlite`, `rtcp_mfi_lubanlite`, interface setter and `rtcp_lubanlite_random` |
 
 The first hardware target is an ArtInChip D213 with an RTL8733BS (SDIO Wi-Fi +
-HCI H5 Bluetooth).
+HCI H5 Bluetooth).  The board bring-up reference is the `poc/carplay/zalink`
+branch of the Luban-Lite tree: the ZALink 1.5.1 integration for this exact
+board, verified running on the hardware.  The board files under
+`target/d21x/demo128-nand-carplay/` are byte-identical to that branch, and
+the application defconfig follows its verified network/stack profile
+(`LWIP_NO_RX/TX_THREAD`, 256 pbufs, RX thread priority 3, 16 KB lwIP/SDIO/MMC
+stacks, 4-byte lwIP alignment, 4 KB WLAN workqueue).
 
 ## Wi-Fi seam
 
@@ -168,7 +174,13 @@ same path.
 
 - The H5 handshake, firmware download and baud switch on this RTL8733BS
   module.  The vendor ZABlue library uses its own H5 implementation; this
-  Zephyr path has never run on the board.
+  Zephyr path has never run on the board.  The verified ZALink branch
+  downloads a 65,660-byte Realtek firmware file (`rtl8733bs_8723fs_fw`,
+  `Realtech` magic) while the Zephyr host compiles the 57,020-byte
+  `RealtechC` patch array from `fw_rtl8733bs_d7b8_0da7.h`; both are Realtek
+  blobs kept outside this repository.  If the download fails on the board,
+  compare the chip/ROM id the Zephyr driver selected with the vendor log
+  before suspecting the UART or H5 handshake.
 - The phone's security requirements for the iAP2 link.  The DLC is left at
   the stack default security level and SSP I/O capabilities are not
   configured; application-level authentication is still the iAP2 MFi
@@ -304,6 +316,9 @@ independent.
    (or the Zephyr `bt` shell) must find the iAP2 UUID in SDP, connect and
    see echoed bytes. This is the first validation of the
    `rtcp_bt_lubanlite` seam; the earlier "stub" status no longer applies.
+   The board settings are the ones the verified ZALink branch uses:
+   `uart7` at 1500000 baud with flow control, BT power on PD.3, and the
+   Realtek firmware note above.
 5. **CE TRNG** — with `CONFIG_AIC_CE_DRV=y`, run `carplay_randtest` (it calls
    `rtcp_lubanlite_random()` twice): both calls must succeed, the two hex
    dumps must differ, and no poll timeout may appear in the log. This

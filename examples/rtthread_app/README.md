@@ -320,6 +320,14 @@ path is independent of MFi.
   `rt_touch_read/control`, `touch_irq_callback` and `gt911_read_point`.
   Build-only: the first board run must log `[carplay-touch] gt911: <n>
   point(s), 1024x600 -> <w>x<h>` and the phone UI must follow the panel.
+- **Board-verified reference alignment (2026-11-09)**: the Luban-Lite
+  `poc/carplay/zalink` branch (ZALink 1.5.1, running on this board) was used
+  as the reference.  The board target is byte-identical, and the shipped
+  defconfig now follows its verified network profile: lwIP processes Wi-Fi
+  bursts without separate rx/tx threads, 256 pbufs, RX above the TCP thread,
+  16 KB lwIP/SDIO/MMC stacks, 4-byte alignment and a 4 KB WLAN workqueue.
+  Build-only for this app: the receiver's own Wi-Fi/RTSP path still needs the
+  board run.
 - **Not board-verified yet**: Wi-Fi bring-up, vendor IE, pairing with a real
   controller, touch input, the CE TRNG unit assignment, the Bluetooth
   H5/RFCOMM path, the MFi exchange with a real phone, the iAP2 session and

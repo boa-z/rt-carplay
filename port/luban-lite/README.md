@@ -14,9 +14,11 @@ RT-Thread port:
 The first hardware target is an ArtInChip D213 with an RTL8733BS (SDIO Wi-Fi +
 HCI H5 Bluetooth).  The board bring-up reference is the `poc/carplay/zalink`
 branch of the Luban-Lite tree: the ZALink 1.5.1 integration for this exact
-board, verified running on the hardware.  The board files under
-`target/d21x/demo128-nand-carplay/` are byte-identical to that branch, and
-the application defconfig follows its verified network/stack profile
+board, verified running on the hardware.  Every board configuration file
+under `target/d21x/demo128-nand-carplay/` is byte-identical to that branch
+(only the checked-in prebuilt `pack/bootloader.bin` differs, and the image
+uses a locally built bootloader), and the application defconfig follows its
+verified network/stack profile
 (`LWIP_NO_RX/TX_THREAD`, 256 pbufs, RX thread priority 3, 16 KB lwIP/SDIO/MMC
 stacks, 4-byte lwIP alignment, 4 KB WLAN workqueue).
 

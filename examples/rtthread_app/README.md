@@ -322,7 +322,9 @@ path is independent of MFi.
   point(s), 1024x600 -> <w>x<h>` and the phone UI must follow the panel.
 - **Board-verified reference alignment (2026-11-09)**: the Luban-Lite
   `poc/carplay/zalink` branch (ZALink 1.5.1, running on this board) was used
-  as the reference.  The board target is byte-identical, and the shipped
+  as the reference.  The board target configuration is byte-identical
+  (only the prebuilt `pack/bootloader.bin` differs, and the image uses a
+  locally built bootloader), and the shipped
   defconfig now follows its verified network profile: lwIP processes Wi-Fi
   bursts without separate rx/tx threads, 256 pbufs, RX above the TCP thread,
   16 KB lwIP/SDIO/MMC stacks, 4-byte alignment and a 4 KB WLAN workqueue.

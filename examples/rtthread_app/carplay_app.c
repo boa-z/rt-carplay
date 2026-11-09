@@ -47,11 +47,29 @@
 
 #define APP_LOG(fmt, ...) rt_kprintf("[carplay] " fmt "\n", ##__VA_ARGS__)
 
+/* carplay_start uses the same geometry as the SDK autostart path.  In app
+ * mode the board's Kconfig values (which must match the panel) win; a caller
+ * that links the library directly gets the 1280x480 widescreen fallback. */
 #ifndef CARPLAY_APP_DEFAULT_WIDTH
+#if defined(RTCARPLAY_SCREEN_WIDTH)
+#define CARPLAY_APP_DEFAULT_WIDTH RTCARPLAY_SCREEN_WIDTH
+#else
 #define CARPLAY_APP_DEFAULT_WIDTH 1280U
 #endif
+#endif
 #ifndef CARPLAY_APP_DEFAULT_HEIGHT
+#if defined(RTCARPLAY_SCREEN_HEIGHT)
+#define CARPLAY_APP_DEFAULT_HEIGHT RTCARPLAY_SCREEN_HEIGHT
+#else
 #define CARPLAY_APP_DEFAULT_HEIGHT 480U
+#endif
+#endif
+#ifndef CARPLAY_APP_DEFAULT_ROTATION
+#if defined(RTCARPLAY_ROTATION)
+#define CARPLAY_APP_DEFAULT_ROTATION RTCARPLAY_ROTATION
+#else
+#define CARPLAY_APP_DEFAULT_ROTATION 0U
+#endif
 #endif
 
 /* Advertised PCM sample rate.  The sink configures the codec from the format
@@ -1012,6 +1030,7 @@ int carplay_app_autostart(void)
     carplay_app_config_defaults(&config);
     config.width_pixels = CARPLAY_APP_DEFAULT_WIDTH;
     config.height_pixels = CARPLAY_APP_DEFAULT_HEIGHT;
+    config.rotation_degrees = CARPLAY_APP_DEFAULT_ROTATION;
     return carplay_app_start(&config);
 }
 

@@ -55,6 +55,9 @@ typedef struct {
 
     uint16_t display_width;
     uint16_t display_height;
+    /* Panel geometry from aicfb; the DE layer works in these coordinates. */
+    uint16_t panel_width;
+    uint16_t panel_height;
 
     nal_entry_t queue[SINK_QUEUE_LENGTH];
     unsigned head;
@@ -200,21 +203,23 @@ static void present_frame(video_sink_t *sink, const struct mpp_frame *frame)
         src_h = frame->buf.crop.height;
     }
 
-    /* Letterbox: keep the source aspect ratio inside the panel. */
-    int scale_w = sink->display_width;
-    int scale_h = sink->display_height;
+    /* Letterbox: keep the source aspect ratio inside the panel.  The DE layer
+     * position/scale is in panel pixels, not in the AirPlay display mode, so
+     * use the aicfb geometry (identical when the mode matches the panel). */
+    int scale_w = sink->panel_width;
+    int scale_h = sink->panel_height;
     if (src_w > 0 && src_h > 0) {
-        int by_width = (int)sink->display_width * src_h / src_w;
-        if (by_width <= (int)sink->display_height) {
+        int by_width = (int)sink->panel_width * src_h / src_w;
+        if (by_width <= (int)sink->panel_height) {
             scale_h = by_width;
         } else {
-            scale_w = (int)sink->display_height * src_w / src_h;
+            scale_w = (int)sink->panel_height * src_w / src_h;
         }
     }
     layer.scale_size.width = scale_w;
     layer.scale_size.height = scale_h;
-    layer.pos.x = ((int)sink->display_width - scale_w) / 2;
-    layer.pos.y = ((int)sink->display_height - scale_h) / 2;
+    layer.pos.x = ((int)sink->panel_width - scale_w) / 2;
+    layer.pos.y = ((int)sink->panel_height - scale_h) / 2;
     memcpy(&layer.buf, &frame->buf, sizeof(layer.buf));
 
     if (rt_device_control(sink->fb, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0) {
@@ -414,6 +419,8 @@ int carplay_video_sink_start(uint16_t display_width, uint16_t display_height)
     memset(sink, 0, sizeof(*sink));
     sink->display_width = display_width;
     sink->display_height = display_height;
+    sink->panel_width = display_width;
+    sink->panel_height = display_height;
 
     sink->fb = rt_device_find("aicfb");
     if (sink->fb == NULL) {
@@ -423,9 +430,16 @@ int carplay_video_sink_start(uint16_t display_width, uint16_t display_height)
 
     struct aicfb_screeninfo screen;
     memset(&screen, 0, sizeof(screen));
-    if (rt_device_control(sink->fb, AICFB_GET_SCREENINFO, &screen) >= 0) {
-        rt_kprintf("[" TAG "] panel %ux%u, scaling to %ux%u\n",
-                   screen.width, screen.height, display_width, display_height);
+    if (rt_device_control(sink->fb, AICFB_GET_SCREENINFO, &screen) >= 0 &&
+        screen.width != 0U && screen.height != 0U) {
+        sink->panel_width = (uint16_t)screen.width;
+        sink->panel_height = (uint16_t)screen.height;
+        rt_kprintf("[" TAG "] panel %ux%u, AirPlay display %ux%u\n",
+                   (unsigned)sink->panel_width, (unsigned)sink->panel_height,
+                   (unsigned)display_width, (unsigned)display_height);
+    } else {
+        rt_kprintf("[" TAG "] no panel info, assuming %ux%u\n",
+                   (unsigned)display_width, (unsigned)display_height);
     }
 
     int ret = create_decoder(sink);

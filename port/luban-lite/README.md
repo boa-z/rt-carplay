@@ -308,7 +308,15 @@ independent.
    `rtcp_lubanlite_random()` twice): both calls must succeed, the two hex
    dumps must differ, and no poll timeout may appear in the log. This
    confirms the unit-3 inference above.
-6. **Audio playback** — with `CONFIG_AIC_USING_AUDIO=y` and
+6. **Video display** — with `CONFIG_RTCARPLAY_VIDEO=y`, first run
+   `carplay_video play /data/sample.h264`: the log must show
+   `[carplay-vid] panel 1024x600, AirPlay display 1024x600`, and the decoder
+   frame counter must grow.  Then start a controller session and check that
+   the CarPlay UI fills the panel.  Keep `CONFIG_RTCARPLAY_SCREEN_WIDTH/`
+   `HEIGHT`, the panel and `AIC_SCREEN_REAL_X/Y_RESOLUTION` equal
+   (1024x600 here); a different display mode is letterboxed and misaligns
+   touch.
+7. **Audio playback** — with `CONFIG_AIC_USING_AUDIO=y` and
    `CONFIG_RTCARPLAY_AUDIO=y`, start a phone session: the log must show
    `[carplay-aud] playback <rate> Hz <ch> ch 16-bit`, `carplay_status` must
    show a growing packet counter, and the speaker must play the CarPlay
@@ -319,7 +327,7 @@ independent.
    not registered; if packets grow but nothing is audible, check the PA
    enable pin/level (`AIC_AUDIO_EN_PIN_*`, `AIC_AUDIO_SPK_*`) and the codec
    wiring in the board target.
-7. **Touch panel** — with `CONFIG_RTCARPLAY_TOUCH_PANEL=y` and the CTP
+8. **Touch panel** — with `CONFIG_RTCARPLAY_TOUCH_PANEL=y` and the CTP
    driver enabled (`gt911` on this board), `carplay_start` must log
    `[carplay-touch] gt911: <n> point(s), 1024x600 -> <w>x<h>`, and touching
    the panel must move the CarPlay pointer (watch `carplay_status` and the

@@ -24,12 +24,18 @@ config RTCARPLAY_DIR
       is fine.
 
 config RTCARPLAY_SCREEN_WIDTH
-    int "Display width for HID touch mapping"
-    default 1280
+    int "AirPlay display width (must match the panel)"
+    default 1024
+    help
+      The display mode advertised to the controller in /info and used for
+      HID touch mapping.  It should equal the panel and
+      AIC_SCREEN_REAL_X_RESOLUTION (1024 on demo128-nand-carplay): the
+      video sink letterboxes into the panel, and a different mode makes the
+      CarPlay UI and the touch coordinates disagree.
 
 config RTCARPLAY_SCREEN_HEIGHT
-    int "Display height for HID touch mapping"
-    default 480
+    int "AirPlay display height (must match the panel)"
+    default 600
 
 config RTCARPLAY_ROTATION
     int "Display rotation (0, 90, 180 or 270)"

@@ -94,7 +94,7 @@ carplay_iap2 status           # serving/link/coprocessor/identification/MFi coun
 carplay_iap2 stop             # stop the session and disconnect the phone
 
 carplay_video status          # decoder counters, queue depth
-carplay_video start 1280 480  # exercise MPP + DE without a controller
+carplay_video start 1024 600  # exercise MPP + DE without a controller
 carplay_video play /data/sample.h264   # decode an Annex-B file
 carplay_video stop            # release the decoder, restore the UI layer
 ```
@@ -135,8 +135,8 @@ drivers are available) the application installs `video_sink_lubanlite.c`:
 - the Annex-B data is split into NAL units on a queue (one decoder packet per
   NAL, matching the SDK H.264 decoder);
 - the sink's own thread decodes with `mpp_decoder` and presents NV12 frames
-  through the `aicfb` video layer, letterboxed into the configured display
-  size;
+  through the `aicfb` video layer, letterboxed into the panel geometry
+  reported by `AICFB_GET_SCREENINFO` (the DE layer works in panel pixels);
 - a configuration message (SPS/PPS) that arrives after frames were shown
   marks a new stream (reconnect or resolution change) and recreates the
   decoder before feeding it;
@@ -146,6 +146,13 @@ drivers are available) the application installs `video_sink_lubanlite.c`:
 Passing `config.on_screen` yourself bypasses the on-board sink.  Without
 `CONFIG_RTCARPLAY_VIDEO` (or when `aicfb` is missing) the receiver stays
 headless and only counts frames.
+
+The AirPlay display mode (`config.width_pixels`/`height_pixels`) is
+advertised in `/info`, so it must match the panel.  On demo128-nand-carplay
+that is 1024x600; the app-mode Kconfig (`RTCARPLAY_SCREEN_WIDTH/HEIGHT`)
+and `carplay_start` use the same values, and the panel reader scales the
+GT911 range to them.  A different mode still displays (the sink letterboxes
+into the panel), but the UI aspect and the touch mapping no longer agree.
 
 Known bring-up notes: video memory comes from the VE/DE pools, so the frame
 count in use depends on the controller's H.264 profile; the first hardware

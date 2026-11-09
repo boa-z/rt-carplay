@@ -71,12 +71,21 @@ static int bus_read(void *context, uint8_t reg, uint8_t *data, size_t len,
     if (bus == NULL || data == NULL || len == 0U) return RTCP_EINVAL;
 
     for (int attempt = 0; attempt <= retries; ++attempt) {
-        if (attempt > 0 && delay_ms > 0) {
+        /* The register write and the data read are two separate transfers,
+         * each with STOP, and the part needs a settling gap between them.
+         * The vendor driver does write -> 50 ms -> read; rt_i2c_read_reg()
+         * issues the two transfers back to back, which the board's 2.0C NAKs.
+         * Keep the vendor timing here. */
+        rt_size_t sent = rt_i2c_master_send(bus, s_mfi.address, RT_I2C_WR,
+                                            &reg, 1U);
+        if (sent == 1U) {
+            if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
+            rt_size_t got = rt_i2c_master_recv(bus, s_mfi.address, 0U, data,
+                                               (rt_uint32_t)len);
+            if (got == len) return RTCP_OK;
+        } else if (delay_ms > 0) {
             aicos_msleep((uint32_t)delay_ms);
         }
-        rt_size_t got = rt_i2c_read_reg(bus, s_mfi.address, reg, data,
-                                        (rt_uint32_t)len);
-        if (got == len) return RTCP_OK;
     }
     return RTCP_EIO;
 }

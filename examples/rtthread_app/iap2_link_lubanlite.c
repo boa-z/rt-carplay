@@ -174,24 +174,32 @@ static void link_event(iap2_session_event_t event, void *context)
  * The coprocessor is optional at runtime: a board with the part absent (or
  * wired to another bus/address) must still run the identify-only flow so the
  * transport can be tested.  The probe touches I2C once, when the session is
- * created.
+ * created; on failure the session gets a lazy handle that re-probes at
+ * certificate time.
  */
 static const struct rtcp_mfi *link_mfi(void)
 {
 #if defined(RTCARPLAY_MFI)
     int result = RTCP_EIO;
 
-    /* Two attempts: the 2.0C answers 0x32 to every register while the board
-     * is busy elsewhere (see the call site), so a single unlucky probe must
-     * not disable MFi for the whole session. */
+    /* Two attempts at start time only; the coprocessor may still be
+     * settling (it answered 0x32 to every register right after boot even
+     * with the Bluetooth controller untouched).  If both fail the session
+     * still gets a lazy handle: the first certificate request re-probes,
+     * by which time the phone has connected and the part has recovered. */
     for (int attempt = 0; attempt < 2; attempt++) {
         result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
                                           RTCARPLAY_MFI_I2C_ADDR);
         if (result == RTCP_OK) return rtcp_mfi_lubanlite();
         if (attempt == 0) rt_thread_mdelay(100);
     }
-    IAP2_LOG("MFi coprocessor unavailable rc=%d; the session will stop after "
-             "identification", result);
+    IAP2_LOG("MFi coprocessor not ready at start rc=%d; retrying when the "
+             "phone requests the certificate", result);
+    const struct rtcp_mfi *lazy = rtcp_mfi_lubanlite_lazy(
+        RTCARPLAY_MFI_I2C_BUS, RTCARPLAY_MFI_I2C_ADDR);
+    if (lazy != NULL) return lazy;
+    IAP2_LOG("MFi lazy handle unavailable; the session will stop after "
+             "identification");
 #else
     IAP2_LOG("MFi support not built in; the session will stop after "
              "identification");
@@ -249,11 +257,11 @@ static void link_thread(void *parameter)
 {
     iap2_link_t *link = parameter;
 
-    /* Probe the coprocessor BEFORE the Bluetooth controller is enabled.
-     * Board-verified 2026-11-09: a probe issued right after the RTL8733BS
-     * firmware download reads 0x32 from every 2.0C register, while the same
-     * reads minutes later return the correct id 0x00000200 and cert 908.
-     * The BT bring-up is the disturbance, so probe while it is still idle. */
+    /* Probe the coprocessor before the Bluetooth controller is enabled so a
+     * healthy part is ready by the time the phone connects.  Board logs show
+     * the 2.0C can still answer 0x32 to every register this early in boot
+     * (even with Bluetooth untouched), so link_mfi() keeps a lazy handle
+     * that re-probes at certificate time. */
     const struct rtcp_mfi *mfi = link_mfi();
 
     int result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);

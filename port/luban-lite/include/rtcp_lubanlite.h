@@ -114,6 +114,17 @@ bool rtcp_mfi_lubanlite_ready(void);
 const struct rtcp_mfi *rtcp_mfi_lubanlite(void);
 
 /*
+ * Lazy variant for the iAP2 session.  The returned ops probe the coprocessor
+ * on first use instead of returning NULL after a boot-time probe failure.
+ * Board-verified 2026-11-09: the 2.0C answers 0x32 to every register for a
+ * while after reset/RTL8733BS firmware download, but reads correctly when the
+ * phone connects later, so the session should retry at certificate time.
+ * The bus name and address are copied from this call and used for the retry.
+ */
+const struct rtcp_mfi *rtcp_mfi_lubanlite_lazy(const char *i2c_bus_name,
+                                               uint8_t address);
+
+/*
  * Bring-up diagnostic.  Prints the raw bytes read from the coprocessor with
  * the vendor shape (write STOP, 50 ms, read STOP), the immediate shape and
  * the combined repeated-start attempt, then scans 0x08..0x77 and prints every

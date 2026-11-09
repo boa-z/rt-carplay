@@ -307,4 +307,61 @@ static const struct rtcp_mfi s_mfi_ops = {
     .read_cert = mfi_read_cert,
 };
 
+/* ------------------------------------------------------------------ */
+/* Lazy session handle                                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The 2.0C reads 0x32 from every register for a while after boot on this
+ * board (board-verified 2026-11-09: the same probe succeeds minutes later,
+ * and the vendor stack only touches the part once a phone is connected).
+ * The session therefore keeps this handle even when the early probe failed;
+ * the first certificate read or signature request probes again.  A genuine
+ * absence costs one extra probe and then fails cleanly at the same point.
+ */
+static char s_lazy_bus[16];
+static uint8_t s_lazy_addr;
+
+static int lazy_ensure(void)
+{
+    if (s_mfi.ready) return RTCP_OK;
+    if (s_lazy_bus[0] == '\0') return RTCP_ESTATE;
+    return rtcp_mfi_lubanlite_start(s_lazy_bus, s_lazy_addr);
+}
+
+static int lazy_info(struct rtcp_mfi_info *out)
+{
+    if (lazy_ensure() != RTCP_OK) return RTCP_ESTATE;
+    return mfi_info(out);
+}
+
+static int lazy_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
+                     size_t sig_cap, size_t *sig_len)
+{
+    if (lazy_ensure() != RTCP_OK) return RTCP_ESTATE;
+    return mfi_sign(challenge, len, sig, sig_cap, sig_len);
+}
+
+static int lazy_read_cert(uint8_t *der, size_t cap, size_t *der_len)
+{
+    if (lazy_ensure() != RTCP_OK) return RTCP_ESTATE;
+    return mfi_read_cert(der, cap, der_len);
+}
+
+static const struct rtcp_mfi s_lazy_ops = {
+    .info = lazy_info,
+    .sign = lazy_sign,
+    .read_cert = lazy_read_cert,
+};
+
+const struct rtcp_mfi *rtcp_mfi_lubanlite_lazy(const char *i2c_bus_name,
+                                               uint8_t address)
+{
+    size_t len = i2c_bus_name != NULL ? strlen(i2c_bus_name) : 0U;
+    if (len == 0U || len >= sizeof(s_lazy_bus)) return NULL;
+    memcpy(s_lazy_bus, i2c_bus_name, len + 1U);
+    s_lazy_addr = address;
+    return &s_lazy_ops;
+}
+
 #endif /* LPKG_RT_CARPLAY_LUBANLITE_MFI */

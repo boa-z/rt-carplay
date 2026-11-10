@@ -37,6 +37,10 @@ if GetDepend('RTCARPLAY_TOUCH_PANEL'):
 if GetDepend('RTCARPLAY_IAP2'):
     src += Glob('iap2_link_lubanlite.c')
 
+# Wired USB host bring-up (carplay_usb command, descriptor inspection).
+if GetDepend('RTCARPLAY_USB_HOST'):
+    src += Glob('carplay_usb_cmd.c')
+
 group = DefineGroup('rt-carplay-app', src,
                     depend=['LPKG_USING_RT_CARPLAY',
                             'LPKG_RT_CARPLAY_LUBANLITE_WIFI'],

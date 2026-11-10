@@ -7,7 +7,28 @@
 
 #include "rtcp/bt.h"
 #include "rtcp/mfi.h"
+#include "rtcp/usb.h"
 #include "rtcp/wifi.h"
+
+/*
+ * Wired CarPlay USB host seam, backed by the Luban-Lite CherryUSB host
+ * stack.  The INSTANCE is always linked when the SDK option is enabled; the
+ * USB1 (or USB0) host controller is initialized by CherryUSB itself at boot.
+ *
+ *   ops->open(cb, user)   arm the enumeration hook and event callback.  The
+ *                         hook only acts while the seam is open, and it only
+ *                         runs during enumeration, so the phone should be
+ *                         plugged in after open() (or replugged afterwards).
+ *   ops->get_device()     copy the descriptor-derived snapshot; RTCP_ESTATE
+ *                         when no accepted iPhone is attached.
+ *   ops->control_transfer()/bulk_transfer()
+ *                         synchronous transfers on the attached device.
+ *
+ * Only the Apple USBMUX interface is claimed.  bulk_transfer() accepts its
+ * bulk IN/OUT address (taken from the descriptor, never hard-coded) and adds
+ * the zero-length packet a packet-aligned OUT transfer needs.
+ */
+extern const rtcp_usb_t rtcp_usb_lubanlite;
 
 /*
  * Realtek RTL8733BS SoftAP through the Luban-Lite Wi-Fi API.  Vendor IE

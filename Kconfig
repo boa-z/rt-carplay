@@ -58,4 +58,21 @@ config LPKG_RT_CARPLAY_LUBANLITE_MFI
         register engine is core/mfi/mfi2c.c.  Without a working
         coprocessor the session stops after IdentificationInformation.
 
+config LPKG_RT_CARPLAY_LUBANLITE_USB
+    bool "Use the Luban-Lite CherryUSB wired USB host seam"
+    default y if LPKG_CHERRYUSB_HOST
+    depends on LPKG_CHERRYUSB_HOST
+    help
+        Bind the wired CarPlay USB host transport to the Luban-Lite
+        CherryUSB host stack.  Adds the Apple USBMUX class driver and the
+        enumeration hook that asks the phone for its CarPlay configuration
+        (vendor request 0x52) and selects it by descriptor.  The board must
+        enable a host controller, normally CONFIG_AIC_USING_USB1_HOST on
+        D21x.  The seam is usable without a phone: the usb_probe shell
+        command prints the descriptors of whatever is attached.
+
+        This option only claims the USBMUX interface.  CDC-NCM is a separate
+        host class (LPKG_CHERRYUSB_HOST_NCM) and is needed for the wired
+        AirPlay IP link, not for this stage.
+
 endif

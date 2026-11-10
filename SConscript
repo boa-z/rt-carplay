@@ -26,7 +26,7 @@ if GetDepend('LPKG_RT_CARPLAY_LOG'):
         cwd, 'port/rtthread/include/rtcp_log_rtthread.h')
 
 # Protocol core: hardware and OS independent.
-for sub in ('airplay', 'iap2', 'discovery', 'input', 'media', 'mfi'):
+for sub in ('airplay', 'iap2', 'discovery', 'input', 'media', 'mfi', 'usb'):
     src += Glob('core/%s/*.c' % sub)
     inc = os.path.join(cwd, 'core', sub, 'include')
     if os.path.isdir(inc):
@@ -49,7 +49,8 @@ cpppath.append(cwd + '/port/rtthread/include')
 # Bluetooth and MFi sources (rtcp_lubanlite.h declares all three interfaces).
 if (GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI') or
         GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT') or
-        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI')):
+        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI') or
+        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB')):
     cpppath.append(cwd + '/port/luban-lite/include')
 
 # Luban-Lite Wi-Fi seam (Realtek RTL8733BS SoftAP + vendor IE).
@@ -87,6 +88,19 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT'):
 # Luban-Lite MFi seam: 2.0C authentication coprocessor on the I2C bus.
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI'):
     src += Glob('port/luban-lite/rtcp_mfi_lubanlite.c')
+
+# Luban-Lite wired USB host seam: CherryUSB host stack, Apple USBMUX class
+# driver and the configuration-selection hook.  The CherryUSB headers are
+# only added to this group (the stack builds its own copy with its own paths).
+if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB'):
+    src += Glob('port/luban-lite/rtcp_usb_lubanlite.c')
+
+    aic_root = os.environ.get('AIC_ROOT', '')
+    if aic_root:
+        cherryusb = os.path.join(aic_root, 'packages', 'third-party',
+                                 'cherryusb')
+        cpppath.append(os.path.join(cherryusb, 'common'))
+        cpppath.append(os.path.join(cherryusb, 'core'))
 
 group = DefineGroup('rt-carplay', src, depend=['LPKG_USING_RT_CARPLAY'],
                     CPPPATH=cpppath, LOCAL_CCFLAGS=ccflags)

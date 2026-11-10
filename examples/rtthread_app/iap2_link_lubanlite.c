@@ -584,6 +584,92 @@ static int cmd_carplay_mfi_cert(int argc, char **argv)
  * this passes points at iOS trust or the exchange itself, not at the
  * certificate data path.
  */
+/*
+ * The 2.0C returns its certificate as a PKCS#7 SignedData blob (the first
+ * bytes are 06 09 2a 86 48 86 f7 0d 01 07 02, OID 1.2.840.113549.1.7.2),
+ * not as a bare X.509 certificate.  iOS expects exactly these bytes and they
+ * are sent unchanged; only the local self-test needs the X.509 leaf inside.
+ * mbedtls 2.7 has no PKCS#7 parser, so walk the DER containers directly.
+ */
+struct der_tlv {
+    uint8_t tag;
+    const uint8_t *start;   /* tag byte */
+    const uint8_t *value;   /* first content byte */
+    size_t len;             /* content length */
+    const uint8_t *next;    /* first byte after this TLV */
+};
+
+static int der_next(const uint8_t *p, const uint8_t *end, struct der_tlv *t)
+{
+    size_t len;
+
+    if (p == NULL || t == NULL || (size_t)(end - p) < 2U) return -1;
+    t->start = p;
+    t->tag = *p++;
+    len = *p++;
+    if ((len & 0x80U) != 0U) {
+        size_t n = len & 0x7FU;
+        if (n == 0U || n > 3U || (size_t)(end - p) < n) return -1;
+        len = 0U;
+        while (n-- > 0U) len = (len << 8) | *p++;
+    }
+    if ((size_t)(end - p) < len) return -1;
+    t->value = p;
+    t->len = len;
+    t->next = p + len;
+    return 0;
+}
+
+/*
+ * Locate the first X.509 certificate inside a PKCS#7 SignedData blob and
+ * return it as a complete DER TLV.  Returns 0 on success.
+ */
+static int pkcs7_first_certificate(const uint8_t *der, size_t len,
+                                   const uint8_t **cert, size_t *cert_len)
+{
+    static const uint8_t signed_data_oid[9] = {
+        0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02
+    };
+    struct der_tlv outer, oid, wrapper, signed_data, field, certs, first;
+
+    /* ContentInfo ::= SEQUENCE { contentType OID, content [0] EXPLICIT } */
+    if (der_next(der, der + len, &outer) != 0 || outer.tag != 0x30)
+        return -1;
+    if (der_next(outer.value, outer.next, &oid) != 0 || oid.tag != 0x06)
+        return -1;
+    if (oid.len != sizeof(signed_data_oid) ||
+        memcmp(oid.value, signed_data_oid, sizeof(signed_data_oid)) != 0)
+        return -1;
+    if (der_next(oid.next, outer.next, &wrapper) != 0 || wrapper.tag != 0xA0)
+        return -1;
+    if (der_next(wrapper.value, wrapper.next, &signed_data) != 0 ||
+        signed_data.tag != 0x30)
+        return -1;
+
+    /* SignedData ::= SEQUENCE { version, digestAlgorithms, contentInfo,
+     *                           certificates [0] IMPLICIT ... } */
+    if (der_next(signed_data.value, signed_data.next, &field) != 0 ||
+        field.tag != 0x02)
+        return -1;
+    if (der_next(field.next, signed_data.next, &field) != 0 ||
+        field.tag != 0x31)
+        return -1;
+    if (der_next(field.next, signed_data.next, &field) != 0 ||
+        field.tag != 0x30)
+        return -1;
+    if (der_next(field.next, signed_data.next, &certs) != 0 ||
+        certs.tag != 0xA0)
+        return -1;
+
+    /* The first element of the implicit SET is the leaf certificate. */
+    if (der_next(certs.value, certs.next, &first) != 0 || first.tag != 0x30)
+        return -1;
+
+    *cert = first.start;
+    *cert_len = (size_t)(first.next - first.start);
+    return 0;
+}
+
 static void cmd_mfi_check_signature(const uint8_t *certificate,
                                     size_t certificate_len,
                                     const uint8_t *challenge,
@@ -592,9 +678,22 @@ static void cmd_mfi_check_signature(const uint8_t *certificate,
                                     size_t signature_len)
 {
     mbedtls_x509_crt crt;
+    const uint8_t *x509 = certificate;
+    size_t x509_len = certificate_len;
+
     mbedtls_x509_crt_init(&crt);
 
-    int result = mbedtls_x509_crt_parse(&crt, certificate, certificate_len);
+    if (pkcs7_first_certificate(certificate, certificate_len, &x509,
+                                &x509_len) == 0) {
+        rt_kprintf("carplay_mfi sign: PKCS#7 SignedData, leaf certificate "
+                   "%u bytes of %u\n", (unsigned)x509_len,
+                   (unsigned)certificate_len);
+    } else {
+        rt_kprintf("carplay_mfi sign: certificate is not PKCS#7 SignedData; "
+                   "parsing as X.509\n");
+    }
+
+    int result = mbedtls_x509_crt_parse(&crt, x509, x509_len);
     if (result != 0) {
         rt_kprintf("carplay_mfi sign: certificate parse failed -0x%04x\n",
                    -result);

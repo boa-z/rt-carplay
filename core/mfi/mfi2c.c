@@ -11,9 +11,13 @@
  *           ID32 @ 0x04 (4 bytes, big-endian), error @ 0x05,
  *           certificate length @ 0x30 (2 bytes, big-endian)
  *   sign  : write {0x00, len} + challenge to 0x20, delay 10 ms,
- *           write 0x01 to 0x10, poll 0x10 until 0x10 (ok) or bit 7 (error),
- *           read signature length @ 0x11 (2 bytes BE),
- *           read signature @ 0x12
+ *           write 0x01 to 0x10, then wait for the result: bit 7 of 0x10 is
+ *           the error flag, but the part under test leaves 0x10 at 0x00 even
+ *           after the signature is ready (Apple's MFiPlatform_CreateSignature
+ *           and the vendor ELF both read the status once and only check bit 7,
+ *           then read 0x11/0x12 directly).  Completion is therefore detected
+ *           by a plausible signature length @ 0x11 (2 bytes BE) followed by a
+ *           successful signature read @ 0x12, with a ~2 s deadline.
  *   cert  : read length @ 0x30 (2 bytes BE), read DER @ 0x31
  *
  * The private key never leaves the coprocessor; this module has no API to
@@ -53,8 +57,18 @@
 #define MFI_STATUS_SUCCESS   0x10
 #define MFI_STATUS_ERROR     0x80
 
-#define MFI_STATUS_POLLS     40
+/*
+ * Poll pacing.  Every bus read uses the vendor 50 ms select-to-read gap
+ * (MFI_VENDOR_DELAY_MS), so one poll costs roughly 110 ms.  18 polls give a
+ * deadline just under Apple's 2 s signature timeout.
+ */
+#define MFI_STATUS_POLLS     18
 #define MFI_STATUS_POLL_MS   10
+
+/* A 2.0C is RSA-2048 (256-byte signature).  Anything shorter than this is
+ * either the stale challenge window (0x00 0x14 = 20) or a not-yet-ready
+ * register, never a real MFi signature. */
+#define MFI_SIG_MIN_LEN      64
 
 #define MFI_SIGN_DELAY_MS    10
 
@@ -176,44 +190,38 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
     for (i = 0; i < MFI_STATUS_POLLS; i++) {
         mfi_delay(dev, MFI_STATUS_POLL_MS);
 
-        if (mfi_read(dev, MFI_REG_STATUS, &status, 1, 1, 0) != RTCP_OK)
-            continue;
-        if (status & MFI_STATUS_ERROR) {
+        /*
+         * Use the vendor select-to-read gap here: while the coprocessor is
+         * busy it drops register writes, and a dropped 0x10 select would make
+         * the read return the previous register window.
+         */
+        status = 0;
+        if (mfi_read(dev, MFI_REG_STATUS, &status, 1, 1,
+                     MFI_VENDOR_DELAY_MS) == RTCP_OK && (status & MFI_STATUS_ERROR)) {
             RTCP_LOGE(TAG, "sign=status_error status=0x%02x poll=%d",
                       (unsigned)status, i);
             return RTCP_EIO;
         }
-        if (status == MFI_STATUS_SUCCESS)
-            break;
+
+        n = 0;
+        if (mfi_read(dev, MFI_REG_SIG_LEN, slen, sizeof(slen), 1,
+                     MFI_VENDOR_DELAY_MS) == RTCP_OK) {
+            n = ((size_t)slen[0] << 8) | slen[1];
+            if (n >= MFI_SIG_MIN_LEN && n <= sig_cap) {
+                if (mfi_read(dev, MFI_REG_SIG, sig, n, MFI_REG_RETRIES,
+                             MFI_VENDOR_DELAY_MS) == RTCP_OK) {
+                    *sig_len = n;
+                    RTCP_LOGI(TAG, "sign: status=0x%02x siglen=%u polls=%d",
+                              (unsigned)status, (unsigned)n, i + 1);
+                    return RTCP_OK;
+                }
+            }
+        }
     }
 
-    if (status != MFI_STATUS_SUCCESS) {
-        RTCP_LOGE(TAG, "sign=status_timeout last=0x%02x polls=%u",
-                  (unsigned)status, (unsigned)MFI_STATUS_POLLS);
-        return RTCP_ETIMEDOUT;
-    }
-
-    if (mfi_read(dev, MFI_REG_SIG_LEN, slen, sizeof(slen),
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
-        RTCP_LOGE(TAG, "sign=siglen_read_failed");
-        return RTCP_EIO;
-    }
-
-    n = ((size_t)slen[0] << 8) | slen[1];
-    if (n == 0 || n > sig_cap) {
-        RTCP_LOGE(TAG, "sign=siglen_invalid len=%u cap=%u",
-                  (unsigned)n, (unsigned)sig_cap);
-        return RTCP_EIO;
-    }
-
-    if (mfi_read(dev, MFI_REG_SIG, sig, n,
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
-        RTCP_LOGE(TAG, "sign=signature_read_failed len=%u", (unsigned)n);
-        return RTCP_EIO;
-    }
-
-    *sig_len = n;
-    return RTCP_OK;
+    RTCP_LOGE(TAG, "sign=status_timeout last_status=0x%02x last_siglen=%u polls=%u",
+              (unsigned)status, (unsigned)n, (unsigned)MFI_STATUS_POLLS);
+    return RTCP_ETIMEDOUT;
 }
 
 int rtcp_mfi2c_read_cert(rtcp_mfi2c_t *dev, uint8_t *der, size_t cap,

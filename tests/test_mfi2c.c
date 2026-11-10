@@ -17,6 +17,7 @@ struct fake {
     uint8_t sig[128];
     uint8_t cert[908];
     int     fail_sign;
+    int     zero_status;
 };
 
 static int fake_write(void *ctx, uint8_t reg, const uint8_t *data, size_t len)
@@ -32,7 +33,7 @@ static int fake_write(void *ctx, uint8_t reg, const uint8_t *data, size_t len)
         if (f->fail_sign) {
             f->status = 0x80;
         } else {
-            f->status = 0x10;
+            f->status = f->zero_status ? 0x00 : 0x10;
             f->sig[0] = 0xA5;
             f->sig[127] = 0x5A;
         }
@@ -148,6 +149,14 @@ int main(void)
     assert(f.challenge[0] == 0x00);
     assert(f.challenge[1] == 0x14);
     assert(memcmp(&f.challenge[2], challenge, sizeof(challenge)) == 0);
+
+    /* The board's 2.0C leaves the status register at 0x00 after signing;
+     * completion must be detected from the signature length/data. */
+    f.zero_status = 1;
+    assert(rtcp_mfi2c_sign(&dev, challenge, sizeof(challenge),
+                           sig, sizeof(sig), &sig_len) == RTCP_OK);
+    assert(sig_len == 128);
+    f.zero_status = 0;
 
     assert(rtcp_mfi2c_read_cert(&dev, cert, sizeof(cert), &cert_len) == RTCP_OK);
     assert(cert_len == 908);

@@ -558,7 +558,9 @@ static void shutdown_stack(app_state_t *app)
     }
     airplay_ed25519_keypair_clear(&app->keypair);
     if (app->ap_started) {
+#if defined(LPKG_RT_CARPLAY_LUBANLITE_WIFI)
         (void)rtcp_wifi_lubanlite.ap_stop();
+#endif
         app->ap_started = false;
     }
     if (app->lock != NULL) {
@@ -764,6 +766,7 @@ static bool make_pairing_code(app_state_t *app, const char *requested)
     return true;
 }
 
+#if defined(LPKG_RT_CARPLAY_LUBANLITE_WIFI)
 static bool format_device_id_from_mac(app_state_t *app)
 {
     uint8_t mac[6];
@@ -777,6 +780,7 @@ static bool format_device_id_from_mac(app_state_t *app)
                 mac[3], mac[4], mac[5]);
     return true;
 }
+#endif /* LPKG_RT_CARPLAY_LUBANLITE_WIFI */
 
 static bool format_device_id_from_seed(app_state_t *app,
                                        const uint8_t seed[32])
@@ -825,6 +829,7 @@ static int build_identity(app_state_t *app, const char *pair_code,
     return make_pairing_code(app, pair_code) ? RTCP_OK : RTCP_EIO;
 }
 
+#if defined(LPKG_RT_CARPLAY_LUBANLITE_WIFI)
 static int wait_for_ipv4(app_state_t *app)
 {
     for (unsigned attempt = 0U; attempt < IP_WAIT_TRIES; ++attempt) {
@@ -877,6 +882,7 @@ static int start_wifi(app_state_t *app)
     }
     return RTCP_OK;
 }
+#endif /* LPKG_RT_CARPLAY_LUBANLITE_WIFI */
 
 static int build_announcement_data(app_state_t *app)
 {
@@ -976,11 +982,18 @@ int carplay_app_start(const carplay_app_config_t *config)
     if (result != RTCP_OK) return result;
 
     if (!app->wired) {
+#if defined(LPKG_RT_CARPLAY_LUBANLITE_WIFI)
         result = start_wifi(app);
         if (result != RTCP_OK) {
             shutdown_stack(app);
             return result;
         }
+#else
+        APP_LOG("wireless mode needs LPKG_RT_CARPLAY_LUBANLITE_WIFI; "
+                "use 'carplay_start wired' on this build");
+        shutdown_stack(app);
+        return RTCP_ENOTSUP;
+#endif
     }
 
     airplay_pairing_store_backend_t backend = {

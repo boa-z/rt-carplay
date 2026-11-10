@@ -18,6 +18,9 @@ if not any(group.get('name') == 'rt-carplay' for group in building.Projects):
     SConscript(os.path.join(cwd, '..', '..', 'SConscript'))
 
 src = Glob('carplay_app.c')
+# AirPlay /auth-setup MFiSAP provider lifecycle, shared by the wired USB and
+# wireless iAP2 transports.  Not transport-specific, so it is always built.
+src += Glob('carplay_mfi_provider.c')
 
 # The on-board video path (MPP H.264 decoder + DE video layer).  It lives in
 # the same group because carplay_app.c composes it under the same symbol.
@@ -42,8 +45,7 @@ if GetDepend('RTCARPLAY_USB_HOST'):
     src += Glob('carplay_usb_cmd.c')
 
 group = DefineGroup('rt-carplay-app', src,
-                    depend=['LPKG_USING_RT_CARPLAY',
-                            'LPKG_RT_CARPLAY_LUBANLITE_WIFI'],
+                    depend=['LPKG_USING_RT_CARPLAY'],
                     CPPPATH=[cwd])
 
 Return('group')

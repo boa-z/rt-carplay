@@ -12,7 +12,7 @@
 #define FAKE_RX_MAX 8U
 
 typedef struct {
-    uint8_t data[4096];
+    uint8_t data[RTCP_USBMUX_MAX_PAYLOAD + 64U];
     size_t length;
 } fake_packet_t;
 
@@ -101,7 +101,7 @@ static void start_host(rtcp_usbmux_host_t *host, fake_transport_t *fake)
 static void test_connect_and_stream(void)
 {
     static rtcp_usbmux_host_t host;
-    fake_transport_t fake;
+    static fake_transport_t fake;
     start_host(&host, &fake);
 
     queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
@@ -157,7 +157,7 @@ static void test_connect_and_stream(void)
 static void test_connect_reset(void)
 {
     static rtcp_usbmux_host_t host;
-    fake_transport_t fake;
+    static fake_transport_t fake;
     start_host(&host, &fake);
 
     queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
@@ -171,7 +171,7 @@ static void test_connect_reset(void)
 static void test_connect_timeout(void)
 {
     static rtcp_usbmux_host_t host;
-    fake_transport_t fake;
+    static fake_transport_t fake;
     start_host(&host, &fake);
 
     rtcp_usbmux_connection_t *connection = NULL;
@@ -189,7 +189,7 @@ static void test_connect_timeout(void)
 static void test_desynchronised_stream(void)
 {
     static rtcp_usbmux_host_t host;
-    fake_transport_t fake;
+    static fake_transport_t fake;
     start_host(&host, &fake);
 
     fake_packet_t *packet = &fake.received[fake.received_count++];
@@ -203,7 +203,7 @@ static void test_desynchronised_stream(void)
 static void test_two_streams(void)
 {
     static rtcp_usbmux_host_t host;
-    fake_transport_t fake;
+    static fake_transport_t fake;
     start_host(&host, &fake);
 
     queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
@@ -233,6 +233,188 @@ static void test_two_streams(void)
     rtcp_usbmux_connection_close(&host, second);
 }
 
+static void test_large_tls_record(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    start_host(&host, &fake);
+
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0U);
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 500U,
+                               &connection) == RTCP_OK);
+
+    /* One frame carrying a full-size record: the old 4 KiB connection ring
+     * reset the stream here.  The payload also exactly fills the ring. */
+    static uint8_t payload[RTCP_USBMUX_MAX_PAYLOAD];
+    for (size_t i = 0U; i < sizeof(payload); ++i) {
+        payload[i] = (uint8_t)(i * 7U);
+    }
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 101U, 1U,
+                       RTCP_USBMUX_TH_ACK, payload, sizeof(payload));
+    assert(rtcp_usbmux_pump(&host, 0U, 0U) == 1);
+
+    static uint8_t received[RTCP_USBMUX_MAX_PAYLOAD];
+    assert(rtcp_usbmux_connection_recv(&host, connection, received, 100U) == 100);
+    assert(memcmp(received, payload, 100U) == 0);
+    /* Partial receive: the rest is still buffered and drains in one call. */
+    int rest = rtcp_usbmux_connection_recv(
+        &host, connection, received + 100U, sizeof(received) - 100U);
+    assert(rest == (int)sizeof(payload) - 100);
+    assert(memcmp(received + 100U, payload + 100U,
+                  sizeof(payload) - 100U) == 0);
+    assert(rtcp_usbmux_connection_recv(&host, connection, received,
+                                       sizeof(received)) == 0);
+
+    rtcp_usbmux_connection_close(&host, connection);
+}
+
+static void test_back_to_back_frames(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    start_host(&host, &fake);
+
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0U);
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 500U,
+                               &connection) == RTCP_OK);
+
+    /* Two complete mux frames in one bulk transfer. */
+    fake_packet_t *packet = &fake.received[fake.received_count++];
+    size_t offset = rtcp_usbmux_build_tcp(
+        packet->data, sizeof(packet->data), 0U, RTCP_USBMUX_LOCKDOWN_PORT, 1U,
+        101U, 1U, RTCP_USBMUX_TH_ACK, "one", 3U);
+    assert(offset != 0U);
+    offset += rtcp_usbmux_build_tcp(
+        packet->data + offset, sizeof(packet->data) - offset, 1U,
+        RTCP_USBMUX_LOCKDOWN_PORT, 1U, 104U, 1U, RTCP_USBMUX_TH_ACK, "two",
+        3U);
+    packet->length = offset;
+
+    assert(rtcp_usbmux_pump(&host, 0U, 0U) == 2);
+    char buffer[8] = {0};
+    assert(rtcp_usbmux_connection_recv(&host, connection, buffer,
+                                       sizeof(buffer)) == 6);
+    assert(memcmp(buffer, "onetwo", 6U) == 0);
+
+    rtcp_usbmux_connection_close(&host, connection);
+}
+
+static void test_partial_frame(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    start_host(&host, &fake);
+
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0U);
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 500U,
+                               &connection) == RTCP_OK);
+
+    static uint8_t frame[128];
+    size_t frame_length = rtcp_usbmux_build_tcp(
+        frame, sizeof(frame), 0U, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 101U, 1U,
+        RTCP_USBMUX_TH_ACK, "split frame", 11U);
+    assert(frame_length != 0U);
+
+    fake_packet_t *first = &fake.received[fake.received_count++];
+    memcpy(first->data, frame, 20U);
+    first->length = 20U;
+    fake_packet_t *second = &fake.received[fake.received_count++];
+    memcpy(second->data, frame + 20U, frame_length - 20U);
+    second->length = frame_length - 20U;
+
+    assert(rtcp_usbmux_pump(&host, 0U, 0U) == 0);
+    char buffer[16] = {0};
+    assert(rtcp_usbmux_connection_recv(&host, connection, buffer,
+                                       sizeof(buffer)) == 0);
+    assert(rtcp_usbmux_pump(&host, 0U, 0U) == 1);
+    assert(rtcp_usbmux_connection_recv(&host, connection, buffer,
+                                       sizeof(buffer)) == 11);
+    assert(memcmp(buffer, "split frame", 11U) == 0);
+
+    rtcp_usbmux_connection_close(&host, connection);
+}
+
+static void test_overflow_resets_and_reconnect(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    static uint8_t payload[RTCP_USBMUX_MAX_PAYLOAD / 2U + 1000U];
+    start_host(&host, &fake);
+    memset(payload, 0xa5, sizeof(payload));
+
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0U);
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 500U,
+                               &connection) == RTCP_OK);
+
+    /* Two frames whose combined payloads exceed the ring while the owner
+     * has not drained between pumps: the stream must reset, not corrupt. */
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 101U, 1U,
+                       RTCP_USBMUX_TH_ACK, payload, sizeof(payload));
+    assert(rtcp_usbmux_pump(&host, 0U, 0U) == 1);
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U,
+                       101U + (uint32_t)sizeof(payload), 1U,
+                       RTCP_USBMUX_TH_ACK, payload, sizeof(payload));
+    assert(rtcp_usbmux_pump(&host, 0U, 0U) == 1);
+    assert(connection->reset);
+    assert(connection->remote_closed);
+    rtcp_usbmux_tcp_packet_t rst = sent_tcp(&fake, fake.sent_count - 1U);
+    assert((rst.flags & RTCP_USBMUX_TH_RST) != 0U);
+
+    static uint8_t drained[RTCP_USBMUX_MAX_PAYLOAD];
+    assert(rtcp_usbmux_connection_recv(&host, connection, drained,
+                                       sizeof(drained)) ==
+           (int)sizeof(payload));
+    assert(rtcp_usbmux_connection_recv(&host, connection, drained,
+                                       sizeof(drained)) == RTCP_EIO);
+    rtcp_usbmux_connection_close(&host, connection);
+
+    /* The slot and local port are reusable after the reset. */
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 2U, 300U, 1U,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0U);
+    connection = NULL;
+    assert(rtcp_usbmux_connect(&host, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 500U,
+                               &connection) == RTCP_OK);
+    assert(connection->local_port == 2U);
+    rtcp_usbmux_connection_close(&host, connection);
+}
+
+static void test_optional_reply_padding(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    memset(&fake, 0, sizeof(fake));
+    rtcp_usbmux_transport_t transport = {
+        .send = fake_send,
+        .recv = fake_recv,
+        .user = &fake,
+    };
+    rtcp_usbmux_init(&host, &transport);
+
+    /* iOS appends four bytes to its VERSION reply.  The next frame starts at
+     * offset 4, not at offset 0. */
+    fake_packet_t *packet = &fake.received[fake.received_count++];
+    size_t length = rtcp_usbmux_build_version(packet->data,
+                                              sizeof(packet->data));
+    memset(packet->data + length, 0, 4U);
+    packet->length = length + 4U;
+    assert(rtcp_usbmux_start(&host, 0U) == RTCP_OK);
+
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1U, 100U, 1U,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0U);
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 500U,
+                               &connection) == RTCP_OK);
+    rtcp_usbmux_connection_close(&host, connection);
+}
+
 int main(void)
 {
     test_connect_and_stream();
@@ -240,6 +422,11 @@ int main(void)
     test_connect_timeout();
     test_desynchronised_stream();
     test_two_streams();
+    test_large_tls_record();
+    test_back_to_back_frames();
+    test_partial_frame();
+    test_overflow_resets_and_reconnect();
+    test_optional_reply_padding();
     puts("usbmux host test passed");
     return 0;
 }

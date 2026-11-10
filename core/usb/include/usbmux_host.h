@@ -27,7 +27,10 @@
 #include "rtcp/usbmux.h"
 
 #define RTCP_USBMUX_MAX_CONNECTIONS 2U
-#define RTCP_USBMUX_CONN_RX_CAPACITY 4096U
+/* One bulk transfer may carry a maximum-size TLS record (or two ordinary
+ * frames) before the owning thread gets to call connection_recv().  A
+ * 4 KiB ring dropped the stream exactly when it carried a full record. */
+#define RTCP_USBMUX_CONN_RX_CAPACITY RTCP_USBMUX_MAX_PAYLOAD
 #define RTCP_USBMUX_REASSEMBLY_CAPACITY \
     (RTCP_USBMUX_MAX_PAYLOAD + RTCP_USBMUX_TCP_HEADER_SIZE + \
      RTCP_USBMUX_HEADER_SIZE)

@@ -35,7 +35,11 @@
 #define RTCP_USBMUX_HEADER_SIZE 16U
 #define RTCP_USBMUX_VERSION_PACKET_SIZE 20U
 #define RTCP_USBMUX_TCP_HEADER_SIZE 20U
-#define RTCP_USBMUX_MAX_PAYLOAD 16384U
+/* Largest TCP payload in one mux frame.  A TLS record can be 16 KiB of
+ * plaintext plus up to 2 KiB of expansion; 32 KiB also leaves room for a
+ * second frame from the same bulk transfer.  The old 16 KiB limit rejected
+ * a whole-record frame at the wire boundary. */
+#define RTCP_USBMUX_MAX_PAYLOAD 32768U
 
 /* The iPhone's lockdown/usbmuxd control port.  It is a TCP destination port
  * inside a USBMUX stream, not a UDP/TCP port on an IP network. */

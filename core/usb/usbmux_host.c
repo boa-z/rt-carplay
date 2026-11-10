@@ -149,6 +149,35 @@ int rtcp_usbmux_start(rtcp_usbmux_host_t *host, uint32_t now_ms)
     return RTCP_OK;
 }
 
+static uint32_t read_be32(const uint8_t *data)
+{
+    return ((uint32_t)data[0] << 24U) | ((uint32_t)data[1] << 16U) |
+           ((uint32_t)data[2] << 8U) | (uint32_t)data[3];
+}
+
+/* Some iOS releases append four bytes to a VERSION reply (and, per DiPlay's
+ * capture, to a few TCP replies).  The next mux header starts four bytes
+ * later.  Accept that one boundary only when the skipped-to header is
+ * plausible; otherwise the stream is really desynchronised. */
+static bool plausible_frame_header(const uint8_t *data, size_t length)
+{
+    if (length < 8U) return false;
+    uint32_t proto = read_be32(data);
+    uint32_t frame_size = read_be32(data + 4U);
+    if (proto != RTCP_USBMUX_PROTO_VERSION && proto != RTCP_USBMUX_PROTO_SETUP &&
+        proto != RTCP_USBMUX_PROTO_TCP) {
+        return false;
+    }
+    if (proto == RTCP_USBMUX_PROTO_VERSION) {
+        return frame_size == RTCP_USBMUX_VERSION_PACKET_SIZE;
+    }
+    if (frame_size < 8U || frame_size > (1U << 20)) return false;
+    if (length >= 16U && read_be32(data + 8U) != RTCP_USBMUX_MAGIC) {
+        return false;
+    }
+    return true;
+}
+
 int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
                      uint32_t now_ms)
 {
@@ -188,6 +217,16 @@ int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
             break;
         }
         if (parsed < 0) {
+            const size_t padding = 4U;
+            size_t remaining = host->reassembly_length - offset;
+            if (remaining > padding &&
+                plausible_frame_header(host->reassembly + offset + padding,
+                                       remaining - padding)) {
+                RTCP_LOGW(USBMUX_HOST_TAG,
+                          "skipping optional 4-byte reply padding");
+                offset += padding;
+                continue;
+            }
             RTCP_LOGW(USBMUX_HOST_TAG, "frame desynchronised, dropping");
             host->reassembly_length = 0U;
             return RTCP_EIO;

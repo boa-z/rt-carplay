@@ -13,15 +13,20 @@
  *                         configuration, interfaces and endpoints
  *   carplay_usb request   send Apple's vendor request 0x52 again and print
  *                         the descriptor count the phone reports afterwards
+ *   carplay_usb mux       open USBMUX to the phone's lockdown port, send a
+ *                         GetValue request and print the reply; proves the
+ *                         bulk pipe and the mux/TCP layers end to end
  *   carplay_usb stop      disarm the hook
  */
 #include <rtthread.h>
 
 #include <string.h>
 
+#include "lockdown.h"
 #include "rtcp_lubanlite.h"
 #include "rtcp/rtcp.h"
 #include "rtcp/usb.h"
+#include "usbmux_host.h"
 
 #ifdef LPKG_RT_CARPLAY_LUBANLITE_USB
 
@@ -29,6 +34,8 @@
 
 #define APPLE_REQUEST_CARPLAY_CONFIGS 0x52U
 #define APPLE_CARPLAY_CONFIGS_WINDEX 0x0004U
+
+#define MUX_REPLY_MAX 2048U
 
 static const char *speed_name(uint8_t speed)
 {
@@ -157,6 +164,149 @@ static int cmd_request(void)
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* USBMUX end-to-end smoke test                                        */
+/* ------------------------------------------------------------------ */
+
+static struct {
+    uint8_t out_endpoint;
+    uint8_t in_endpoint;
+} s_mux_transport;
+
+static rtcp_usbmux_host_t s_mux;
+static uint8_t s_mux_reply[MUX_REPLY_MAX];
+
+static int mux_transport_send(void *user, const uint8_t *data, size_t length)
+{
+    (void)user;
+    int ret = rtcp_usb_lubanlite.ops->bulk_transfer(
+        rtcp_usb_lubanlite.context, s_mux_transport.out_endpoint,
+        (void *)data, length, 1000U);
+    if (ret < 0) {
+        return ret;
+    }
+    return (size_t)ret == length ? RTCP_OK : RTCP_EIO;
+}
+
+static int mux_transport_recv(void *user, uint8_t *data, size_t capacity,
+                              uint32_t timeout_ms)
+{
+    (void)user;
+    return rtcp_usb_lubanlite.ops->bulk_transfer(
+        rtcp_usb_lubanlite.context, s_mux_transport.in_endpoint, data,
+        capacity, timeout_ms);
+}
+
+static int cmd_mux(void)
+{
+    static rtcp_usb_device_t device;
+    int ret = rtcp_usb_lubanlite.ops->get_device(
+        rtcp_usb_lubanlite.context, &device);
+    if (ret != RTCP_OK) {
+        rt_kprintf("[carplay_usb] mux: not attached\n");
+        return 0;
+    }
+
+    int mux_interface = rtcp_usb_find_interface(
+        &device, RTCP_USB_CLASS_VENDOR, RTCP_USB_APPLE_SUBCLASS_USBMUX,
+        RTCP_USB_APPLE_PROTOCOL_USBMUX);
+    uint8_t out = 0U;
+    uint8_t in = 0U;
+    if (mux_interface < 0 ||
+        !rtcp_usb_interface_bulk_endpoints(&device.interfaces[mux_interface],
+                                           &out, &in) ||
+        out == 0U || in == 0U) {
+        rt_kprintf("[carplay_usb] mux: no USBMUX bulk pair\n");
+        return 0;
+    }
+    if (!rtcp_usb_is_carplay_configuration(&device)) {
+        rt_kprintf("[carplay_usb] mux: current configuration is not a "
+                   "CarPlay one; replug the phone after 'carplay_usb "
+                   "start'\n");
+        return 0;
+    }
+    s_mux_transport.out_endpoint = out;
+    s_mux_transport.in_endpoint = in;
+
+    rtcp_usbmux_transport_t transport = {
+        .send = mux_transport_send,
+        .recv = mux_transport_recv,
+        .user = NULL,
+    };
+    rtcp_usbmux_init(&s_mux, &transport);
+    ret = rtcp_usbmux_start(&s_mux, 0U);
+    rt_kprintf("[carplay_usb] mux: version/setup ret=%d\n", ret);
+    if (ret < 0) {
+        return 0;
+    }
+
+    rtcp_usbmux_connection_t *connection = NULL;
+    ret = rtcp_usbmux_connect(&s_mux, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 5000U,
+                              &connection);
+    rt_kprintf("[carplay_usb] mux: lockdown connect ret=%d\n", ret);
+    if (ret < 0) {
+        return 0;
+    }
+
+    uint8_t request[RTCP_LOCKDOWN_REQUEST_MAX];
+    size_t request_length = rtcp_lockdown_build_get_value(
+        request, sizeof(request), "rt-carplay", "ProductVersion");
+    if (request_length == 0U) {
+        rt_kprintf("[carplay_usb] mux: cannot build lockdown request\n");
+        rtcp_usbmux_connection_close(&s_mux, connection);
+        return 0;
+    }
+    ret = rtcp_usbmux_connection_send(&s_mux, connection, request,
+                                      request_length);
+    rt_kprintf("[carplay_usb] mux: GetValue sent ret=%d bytes=%u\n", ret,
+               (unsigned)request_length);
+    if (ret < 0) {
+        rtcp_usbmux_connection_close(&s_mux, connection);
+        return 0;
+    }
+
+    size_t reply_length = 0U;
+    bool complete = false;
+    for (unsigned elapsed = 0U; elapsed < 5000U; elapsed += 200U) {
+        ret = rtcp_usbmux_pump(&s_mux, 200U, elapsed);
+        if (ret < 0) {
+            rt_kprintf("[carplay_usb] mux: pump ret=%d\n", ret);
+            break;
+        }
+        int received;
+        do {
+            size_t space = sizeof(s_mux_reply) - 1U - reply_length;
+            if (space == 0U) {
+                break;
+            }
+            received = rtcp_usbmux_connection_recv(
+                &s_mux, connection, s_mux_reply + reply_length, space);
+            if (received > 0) {
+                reply_length += (size_t)received;
+            }
+        } while (received > 0 && reply_length < sizeof(s_mux_reply) - 1U);
+        s_mux_reply[reply_length] = '\0';
+        if (reply_length != 0U &&
+            strstr((const char *)s_mux_reply, "</plist>") != NULL) {
+            complete = true;
+            break;
+        }
+    }
+
+    rt_kprintf("[carplay_usb] mux: reply bytes=%u complete=%u\n",
+               (unsigned)reply_length, complete ? 1U : 0U);
+    if (reply_length != 0U) {
+        char version[32];
+        if (rtcp_lockdown_extract_string(s_mux_reply, reply_length, "Value",
+                                         version, sizeof(version)) == RTCP_OK) {
+            rt_kprintf("[carplay_usb] mux: ProductVersion=%s\n", version);
+        }
+        rt_kprintf("%s\n", (const char *)s_mux_reply);
+    }
+    rtcp_usbmux_connection_close(&s_mux, connection);
+    return 0;
+}
+
 static int cmd_carplay_usb(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "status";
@@ -179,7 +329,11 @@ static int cmd_carplay_usb(int argc, char **argv)
     if (strcmp(what, "request") == 0) {
         return cmd_request();
     }
-    rt_kprintf("usage: carplay_usb [start|stop|status|request]\n");
+    if (strcmp(what, "mux") == 0) {
+        return cmd_mux();
+    }
+    rt_kprintf(
+        "usage: carplay_usb [start|stop|status|request|mux]\n");
     return 0;
 }
 

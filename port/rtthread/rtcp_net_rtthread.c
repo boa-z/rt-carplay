@@ -2,6 +2,8 @@
 /*
  * RT-Thread TCP seam.  Uses the BSD socket API exposed by SAL (or lwIP
  * directly) so the same code works with the ArtInChip SDK network stack.
+ * IPv6 support follows the stack build: when neither SAL's NETDEV_IPV6 nor
+ * lwIP's LWIP_IPV6 is enabled, AF_INET6 requests return RTCP_ENOTSUP.
  */
 #include "rtcp_rtthread.h"
 
@@ -22,6 +24,11 @@
 
 #include "rtcp/rtcp.h"
 
+#if (defined(NETDEV_IPV6) && NETDEV_IPV6) || \
+    (defined(LWIP_IPV6) && LWIP_IPV6)
+#define RTCP_NET_HAVE_IPV6 1
+#endif
+
 /* Upper bound for one poll() batch; stack cost is sizeof(struct pollfd) each.
  * The AirPlay server polls RTSP, event, timing, screen and three audio
  * data/control pairs, so 12 leaves a little headroom. */
@@ -31,23 +38,97 @@
 
 static int poll_fds(struct rtcp_pollfd *fds, int n, int timeout_ms);
 
-static int listen_socket(uint16_t port)
+static int fill_sockaddr(const rtcp_addr_t *addr,
+                         struct sockaddr_storage *storage, socklen_t *length)
 {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    memset(storage, 0, sizeof(*storage));
+    if (addr->family == RTCP_AF_INET) {
+        struct sockaddr_in *in = (struct sockaddr_in *)storage;
+        in->sin_family = AF_INET;
+        memcpy(&in->sin_addr, addr->addr, 4U);
+        in->sin_port = htons(addr->port);
+        *length = sizeof(*in);
+        return RTCP_OK;
+    }
+#if RTCP_NET_HAVE_IPV6
+    if (addr->family == RTCP_AF_INET6) {
+        struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)storage;
+        in6->sin6_family = AF_INET6;
+        memcpy(&in6->sin6_addr, addr->addr, 16U);
+        in6->sin6_port = htons(addr->port);
+        in6->sin6_scope_id = addr->scope_id;
+        *length = sizeof(*in6);
+        return RTCP_OK;
+    }
+#endif
+    return RTCP_ENOTSUP;
+}
+
+static void read_sockaddr(const struct sockaddr_storage *storage,
+                          rtcp_addr_t *addr)
+{
+    memset(addr, 0, sizeof(*addr));
+    if (storage->ss_family == AF_INET) {
+        const struct sockaddr_in *in = (const struct sockaddr_in *)storage;
+        addr->family = RTCP_AF_INET;
+        memcpy(addr->addr, &in->sin_addr, 4U);
+        addr->port = ntohs(in->sin_port);
+    }
+#if RTCP_NET_HAVE_IPV6
+    else if (storage->ss_family == AF_INET6) {
+        const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)storage;
+        addr->family = RTCP_AF_INET6;
+        memcpy(addr->addr, &in6->sin6_addr, 16U);
+        addr->port = ntohs(in6->sin6_port);
+        addr->scope_id = (uint16_t)in6->sin6_scope_id;
+    }
+#endif
+}
+
+static int listen_socket(uint8_t family, uint16_t port)
+{
+    int domain;
+    if (family == RTCP_AF_INET) {
+        domain = AF_INET;
+    } else if (family == RTCP_AF_INET6) {
+#if RTCP_NET_HAVE_IPV6
+        domain = AF_INET6;
+#else
+        return RTCP_ENOTSUP;
+#endif
+    } else {
+        return RTCP_EINVAL;
+    }
+
+    int fd = socket(domain, SOCK_STREAM, 0);
     if (fd < 0) return RTCP_EIO;
 
     int one = 1;
     (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-        listen(fd, 4) != 0) {
-        closesocket(fd);
-        return RTCP_EIO;
+    if (family == RTCP_AF_INET6) {
+#if RTCP_NET_HAVE_IPV6
+        struct sockaddr_in6 addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port = htons(port);
+        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+            listen(fd, 4) != 0) {
+            closesocket(fd);
+            return RTCP_EIO;
+        }
+#endif
+    } else {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(port);
+        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+            listen(fd, 4) != 0) {
+            closesocket(fd);
+            return RTCP_EIO;
+        }
     }
     return fd;
 }
@@ -58,30 +139,33 @@ static int accept_socket(int lfd, rtcp_addr_t *peer)
     socklen_t len = sizeof(storage);
     int fd = accept(lfd, (struct sockaddr *)&storage, &len);
     if (fd < 0) return RTCP_EIO;
-    if (peer != NULL) {
-        memset(peer, 0, sizeof(*peer));
-        if (storage.ss_family == AF_INET) {
-            const struct sockaddr_in *in = (const struct sockaddr_in *)&storage;
-            peer->family = RTCP_AF_INET;
-            memcpy(peer->addr, &in->sin_addr, 4U);
-            peer->port = ntohs(in->sin_port);
-        }
-    }
+    if (peer != NULL) read_sockaddr(&storage, peer);
     return fd;
 }
 
 static int connect_socket(const rtcp_addr_t *addr)
 {
-    if (addr == NULL || addr->family != RTCP_AF_INET) return RTCP_EINVAL;
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return RTCP_EIO;
+    if (addr == NULL) return RTCP_EINVAL;
+    int domain;
+    if (addr->family == RTCP_AF_INET) {
+        domain = AF_INET;
+    } else if (addr->family == RTCP_AF_INET6) {
+#if RTCP_NET_HAVE_IPV6
+        domain = AF_INET6;
+#else
+        return RTCP_ENOTSUP;
+#endif
+    } else {
+        return RTCP_EINVAL;
+    }
+    struct sockaddr_storage storage;
+    socklen_t length = 0;
+    int rc = fill_sockaddr(addr, &storage, &length);
+    if (rc != RTCP_OK) return rc;
 
-    struct sockaddr_in in;
-    memset(&in, 0, sizeof(in));
-    in.sin_family = AF_INET;
-    memcpy(&in.sin_addr, addr->addr, 4U);
-    in.sin_port = htons(addr->port);
-    if (connect(fd, (struct sockaddr *)&in, sizeof(in)) != 0) {
+    int fd = socket(domain, SOCK_STREAM, 0);
+    if (fd < 0) return RTCP_EIO;
+    if (connect(fd, (struct sockaddr *)&storage, length) != 0) {
         closesocket(fd);
         return RTCP_EIO;
     }
@@ -94,29 +178,39 @@ static int connect_socket(const rtcp_addr_t *addr)
  * connect-out runs there. */
 static int connect_timeout_socket(const rtcp_addr_t *addr, int timeout_ms)
 {
-    if (addr == NULL || addr->family != RTCP_AF_INET) return RTCP_EINVAL;
+    if (addr == NULL) return RTCP_EINVAL;
+    int domain;
+    if (addr->family == RTCP_AF_INET) {
+        domain = AF_INET;
+    } else if (addr->family == RTCP_AF_INET6) {
+#if RTCP_NET_HAVE_IPV6
+        domain = AF_INET6;
+#else
+        return RTCP_ENOTSUP;
+#endif
+    } else {
+        return RTCP_EINVAL;
+    }
+    struct sockaddr_storage storage;
+    socklen_t length = 0;
+    int rc = fill_sockaddr(addr, &storage, &length);
+    if (rc != RTCP_OK) return rc;
 
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = socket(domain, SOCK_STREAM, 0);
     if (fd < 0) return RTCP_EIO;
-
-    struct sockaddr_in in;
-    memset(&in, 0, sizeof(in));
-    in.sin_family = AF_INET;
-    memcpy(&in.sin_addr, addr->addr, 4U);
-    in.sin_port = htons(addr->port);
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
         /* No socket-level fcntl on this port: the blocking connect is still
          * correct, just not time-bounded here. */
-        if (connect(fd, (struct sockaddr *)&in, sizeof(in)) != 0) {
+        if (connect(fd, (struct sockaddr *)&storage, length) != 0) {
             closesocket(fd);
             return RTCP_EIO;
         }
         return fd;
     }
 
-    int rc = connect(fd, (struct sockaddr *)&in, sizeof(in));
+    rc = connect(fd, (struct sockaddr *)&storage, length);
     if (rc != 0) {
         if (errno != EINPROGRESS) {
             closesocket(fd);
@@ -189,9 +283,22 @@ static void close_fd(int fd)
     if (fd >= 0) closesocket(fd);
 }
 
-static int udp_open(uint16_t port, bool reuse)
+static int udp_open(uint8_t family, uint16_t port, bool reuse)
 {
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    int domain;
+    if (family == RTCP_AF_INET) {
+        domain = AF_INET;
+    } else if (family == RTCP_AF_INET6) {
+#if RTCP_NET_HAVE_IPV6
+        domain = AF_INET6;
+#else
+        return RTCP_ENOTSUP;
+#endif
+    } else {
+        return RTCP_EINVAL;
+    }
+
+    int fd = socket(domain, SOCK_DGRAM, 0);
     if (fd < 0) return RTCP_EIO;
 
     if (reuse) {
@@ -202,14 +309,27 @@ static int udp_open(uint16_t port, bool reuse)
 #endif
     }
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        closesocket(fd);
-        return RTCP_EIO;
+    if (family == RTCP_AF_INET6) {
+#if RTCP_NET_HAVE_IPV6
+        struct sockaddr_in6 addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port = htons(port);
+        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+            closesocket(fd);
+            return RTCP_EIO;
+        }
+#endif
+    } else {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(port);
+        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+            closesocket(fd);
+            return RTCP_EIO;
+        }
     }
     return fd;
 }
@@ -235,14 +355,11 @@ static int udp_join(int fd, const uint8_t group[4])
 static int udp_sendto(int fd, const rtcp_addr_t *to, const void *buf, size_t len)
 {
     if (fd < 0 || to == NULL || (buf == NULL && len != 0U)) return RTCP_EINVAL;
-    if (to->family != RTCP_AF_INET) return RTCP_ENOTSUP;
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    memcpy(&addr.sin_addr, to->addr, 4U);
-    addr.sin_port = htons(to->port);
-    int rc = sendto(fd, buf, len, 0, (struct sockaddr *)&addr, sizeof(addr));
+    struct sockaddr_storage storage;
+    socklen_t length = 0;
+    int rc = fill_sockaddr(to, &storage, &length);
+    if (rc != RTCP_OK) return rc;
+    rc = sendto(fd, buf, len, 0, (struct sockaddr *)&storage, length);
     return rc < 0 ? RTCP_EIO : rc;
 }
 
@@ -253,36 +370,22 @@ static int udp_recvfrom(int fd, void *buf, size_t len, rtcp_addr_t *from)
     socklen_t storage_len = sizeof(storage);
     int rc = recvfrom(fd, buf, len, 0, (struct sockaddr *)&storage, &storage_len);
     if (rc < 0) return RTCP_EIO;
-    if (from != NULL) {
-        memset(from, 0, sizeof(*from));
-        if (storage.ss_family == AF_INET) {
-            const struct sockaddr_in *in = (const struct sockaddr_in *)&storage;
-            from->family = RTCP_AF_INET;
-            memcpy(from->addr, &in->sin_addr, 4U);
-            from->port = ntohs(in->sin_port);
-        }
-        /* struct sockaddr_in6 only exists when the stack was built with
-         * IPv6; SAL gates it on NETDEV_IPV6, lwIP on LWIP_IPV6. */
-#if (defined(NETDEV_IPV6) && NETDEV_IPV6) || \
-    (defined(LWIP_IPV6) && LWIP_IPV6)
-        else if (storage.ss_family == AF_INET6) {
-            const struct sockaddr_in6 *in6 =
-                (const struct sockaddr_in6 *)&storage;
-            from->family = RTCP_AF_INET6;
-            memcpy(from->addr, &in6->sin6_addr, 16U);
-            from->port = ntohs(in6->sin6_port);
-        }
-#endif
-    }
+    if (from != NULL) read_sockaddr(&storage, from);
     return rc;
 }
 
 uint16_t rtcp_net_rtthread_local_port(int fd)
 {
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
     socklen_t len = sizeof(addr);
     if (fd < 0 || getsockname(fd, (struct sockaddr *)&addr, &len) != 0) return 0U;
-    return ntohs(addr.sin_port);
+    if (addr.ss_family == AF_INET6) {
+        return ntohs(((const struct sockaddr_in6 *)&addr)->sin6_port);
+    }
+    if (addr.ss_family == AF_INET) {
+        return ntohs(((const struct sockaddr_in *)&addr)->sin_port);
+    }
+    return 0U;
 }
 
 const struct rtcp_net rtcp_net_rtthread = {

@@ -40,8 +40,14 @@ static uint64_t timing_now_ntp(const airplay_timing_port_t *port)
 
 static bool same_peer(const rtcp_addr_t *address, const rtcp_addr_t *peer)
 {
-    return address->family == RTCP_AF_INET && peer->family == RTCP_AF_INET &&
-           memcmp(address->addr, peer->addr, 4U) == 0;
+    if (address->family != peer->family) return false;
+    if (peer->family == RTCP_AF_INET) {
+        return memcmp(address->addr, peer->addr, 4U) == 0;
+    }
+    if (peer->family == RTCP_AF_INET6) {
+        return memcmp(address->addr, peer->addr, 16U) == 0;
+    }
+    return false;
 }
 
 void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
@@ -113,11 +119,13 @@ int airplay_timing_port_start(const struct rtcp_os *os,
     *out_port = NULL;
     if (os == NULL || net == NULL || net->udp_open == NULL ||
         net->udp_sendto == NULL || net->udp_recvfrom == NULL ||
-        config == NULL || config->peer.family != RTCP_AF_INET) {
+        config == NULL ||
+        (config->peer.family != RTCP_AF_INET &&
+         config->peer.family != RTCP_AF_INET6)) {
         return RTCP_EINVAL;
     }
 
-    int fd = net->udp_open(0U, false);
+    int fd = net->udp_open(config->peer.family, 0U, false);
     if (fd < 0) {
         RTCP_LOGE(TAG, "udp_open failed rc=%d", fd);
         return fd;

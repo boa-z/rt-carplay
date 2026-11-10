@@ -66,6 +66,7 @@ struct airplay_rtsp_server {
     int listener_fd;
     int client_fd;
     uint16_t port;
+    uint8_t family;
     rtcp_addr_t peer;
     bool stopping;
     unsigned next_connection_id;
@@ -148,6 +149,7 @@ static bool server_start_screen(const airplay_rtsp_pairing_t *pairing,
 
     airplay_screen_server_config_t config = {0};
     config.requested_port = requested_port;
+    config.family = server->family;
     config.max_body_bytes = server->config.screen_max_body_bytes;
     config.on_message = server->config.on_screen_message;
     config.message_context = server->config.screen_message_context;
@@ -209,6 +211,7 @@ static bool server_start_event(const airplay_rtsp_pairing_t *pairing,
     config.keys = keys;
     config.stream_id = 0U;
     config.initial_cseq = 0U;
+    config.family = server->family;
     config.on_state = server_event_state;
     config.context = server;
     int result = airplay_event_port_start(server->os, server->net, &config,
@@ -238,7 +241,8 @@ static bool server_start_timing(uint16_t peer_port, uint16_t *bound_port,
         *bound_port = airplay_timing_port_get_port(server->timing_port);
         return *bound_port != 0U;
     }
-    if (server->peer.family != RTCP_AF_INET) {
+    if (server->peer.family != RTCP_AF_INET &&
+        server->peer.family != RTCP_AF_INET6) {
         RTCP_LOGW(TAG, "timing_setup=peer_address_unavailable");
         return false;
     }
@@ -353,6 +357,7 @@ static bool server_start_audio(const airplay_rtsp_pairing_t *pairing,
     memcpy(config.output_key, output_key, sizeof(config.output_key));
     config.stream_type = stream_type;
     config.audio_format_bits = audio_format_bits;
+    config.family = server->family;
     config.on_pcm = server_audio_pcm;
     config.context = server;
     int result = airplay_audio_stream_start(server->os, server->net, &config,
@@ -767,7 +772,11 @@ int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
 
     uint16_t requested_port = config->port == 0U ? AIRPLAY_RTSP_DEFAULT_PORT
                                                  : config->port;
-    int listener_fd = config->net->listen(requested_port);
+    uint8_t family = config->family == 0U ? RTCP_AF_INET : config->family;
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) {
+        return RTCP_EINVAL;
+    }
+    int listener_fd = config->net->listen(family, requested_port);
     if (listener_fd < 0) {
         RTCP_LOGE(TAG, "rtsp_bind=failed rc=%d port=%u", listener_fd,
                   (unsigned)requested_port);
@@ -791,6 +800,7 @@ int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
     server->config.info_plist = server->info_plist;
     server->listener_fd = listener_fd;
     server->client_fd = -1;
+    server->family = family;
     server->port = config->net->local_port != NULL
                        ? config->net->local_port(listener_fd)
                        : requested_port;
@@ -825,7 +835,8 @@ bool airplay_rtsp_server_get_peer(const airplay_rtsp_server_t *server,
                                   rtcp_addr_t *peer)
 {
     if (server == NULL || peer == NULL || server->client_fd < 0 ||
-        server->peer.family != RTCP_AF_INET) {
+        (server->peer.family != RTCP_AF_INET &&
+         server->peer.family != RTCP_AF_INET6)) {
         return false;
     }
     *peer = server->peer;

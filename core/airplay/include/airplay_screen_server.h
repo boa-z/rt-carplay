@@ -22,6 +22,8 @@ typedef void (*airplay_screen_server_exit_cb_t)(void *context);
 
 typedef struct {
     uint16_t requested_port; /* 0 selects an ephemeral port. */
+    /* Listener address family: 0/RTCP_AF_INET (default) or RTCP_AF_INET6. */
+    uint8_t family;
     size_t max_body_bytes;
     airplay_screen_message_cb_t on_message;
     void *message_context;

@@ -87,7 +87,10 @@ int airplay_event_port_start(const struct rtcp_os *os,
     *out_port = NULL;
     if (os == NULL || net == NULL || config == NULL) return RTCP_EINVAL;
 
-    int listener_fd = net->listen(0U);
+    uint8_t family = config->family == 0U ? RTCP_AF_INET : config->family;
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) return RTCP_EINVAL;
+
+    int listener_fd = net->listen(family, 0U);
     if (listener_fd < 0) {
         RTCP_LOGE(TAG, "event_listener=socket_failed rc=%d", listener_fd);
         return listener_fd;

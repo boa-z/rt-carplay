@@ -174,7 +174,7 @@ static void test_decrypts_and_rejects(void)
     assert(format != NULL && format->sample_rate == 44100U &&
            format->channels == 2U);
 
-    int client = rtcp_net_linux.udp_open(0U, false);
+    int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(client >= 0);
     rtcp_addr_t data_addr = loopback(airplay_audio_stream_get_data_port(stream));
 
@@ -251,7 +251,7 @@ static void test_alt_stream_type(void)
     airplay_audio_stream_t *stream = NULL;
     assert(airplay_audio_stream_start(&rtcp_os_linux, &rtcp_net_linux, &config,
                                       &stream) == RTCP_OK);
-    int client = rtcp_net_linux.udp_open(0U, false);
+    int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(client >= 0);
     rtcp_addr_t data_addr = loopback(airplay_audio_stream_get_data_port(stream));
     static const uint8_t pcm[4] = {0xaa, 0xbb, 0xcc, 0xdd};

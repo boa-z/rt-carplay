@@ -461,7 +461,7 @@ int mdns_responder_open(mdns_responder_t *responder, const struct rtcp_net *net)
     }
     if (responder->fd >= 0) return RTCP_OK;
 
-    int fd = net->udp_open(MDNS_PORT, true);
+    int fd = net->udp_open(RTCP_AF_INET, MDNS_PORT, true);
     if (fd < 0) {
         RTCP_LOGE(TAG, "udp_open failed rc=%d", fd);
         return fd;

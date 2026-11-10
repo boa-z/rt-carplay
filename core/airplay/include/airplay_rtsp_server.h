@@ -41,6 +41,11 @@ typedef struct {
 
     uint16_t port;        /* 0 selects AIRPLAY_RTSP_DEFAULT_PORT */
     uint16_t screen_port; /* 0 requests an ephemeral Screen DataStream port */
+    /* Address family of the RTSP listener and of every media endpoint it
+     * starts: 0/RTCP_AF_INET (default) or RTCP_AF_INET6.  Wired CarPlay uses
+     * IPv6 link-local; the phone connects to the address advertised in
+     * CarPlayStartSession. */
+    uint8_t family;
     size_t screen_max_body_bytes; /* 0 selects the default cap */
 
     /* Decoded Screen frames (Annex-B H.264, borrowed until return). */
@@ -68,9 +73,10 @@ uint16_t airplay_rtsp_server_get_port(const airplay_rtsp_server_t *server);
 bool airplay_rtsp_server_is_connected(const airplay_rtsp_server_t *server);
 bool airplay_rtsp_server_is_encrypted(const airplay_rtsp_server_t *server);
 
-/* Address of the currently attached RTSP client, when it is IPv4.  The
- * CarPlay Control browser uses it to address a unicast mDNS query at the
- * phone, which does not depend on multicast forwarding through the soft-AP. */
+/* Address of the currently attached RTSP client, when it is IPv4 or IPv6.
+ * The CarPlay Control browser uses an IPv4 peer to address a unicast mDNS
+ * query at the phone; wired sessions read an IPv6 link-local peer here for
+ * the timing endpoint. */
 bool airplay_rtsp_server_get_peer(const airplay_rtsp_server_t *server,
                                   rtcp_addr_t *peer);
 

@@ -21,6 +21,9 @@ typedef struct {
     airplay_pair_verify_event_keys_t keys;
     uint32_t stream_id;
     uint32_t initial_cseq;
+    /* Listener address family: 0/RTCP_AF_INET (default) or RTCP_AF_INET6.
+     * Wired CarPlay runs the whole session over IPv6 link-local. */
+    uint8_t family;
     airplay_event_port_state_cb_t on_state;
     void *context;
 } airplay_event_port_config_t;

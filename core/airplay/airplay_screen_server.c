@@ -165,6 +165,8 @@ int airplay_screen_server_start(const struct rtcp_os *os,
         config->max_body_bytes == 0U || config->on_message == NULL) {
         return RTCP_EINVAL;
     }
+    uint8_t family = config->family == 0U ? RTCP_AF_INET : config->family;
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) return RTCP_EINVAL;
 
     airplay_screen_server_t *server = calloc(1U, sizeof(*server));
     if (server == NULL) return RTCP_ENOMEM;
@@ -186,7 +188,7 @@ int airplay_screen_server_start(const struct rtcp_os *os,
         return RTCP_ENOMEM;
     }
 
-    int listener_fd = net->listen(config->requested_port);
+    int listener_fd = net->listen(family, config->requested_port);
     if (listener_fd < 0) {
         airplay_screen_stream_destroy(server->stream);
         free(server);

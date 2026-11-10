@@ -128,6 +128,8 @@ int airplay_audio_stream_start(const struct rtcp_os *os,
         !airplay_audio_stream_type_is_supported(config->stream_type)) {
         return RTCP_EINVAL;
     }
+    uint8_t family = config->family == 0U ? RTCP_AF_INET : config->family;
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) return RTCP_EINVAL;
 
     airplay_audio_stream_t *stream = calloc(1U, sizeof(*stream));
     if (stream == NULL) return RTCP_ENOMEM;
@@ -164,13 +166,13 @@ int airplay_audio_stream_start(const struct rtcp_os *os,
         return RTCP_EIO;
     }
 
-    stream->data_fd = net->udp_open(0U, false);
+    stream->data_fd = net->udp_open(family, 0U, false);
     if (stream->data_fd < 0) {
         RTCP_LOGE(TAG, "data_udp_open failed rc=%d", stream->data_fd);
         audio_stream_free(stream, net);
         return RTCP_EIO;
     }
-    stream->control_fd = net->udp_open(0U, false);
+    stream->control_fd = net->udp_open(family, 0U, false);
     if (stream->control_fd < 0) {
         RTCP_LOGE(TAG, "control_udp_open failed rc=%d", stream->control_fd);
         audio_stream_free(stream, net);

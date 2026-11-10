@@ -13,7 +13,10 @@
 typedef struct airplay_timing_port airplay_timing_port_t;
 
 typedef struct {
-    rtcp_addr_t peer; /* IPv4 peer; peer.port == 0 disables periodic requests. */
+    /* Peer address; IPv4 or IPv6.  peer.port == 0 disables periodic
+     * requests.  An IPv6 link-local peer needs peer.scope_id set to the
+     * outgoing netif zone. */
+    rtcp_addr_t peer;
 } airplay_timing_port_config_t;
 
 int airplay_timing_port_start(const struct rtcp_os *os,

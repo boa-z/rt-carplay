@@ -271,6 +271,65 @@ static void test_plaintext_routing(void)
     airplay_rtsp_server_stop(server);
 }
 
+static bool client_connect6(client_t *client, uint16_t port)
+{
+    rtcp_addr_t address = {0};
+    address.family = RTCP_AF_INET6;
+    address.addr[15] = 1U; /* ::1 */
+    address.port = port;
+    client->client_fd = rtcp_net_linux.connect(&address);
+    client->len = 0U;
+    return client->client_fd >= 0;
+}
+
+/* Wired CarPlay attaches over IPv6 link-local, so the same RTSP server must
+ * serve an IPv6 loopback controller and report the IPv6 peer address. */
+static void test_ipv6_listener(void)
+{
+    uint8_t info_plist[INFO_PLIST_BYTES];
+    size_t info_len = build_info_plist(info_plist, sizeof(info_plist));
+
+    airplay_rtsp_server_config_t config = {0};
+    config.os = &rtcp_os_linux;
+    config.net = &rtcp_net_linux;
+    fill_pairing(&config.pairing);
+    config.info_plist = info_plist;
+    config.info_plist_len = info_len;
+    config.on_screen_message = capture_screen;
+    config.family = RTCP_AF_INET6;
+
+    airplay_rtsp_server_t *server = NULL;
+    int result = airplay_rtsp_server_start(&config, &server);
+    if (result != RTCP_OK) {
+        puts("IPv6 RTSP listener unavailable; skipped");
+        return;
+    }
+
+    client_t client;
+    uint16_t port = airplay_rtsp_server_get_port(server);
+    assert(port != 0U);
+    assert(client_connect6(&client, port));
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS &&
+           !airplay_rtsp_server_is_connected(server)) {
+        airplay_rtsp_server_poll(server, 10);
+    }
+    assert(airplay_rtsp_server_is_connected(server));
+
+    rtcp_addr_t peer = {0};
+    assert(airplay_rtsp_server_get_peer(server, &peer));
+    assert(peer.family == RTCP_AF_INET6);
+    assert(peer.addr[15] == 1U);
+
+    static const char info_request[] =
+        "GET /info RTSP/1.0\r\nCSeq: 1\r\n\r\n";
+    assert(client_send(&client, info_request, sizeof(info_request) - 1U));
+    expect_response(server, &client, "200 OK");
+
+    rtcp_net_linux.close(client.client_fd);
+    airplay_rtsp_server_stop(server);
+}
+
 static void test_argument_checks(void)
 {
     uint8_t info_plist[INFO_PLIST_BYTES];
@@ -315,6 +374,7 @@ static void test_argument_checks(void)
 int main(void)
 {
     test_plaintext_routing();
+    test_ipv6_listener();
     test_argument_checks();
     assert(screen_messages == 0U);
     puts("airplay RTSP server host test passed");

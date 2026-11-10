@@ -47,7 +47,7 @@ static void test_responds_to_request(void)
     assert(airplay_timing_port_get_port(port) != 0U);
     assert(airplay_timing_port_get_fd(port) >= 0);
 
-    int client = rtcp_net_linux.udp_open(0U, false);
+    int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(client >= 0);
     uint16_t client_port = rtcp_net_linux.local_port(client);
     assert(client_port != 0U);
@@ -79,7 +79,7 @@ static void test_responds_to_request(void)
 
 static void test_periodic_requests(void)
 {
-    int client = rtcp_net_linux.udp_open(0U, false);
+    int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(client >= 0);
     uint16_t client_port = rtcp_net_linux.local_port(client);
     assert(client_port != 0U);

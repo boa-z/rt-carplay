@@ -64,7 +64,7 @@ int main(void)
     assert(memcmp(random_a, random_b, sizeof(random_a)) != 0);
 
     /* TCP loopback. */
-    int listener = rtcp_net_linux.listen(0);
+    int listener = rtcp_net_linux.listen(RTCP_AF_INET, 0);
     assert(listener >= 0);
     uint16_t port = rtcp_net_linux_local_port(listener);
     assert(port != 0U);
@@ -106,18 +106,84 @@ int main(void)
     assert(memcmp(buffer, pong, sizeof(pong) - 1U) == 0);
 
     /* Argument validation. */
-    assert(rtcp_net_linux.listen(0) >= 0);
+    assert(rtcp_net_linux.listen(RTCP_AF_INET, 0) >= 0);
+    assert(rtcp_net_linux.listen(9U, 0) == RTCP_EINVAL);
     assert(rtcp_net_linux.send(-1, ping, 1) == RTCP_EINVAL);
     assert(rtcp_net_linux.poll(NULL, 1, 0) == RTCP_EINVAL);
     assert(rtcp_net_linux.connect(NULL) == RTCP_EINVAL);
 
+    /* IPv6 loopback, the wired CarPlay transport.  Skip only when the host
+     * has no IPv6 loopback at all. */
+    int listener6 = rtcp_net_linux.listen(RTCP_AF_INET6, 0);
+    if (listener6 >= 0) {
+        uint16_t port6 = rtcp_net_linux_local_port(listener6);
+        assert(port6 != 0U);
+        rtcp_addr_t loopback6 = {
+            .family = RTCP_AF_INET6,
+            .addr = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+            .port = port6,
+        };
+        int client6 = rtcp_net_linux.connect(&loopback6);
+        assert(client6 >= 0);
+        rtcp_addr_t peer6 = {0};
+        int server6 = rtcp_net_linux.accept(listener6, &peer6);
+        assert(server6 >= 0);
+        assert(peer6.family == RTCP_AF_INET6 && peer6.port != 0U);
+        assert(rtcp_net_linux.send(client6, ping, sizeof(ping) - 1U) ==
+               (int)(sizeof(ping) - 1U));
+        struct rtcp_pollfd poll6 = {
+            .fd = server6,
+            .events = RTCP_POLLIN,
+            .revents = 0,
+        };
+        assert(rtcp_net_linux.poll(&poll6, 1, 1000) == 1);
+        memset(buffer, 0, sizeof(buffer));
+        assert(rtcp_net_linux.recv(server6, buffer, sizeof(buffer) - 1U) ==
+               (int)(sizeof(ping) - 1U));
+        assert(memcmp(buffer, ping, sizeof(ping) - 1U) == 0);
+        rtcp_net_linux.close(client6);
+        rtcp_net_linux.close(server6);
+        rtcp_net_linux.close(listener6);
+
+        int receiver6 = rtcp_net_linux.udp_open(RTCP_AF_INET6, 0U, false);
+        assert(receiver6 >= 0);
+        uint16_t udp_port6 = rtcp_net_linux_local_port(receiver6);
+        assert(udp_port6 != 0U);
+        int sender6 = rtcp_net_linux.udp_open(RTCP_AF_INET6, 0U, false);
+        assert(sender6 >= 0);
+        rtcp_addr_t unicast6 = {
+            .family = RTCP_AF_INET6,
+            .addr = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+            .port = udp_port6,
+        };
+        static const char datagram6[] = "wired";
+        assert(rtcp_net_linux.udp_sendto(sender6, &unicast6, datagram6,
+                                         sizeof(datagram6)) ==
+               (int)sizeof(datagram6));
+        struct rtcp_pollfd poll6_udp = {
+            .fd = receiver6,
+            .events = RTCP_POLLIN,
+            .revents = 0,
+        };
+        assert(rtcp_net_linux.poll(&poll6_udp, 1, 1000) == 1);
+        rtcp_addr_t source6 = {0};
+        assert(rtcp_net_linux.udp_recvfrom(receiver6, buffer, sizeof(buffer),
+                                           &source6) ==
+               (int)sizeof(datagram6));
+        assert(source6.family == RTCP_AF_INET6);
+        rtcp_net_linux.close(receiver6);
+        rtcp_net_linux.close(sender6);
+    } else {
+        puts("IPv6 loopback unavailable; skipped");
+    }
+
     /* UDP loopback (mDNS transport).  Multicast join is environment
      * dependent and is exercised on the target, not here. */
-    int receiver = rtcp_net_linux.udp_open(0U, false);
+    int receiver = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(receiver >= 0);
     uint16_t udp_port = rtcp_net_linux_local_port(receiver);
     assert(udp_port != 0U);
-    int sender = rtcp_net_linux.udp_open(0U, false);
+    int sender = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(sender >= 0);
 
     rtcp_addr_t unicast = {

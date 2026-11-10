@@ -57,6 +57,8 @@ typedef struct {
     uint8_t output_key[AIRPLAY_AUDIO_KEY_BYTES];
     uint16_t stream_type; /* AIRPLAY_AUDIO_STREAM_*; echoed to the callback. */
     uint64_t audio_format_bits; /* SETUP audioFormat field. */
+    /* UDP socket family: 0/RTCP_AF_INET (default) or RTCP_AF_INET6. */
+    uint8_t family;
     size_t max_datagram_bytes;  /* 0 selects the default. */
     airplay_audio_pcm_cb_t on_pcm;
     void *context;

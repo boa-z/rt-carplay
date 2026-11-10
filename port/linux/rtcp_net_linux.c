@@ -13,21 +13,37 @@
 
 #include "rtcp/rtcp.h"
 
-static int listen_socket(uint16_t port)
+static int listen_socket(uint8_t family, uint16_t port)
 {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) {
+        return RTCP_EINVAL;
+    }
+    int fd = socket(family == RTCP_AF_INET6 ? AF_INET6 : AF_INET,
+                    SOCK_STREAM, 0);
     if (fd < 0) return RTCP_EIO;
 
     int one = 1;
     (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-        listen(fd, 4) != 0) {
+    int rc;
+    if (family == RTCP_AF_INET6) {
+#ifdef IPV6_V6ONLY
+        (void)setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one));
+#endif
+        struct sockaddr_in6 addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port = htons(port);
+        rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+    } else {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(port);
+        rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+    }
+    if (rc != 0 || listen(fd, 4) != 0) {
         close(fd);
         return RTCP_EIO;
     }
@@ -52,6 +68,7 @@ static int accept_socket(int lfd, rtcp_addr_t *peer)
             peer->family = RTCP_AF_INET6;
             memcpy(peer->addr, &in6->sin6_addr, 16U);
             peer->port = ntohs(in6->sin6_port);
+            peer->scope_id = (uint16_t)in6->sin6_scope_id;
         }
     }
     return fd;
@@ -138,9 +155,13 @@ static void close_fd(int fd)
     if (fd >= 0) close(fd);
 }
 
-static int udp_open(uint16_t port, bool reuse)
+static int udp_open(uint8_t family, uint16_t port, bool reuse)
 {
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) {
+        return RTCP_EINVAL;
+    }
+    int fd = socket(family == RTCP_AF_INET6 ? AF_INET6 : AF_INET,
+                    SOCK_DGRAM, 0);
     if (fd < 0) return RTCP_EIO;
 
     if (reuse) {
@@ -151,12 +172,26 @@ static int udp_open(uint16_t port, bool reuse)
 #endif
     }
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+    int rc;
+    if (family == RTCP_AF_INET6) {
+#ifdef IPV6_V6ONLY
+        int one = 1;
+        (void)setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one));
+#endif
+        struct sockaddr_in6 addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port = htons(port);
+        rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+    } else {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(port);
+        rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+    }
+    if (rc != 0) {
         close(fd);
         return RTCP_EIO;
     }
@@ -180,14 +215,26 @@ static int udp_join(int fd, const uint8_t group[4])
 static int udp_sendto(int fd, const rtcp_addr_t *to, const void *buf, size_t len)
 {
     if (fd < 0 || to == NULL || (buf == NULL && len != 0U)) return RTCP_EINVAL;
-    if (to->family != RTCP_AF_INET) return RTCP_ENOTSUP;
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    memcpy(&addr.sin_addr, to->addr, 4U);
-    addr.sin_port = htons(to->port);
-    ssize_t rc = sendto(fd, buf, len, 0, (struct sockaddr *)&addr, sizeof(addr));
+    ssize_t rc;
+    if (to->family == RTCP_AF_INET6) {
+        struct sockaddr_in6 addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin6_family = AF_INET6;
+        memcpy(&addr.sin6_addr, to->addr, 16U);
+        addr.sin6_port = htons(to->port);
+        addr.sin6_scope_id = to->scope_id;
+        rc = sendto(fd, buf, len, 0, (struct sockaddr *)&addr, sizeof(addr));
+    } else if (to->family == RTCP_AF_INET) {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        memcpy(&addr.sin_addr, to->addr, 4U);
+        addr.sin_port = htons(to->port);
+        rc = sendto(fd, buf, len, 0, (struct sockaddr *)&addr, sizeof(addr));
+    } else {
+        return RTCP_ENOTSUP;
+    }
     return rc < 0 ? RTCP_EIO : (int)rc;
 }
 
@@ -212,6 +259,7 @@ static int udp_recvfrom(int fd, void *buf, size_t len, rtcp_addr_t *from)
             from->family = RTCP_AF_INET6;
             memcpy(from->addr, &in6->sin6_addr, 16U);
             from->port = ntohs(in6->sin6_port);
+            from->scope_id = (uint16_t)in6->sin6_scope_id;
         }
     }
     return (int)rc;
@@ -219,10 +267,16 @@ static int udp_recvfrom(int fd, void *buf, size_t len, rtcp_addr_t *from)
 
 uint16_t rtcp_net_linux_local_port(int fd)
 {
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
     socklen_t len = sizeof(addr);
     if (fd < 0 || getsockname(fd, (struct sockaddr *)&addr, &len) != 0) return 0U;
-    return ntohs(addr.sin_port);
+    if (addr.ss_family == AF_INET6) {
+        return ntohs(((const struct sockaddr_in6 *)&addr)->sin6_port);
+    }
+    if (addr.ss_family == AF_INET) {
+        return ntohs(((const struct sockaddr_in *)&addr)->sin_port);
+    }
+    return 0U;
 }
 
 const struct rtcp_net rtcp_net_linux = {

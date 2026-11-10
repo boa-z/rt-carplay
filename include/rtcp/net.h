@@ -10,6 +10,9 @@ typedef struct rtcp_addr {
     uint8_t  family;   /* RTCP_AF_INET / RTCP_AF_INET6 */
     uint8_t  addr[16];
     uint16_t port;
+    /* IPv6 zone (netif index) for link-local addresses; sockets need it to
+     * pick the outgoing interface.  Ignored for IPv4. */
+    uint16_t scope_id;
 } rtcp_addr_t;
 
 #define RTCP_AF_INET   4
@@ -26,7 +29,9 @@ struct rtcp_pollfd {
 };
 
 struct rtcp_net {
-    int  (*listen)(uint16_t port);
+    /* TCP listener bound to INADDR_ANY (RTCP_AF_INET) or in6addr_any
+     * (RTCP_AF_INET6).  RTCP_ENOTSUP when the port has no IPv6 support. */
+    int  (*listen)(uint8_t family, uint16_t port);
     int  (*accept)(int lfd, rtcp_addr_t *peer);
     int  (*connect)(const rtcp_addr_t *addr);
     /* Bounded TCP connect: returns a connected fd, or a negative RTCP error
@@ -40,10 +45,11 @@ struct rtcp_net {
     int  (*poll)(struct rtcp_pollfd *fds, int n, int timeout_ms);
     void (*close)(int fd);
 
-    /* IPv4 UDP, used by the mDNS responder.  udp_open binds INADDR_ANY:port;
-     * reuse enables SO_REUSEADDR/SO_REUSEPORT where available.  udp_join adds
-     * the socket to a multicast group. */
-    int  (*udp_open)(uint16_t port, bool reuse);
+    /* UDP socket bound to INADDR_ANY:port (RTCP_AF_INET) or in6addr_any:port
+     * (RTCP_AF_INET6).  reuse enables SO_REUSEADDR/SO_REUSEPORT where
+     * available.  udp_join adds an IPv4 socket to a multicast group (the mDNS
+     * responder); udp_sendto/udp_recvfrom handle both families. */
+    int  (*udp_open)(uint8_t family, uint16_t port, bool reuse);
     int  (*udp_join)(int fd, const uint8_t group[4]);
     int  (*udp_sendto)(int fd, const rtcp_addr_t *to, const void *buf, size_t len);
     int  (*udp_recvfrom)(int fd, void *buf, size_t len, rtcp_addr_t *from);

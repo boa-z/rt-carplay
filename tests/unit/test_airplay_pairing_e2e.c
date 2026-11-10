@@ -1394,7 +1394,7 @@ static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
                                             connection_id, output_key) ==
            RTCP_OK);
 
-    int fd = rtcp_net_linux.udp_open(0U, false);
+    int fd = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(fd >= 0);
     rtcp_addr_t address = {0};
     address.family = RTCP_AF_INET;

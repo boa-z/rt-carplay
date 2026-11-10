@@ -572,10 +572,10 @@ static void mdns_packet_sink(const uint8_t *packet, size_t packet_len,
 
 /*
  * Browses _carplay-ctrl._tcp and performs the reverse connect-out.  Runs in
- * the poll thread; carplay_ctrl_connect() is bounded by
- * CARPLAY_CTRL_TIMEOUT_MS, so a silent endpoint cannot stall mDNS/RTSP for
- * long.  Once the phone has attached to our RTSP port the nudge is no longer
- * needed and is suppressed for the rest of the session.
+ * the poll thread; carplay_ctrl_connect() bounds the handshake and the status
+ * read at CARPLAY_CTRL_TIMEOUT_MS each, so a silent endpoint cannot stall
+ * mDNS/RTSP for long.  Once the phone has attached to our RTSP port the nudge
+ * is no longer needed and is suppressed for the rest of the session.
  */
 static void carplay_ctrl_tick(app_state_t *app, uint32_t now_ms)
 {

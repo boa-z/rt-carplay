@@ -23,6 +23,8 @@
  *   carplay_usb iap2      run the iAP2 session over the open carkit stream
  *                         (identification and MFi; CarPlay needs the NCM link)
  *   carplay_usb iap2stop  stop the wired iAP2 session
+ *   carplay_usb net       show the NCM netdev state and its IPv6 link-local
+ *                         address (the value CarPlayStartSession advertises)
  *   carplay_usb stop      disarm the hook
  */
 #include <rtthread.h>
@@ -552,20 +554,30 @@ static bool iap2_usb_tx(const uint8_t *bytes, size_t length, void *context)
 }
 
 /*
- * The wired AirPlay endpoint needs the NCM network, which is not part of this
- * stage.  Report the missing piece once instead of pretending the invite was
- * sent; identification and MFi still complete over the carkit stream.
+ * The wired AirPlay endpoint needs the NCM network and an IPv6-capable RTSP
+ * server, which is not part of this stage.  Report the missing piece once
+ * instead of pretending the invite was sent; identification and MFi still
+ * complete over the carkit stream.
  */
 static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
 {
     iap2_usb_link_t *link = context;
+    char address[64];
+    bool valid = false;
 
     (void)out;
     if (!link->airplay_unavailable_logged) {
         link->airplay_unavailable_logged = true;
-        rt_kprintf("[carplay_usb] iap2: CarPlay availability reached but no "
-                   "wired AirPlay endpoint is configured yet (NCM/IP is the "
-                   "next stage); 0x4301 is not sent\n");
+        if (rtcp_lubanlite_wired_ipv6(address, sizeof(address), &valid)) {
+            rt_kprintf("[carplay_usb] iap2: wired IPv6 %s (%s), but the "
+                       "AirPlay endpoint is not available yet (IPv6 RTSP is "
+                       "the next stage); 0x4301 is not sent\n",
+                       address, valid ? "valid" : "tentative");
+        } else {
+            rt_kprintf("[carplay_usb] iap2: CarPlay availability reached but "
+                       "the NCM netif has no IPv6 address yet; 0x4301 is not "
+                       "sent\n");
+        }
     }
     return false;
 }
@@ -774,6 +786,23 @@ static int cmd_unpair(void)
     return 0;
 }
 
+static int cmd_net(void)
+{
+    char address[64];
+    bool valid = false;
+    bool up = rtcp_lubanlite_wired_net_up();
+    bool found = rtcp_lubanlite_wired_ipv6(address, sizeof(address), &valid);
+
+    rt_kprintf("[carplay_usb] net: ncm=%s\n", up ? "up" : "down");
+    if (found) {
+        rt_kprintf("[carplay_usb] net: ipv6=%s (%s)\n", address,
+                   valid ? "valid" : "tentative");
+    } else {
+        rt_kprintf("[carplay_usb] net: ipv6=unavailable\n");
+    }
+    return 0;
+}
+
 static int cmd_carplay_usb(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "status";
@@ -816,8 +845,11 @@ static int cmd_carplay_usb(int argc, char **argv)
     if (strcmp(what, "iap2stop") == 0) {
         return cmd_iap2_stop();
     }
+    if (strcmp(what, "net") == 0) {
+        return cmd_net();
+    }
     rt_kprintf("usage: carplay_usb "
-               "[start|stop|status|request|mux|pair|unpair|iap2|iap2stop]\n");
+               "[start|stop|status|request|mux|pair|unpair|iap2|iap2stop|net]\n");
     return 0;
 }
 

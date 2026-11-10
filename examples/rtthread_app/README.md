@@ -69,13 +69,16 @@ CONFIG_RTCARPLAY_IAP2=y         # carplay_iap2 (requires RTCARPLAY_BT)
 # CONFIG_LPKG_BT_ASSERT is not set   # see port/luban-lite/README.md
 ```
 
-Wired CarPlay over the D213 USB1 host (Stage 1/2, no NCM yet):
+Wired CarPlay over the D213 USB1 host (Stages 1/2; the NCM link is up, the
+AirPlay endpoint is the next stage):
 
 ```
 CONFIG_AIC_USING_USB1=y
 CONFIG_AIC_USING_USB1_HOST=y
 CONFIG_LPKG_CHERRYUSB_HOST=y
-CONFIG_RTCARPLAY_USB_HOST=y    # carplay_usb (app mode)
+CONFIG_LPKG_CHERRYUSB_HOST_NCM=y   # phone's CDC-NCM function -> netdev "u1"
+CONFIG_RT_USING_LWIP_IPV6=y        # link-local address CarPlayStartSession uses
+CONFIG_RTCARPLAY_USB_HOST=y        # carplay_usb (app mode)
 ```
 
 The SDK's CherryUSB must expose `usbh_get_configuration_index()`; without the
@@ -119,6 +122,7 @@ carplay_usb mux               # USBMUX -> lockdown 62078, GetValue, print reply
 carplay_usb pair              # wired pairing + StartSession + carkit service
 carplay_usb iap2              # iAP2 over the open carkit stream (ID + MFi)
 carplay_usb iap2stop          # stop the wired iAP2 session
+carplay_usb net               # NCM netdev state and IPv6 link-local address
 carplay_usb unpair            # close the carkit service and lockdown session
 carplay_usb stop              # disarm the hook (device stays configured)
 ```
@@ -145,8 +149,16 @@ Bluetooth/WirelessCarPlay components and the Wi-Fi configuration exchange, and
 reports PowerSourceUpdate (0xAE03) after authentication.  It completes
 identification and MFi over USB; on CarPlayAvailability (0x4300) it needs an
 AirPlay endpoint reachable over the NCM link, which this stage does not bring
-up yet, so it logs that and does not send 0x4301.  `iap2stop` tears the link
-down; `unpair` also stops it first.
+up yet, so it logs the address and does not send 0x4301.  `iap2stop` tears the
+link down; `unpair` also stops it first.
+
+`carplay_usb net` reports the wired NCM netdev: whether CherryUSB registered
+it and whether lwIP gave it an IPv6 link-local address (link-local is what the
+phone connects to; it is advertised in CarPlayStartSession once the AirPlay
+endpoint exists).  A `tentative` address has not passed duplicate-address
+detection yet and must not be advertised.  The netif is named `u1` by the
+CherryUSB lwIP glue and needs a configuration where the phone exposes its NCM
+function — check `carplay_usb status`.
 
 `carplay_usb start` must run before the phone is plugged: the configuration
 hook only runs inside CherryUSB enumeration, and the phone exposes its CarPlay

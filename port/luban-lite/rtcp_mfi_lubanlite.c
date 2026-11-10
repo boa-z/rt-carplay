@@ -45,7 +45,54 @@ static struct {
     rtcp_mfi2c_t device;
     struct rtcp_mfi_info info;
     bool ready;
+    /* The certificate is read once and reused.  This MFi 2.0C class is known
+     * to be unreliable under rapid repeated full reads (carplayd's field
+     * notes: "the MFi chip fails a rapid second full cert read"), and iAP2
+     * plus AirPlay /auth-setup would otherwise read the same 908 bytes twice
+     * within a few seconds.  Serving both from one verified copy removes the
+     * second physical read and guarantees iOS sees identical bytes on both
+     * channels. */
+    uint8_t cert[RTCP_MFI_CERT_MAX];
+    size_t cert_len;
+    uint32_t cert_checksum;
+    bool cert_valid;
 } s_mfi;
+
+/* FNV-1a: cheap integrity tag so a corrupted register dump is visible in the
+ * serial log even when the header/tail bytes still look plausible. */
+static uint32_t mfi_fnv1a32(const uint8_t *data, size_t len)
+{
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= data[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+/* A 2.0C certificate is a DER SEQUENCE whose declared length must span the
+ * whole blob (30 82 03 88 + 904 payload bytes = 908 on this board).  A
+ * mismatch means the register read came back short or garbled. */
+static bool mfi_cert_plausible(const uint8_t *der, size_t len)
+{
+    size_t header;
+    size_t declared;
+
+    if (len < 4U || der[0] != 0x30U) return false;
+    if (der[1] == 0x82U) {
+        header = 4U;
+        declared = ((size_t)der[2] << 8) | der[3];
+    } else if (der[1] == 0x81U) {
+        header = 3U;
+        declared = der[2];
+    } else if (der[1] < 0x80U) {
+        header = 2U;
+        declared = der[1];
+    } else {
+        return false;
+    }
+    return header + declared == len;
+}
 
 static int bus_write(void *context, uint8_t reg, const uint8_t *data,
                      size_t len)
@@ -345,30 +392,59 @@ static int mfi_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
     return RTCP_OK;
 }
 
+#define MFI_CERT_ATTEMPTS 5
+#define MFI_CERT_RECOVERY_MS 400
+
 static int mfi_read_cert(uint8_t *der, size_t cap, size_t *der_len)
 {
     if (!s_mfi.ready) return RTCP_ESTATE;
-    int result = rtcp_mfi2c_read_cert(&s_mfi.device, der, cap, der_len);
-    if (result != RTCP_OK) {
-        RTCP_LOGE("mfi", "certificate read failed rc=%d cap=%u",
-                  result, (unsigned)cap);
-        return result;
+    if (der == NULL || der_len == NULL) return RTCP_EINVAL;
+
+    if (s_mfi.cert_valid) {
+        if (cap < s_mfi.cert_len) return RTCP_EINVAL;
+        memcpy(der, s_mfi.cert, s_mfi.cert_len);
+        *der_len = s_mfi.cert_len;
+        RTCP_LOGI("mfi", "cert_cache=hit bytes=%u checksum=%08X",
+                  (unsigned)s_mfi.cert_len, (unsigned)s_mfi.cert_checksum);
+        return RTCP_OK;
     }
 
-    /* A 2.0C certificate is DER: 30 82 03 88 for the 908-byte part on this
-     * board.  A wrong header or a garbage tail means the 908-byte register
-     * read came back corrupted even though the I2C transfer reported
-     * success. */
-    size_t n = *der_len;
-    if (n >= 8U) {
-        RTCP_LOGI("mfi", "certificate %u bytes header %02X %02X %02X %02X "
-                  "tail %02X %02X %02X %02X", (unsigned)n,
-                  der[0], der[1], der[2], der[3],
-                  der[n - 4U], der[n - 3U], der[n - 2U], der[n - 1U]);
-    } else {
-        RTCP_LOGI("mfi", "certificate %u bytes", (unsigned)n);
+    int result = RTCP_EIO;
+    size_t n = 0U;
+    for (int attempt = 1; attempt <= MFI_CERT_ATTEMPTS; ++attempt) {
+        n = 0U;
+        result = rtcp_mfi2c_read_cert(&s_mfi.device, der, cap, &n);
+        if (result == RTCP_OK && n > 0U && mfi_cert_plausible(der, n)) {
+            s_mfi.cert_len = n;
+            memcpy(s_mfi.cert, der, n);
+            s_mfi.cert_checksum = mfi_fnv1a32(der, n);
+            s_mfi.cert_valid = true;
+            *der_len = n;
+            RTCP_LOGI("mfi", "certificate %u bytes header %02X %02X %02X %02X "
+                      "tail %02X %02X %02X %02X checksum=%08X attempt=%d",
+                      (unsigned)n, der[0], der[1], der[2], der[3],
+                      der[n - 4U], der[n - 3U], der[n - 2U], der[n - 1U],
+                      (unsigned)s_mfi.cert_checksum, attempt);
+            return RTCP_OK;
+        }
+
+        uint32_t checksum = n > 0U ? mfi_fnv1a32(der, n) : 0U;
+        RTCP_LOGE("mfi", "certificate read attempt=%d failed rc=%d bytes=%u "
+                  "plausible=%d checksum=%08X",
+                  attempt, result, (unsigned)n,
+                  n > 0U ? (int)mfi_cert_plausible(der, n) : 0,
+                  (unsigned)checksum);
+
+        /* Give the coprocessor time to recover between full reads; this is
+         * the 400 ms cadence carplayd uses on the same chip family. */
+        aicos_msleep(MFI_CERT_RECOVERY_MS);
     }
-    return RTCP_OK;
+
+    RTCP_LOGE("mfi", "certificate read failed after %d attempts rc=%d",
+              MFI_CERT_ATTEMPTS, result);
+    /* Never report success with an implausible blob: the caller would use a
+     * length we did not set. */
+    return result == RTCP_OK ? RTCP_EIO : result;
 }
 
 static const struct rtcp_mfi s_mfi_ops = {

@@ -27,9 +27,15 @@
 
 #define RTSP_RX_CHUNK_BYTES 1200U
 #define RTSP_STREAM_BUFFER_BYTES 6144U
-#define RTSP_CIPHER_FRAME_BYTES                      \
-    (AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES +         \
-     AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES)
+/* A whole response is sealed in <=1024-byte frames, so the encrypted buffer
+ * is the plaintext maximum plus one 18-byte overhead per chunk. */
+#define RTSP_CIPHER_CHUNKS \
+    ((AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES + \
+      AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES - 1U) / \
+     AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES)
+#define RTSP_CIPHER_FRAME_BYTES                                       \
+    (AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES +                        \
+     RTSP_CIPHER_CHUNKS * AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES)
 
 typedef struct {
     uint8_t stream[RTSP_STREAM_BUFFER_BYTES];
@@ -426,9 +432,10 @@ static bool send_response(airplay_rtsp_server_t *server,
                                connection->response, response_len);
     }
     size_t encrypted_len = 0U;
-    airplay_control_cipher_result_t result = airplay_control_cipher_encrypt(
-        connection->cipher, connection->response, response_len,
-        connection->io, sizeof(connection->io), &encrypted_len);
+    airplay_control_cipher_result_t result =
+        airplay_control_cipher_encrypt_message(
+            connection->cipher, connection->response, response_len,
+            connection->io, sizeof(connection->io), &encrypted_len);
     if (result != AIRPLAY_CONTROL_CIPHER_OK) return false;
     bool sent = socket_send_all(server->net, server->client_fd, connection->io,
                                 encrypted_len);

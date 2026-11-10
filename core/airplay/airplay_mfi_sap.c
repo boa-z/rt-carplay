@@ -14,6 +14,7 @@
 #include "mbedtls/aes.h"
 #include "mbedtls/ecdh.h"
 #include "mbedtls/md.h"
+#include "mbedtls/pk.h"
 #include "mbedtls/platform_util.h"
 
 static airplay_mfi_sap_provider_t s_provider;
@@ -151,6 +152,72 @@ failed:
     return -1;
 }
 
+/*
+ * Bring-up self-check: verify the coprocessor signature against the public
+ * key inside the certificate we are about to send.  iOS performs exactly this
+ * check (plus chain validation) and silently closes the RTSP connection when
+ * it fails, so the accessory itself should catch a corrupted certificate or
+ * signature read before blaming the protocol.
+ *
+ * The PKCS#7 blob carries the certificate chain; this build has no X.509
+ * parser linked (MBEDTLS_PK_PARSE_C is available, MBEDTLS_X509_CRT_PARSE_C is
+ * not), so scan for SubjectPublicKeyInfo structures and let pk_verify pick the
+ * one whose key actually produced the signature.  A corrupted certificate
+ * almost always fails to yield a usable key at all.
+ */
+static int mfi_verify_signature(const uint8_t *certificate,
+                                size_t certificate_len,
+                                mbedtls_md_type_t md_alg,
+                                const uint8_t *digest, size_t digest_len,
+                                const uint8_t *signature,
+                                size_t signature_len)
+{
+    mbedtls_pk_context pk;
+    int verified = 0;
+
+    mbedtls_pk_init(&pk);
+    for (size_t offset = 0U;
+         offset + 8U < certificate_len && verified == 0; ++offset) {
+        if (certificate[offset] != 0x30U) continue;
+        unsigned char *cursor = (unsigned char *)(certificate + offset);
+        const unsigned char *end = certificate + certificate_len;
+        if (mbedtls_pk_parse_subpubkey(&cursor, end, &pk) == 0 &&
+            mbedtls_pk_get_type(&pk) == MBEDTLS_PK_RSA &&
+            mbedtls_pk_verify(&pk, md_alg, digest, digest_len, signature,
+                              signature_len) == 0) {
+            verified = 1;
+        }
+        mbedtls_pk_free(&pk);
+        mbedtls_pk_init(&pk);
+    }
+    mbedtls_pk_free(&pk);
+    return verified;
+}
+
+static uint32_t mfi_sap_fnv1a32(const uint8_t *data, size_t len)
+{
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= data[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static void format_hex(char *out, size_t out_size, const uint8_t *bytes,
+                       size_t len)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    size_t pos = 0U;
+    for (size_t i = 0; i < len && pos + 3U <= out_size; ++i) {
+        out[pos++] = digits[bytes[i] >> 4];
+        out[pos++] = digits[bytes[i] & 0x0fU];
+        out[pos++] = ' ';
+    }
+    if (pos != 0U) pos -= 1U;
+    out[pos] = '\0';
+}
+
 static int encrypt_signature(const uint8_t key[16], const uint8_t iv[16],
                              const uint8_t *signature, size_t signature_len,
                              uint8_t *encrypted)
@@ -247,6 +314,16 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
         result = AIRPLAY_MFI_SAP_SIGN_FAILED;
         goto cleanup;
     }
+    {
+        char digest_hex[3U * sizeof(digest)];
+        format_hex(digest_hex, sizeof(digest_hex), digest, digest_len);
+        int verified = mfi_verify_signature(
+            certificate, certificate_len,
+            protocol_major == 2U ? MBEDTLS_MD_SHA1 : MBEDTLS_MD_SHA256,
+            digest, digest_len, signature, signature_len);
+        RTCP_LOGI(TAG, "auth_setup=signature_check verified=%d digest=%s",
+                  verified, digest_hex);
+    }
     if (encrypt_signature(derivation_key, derivation_iv, signature,
                           signature_len, encrypted_signature) != 0) {
         result = AIRPLAY_MFI_SAP_CRYPTO_FAILED;
@@ -265,8 +342,10 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     memcpy(response + offset, encrypted_signature, signature_len);
     offset += signature_len;
     *response_len = offset;
-    RTCP_LOGI(TAG, "auth_setup=completed protocol_major=%u certificate_bytes=%u",
-              (unsigned)protocol_major, (unsigned)certificate_len);
+    RTCP_LOGI(TAG, "auth_setup=completed protocol_major=%u certificate_bytes=%u "
+              "response_bytes=%u checksum=%08X", (unsigned)protocol_major,
+              (unsigned)certificate_len, (unsigned)offset,
+              (unsigned)mfi_sap_fnv1a32(response, offset));
     result = AIRPLAY_MFI_SAP_OK;
 
 cleanup:

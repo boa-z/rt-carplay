@@ -77,7 +77,7 @@ airplay_control_cipher_result_t airplay_control_cipher_create(
     return AIRPLAY_CONTROL_CIPHER_OK;
 }
 
-airplay_control_cipher_result_t airplay_control_cipher_encrypt(
+static airplay_control_cipher_result_t encrypt_frame(
     airplay_control_cipher_t *cipher,
     const uint8_t *plaintext,
     size_t plaintext_len,
@@ -114,6 +114,54 @@ airplay_control_cipher_result_t airplay_control_cipher_encrypt(
     }
     ++cipher->write_counter;
     *output_len = plaintext_len + AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES;
+    return AIRPLAY_CONTROL_CIPHER_OK;
+}
+
+airplay_control_cipher_result_t airplay_control_cipher_encrypt(
+    airplay_control_cipher_t *cipher,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len)
+{
+    return encrypt_frame(cipher, plaintext, plaintext_len, output,
+                         output_capacity, output_len);
+}
+
+airplay_control_cipher_result_t airplay_control_cipher_encrypt_message(
+    airplay_control_cipher_t *cipher,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len)
+{
+    if (output_len != NULL) *output_len = 0U;
+    if (cipher == NULL || output_len == NULL || output == NULL ||
+        (plaintext == NULL && plaintext_len != 0U)) {
+        return AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT;
+    }
+    if (cipher->failed) return AIRPLAY_CONTROL_CIPHER_FAILED_STATE;
+
+    size_t written = 0U;
+    size_t remaining = plaintext_len;
+    const uint8_t *cursor = plaintext;
+    do {
+        size_t chunk = remaining > AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES
+                           ? AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES
+                           : remaining;
+        size_t frame_len = 0U;
+        airplay_control_cipher_result_t result =
+            encrypt_frame(cipher, cursor, chunk, output + written,
+                          output_capacity - written, &frame_len);
+        if (result != AIRPLAY_CONTROL_CIPHER_OK) return result;
+        written += frame_len;
+        if (cursor != NULL) cursor += chunk;
+        remaining -= chunk;
+    } while (remaining != 0U);
+
+    *output_len = written;
     return AIRPLAY_CONTROL_CIPHER_OK;
 }
 

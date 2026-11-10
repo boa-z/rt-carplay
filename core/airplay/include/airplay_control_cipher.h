@@ -7,6 +7,10 @@
 #define AIRPLAY_CONTROL_CIPHER_KEY_BYTES 32U
 #define AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES 4096U
 #define AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES 18U
+/* Apple's C control transport seals at most kMaxMessageWriteSize = 1024
+ * plaintext bytes per frame; longer RTSP messages are split across frames and
+ * the peer reassembles the byte stream. */
+#define AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES 1024U
 
 typedef struct airplay_control_cipher airplay_control_cipher_t;
 
@@ -29,6 +33,19 @@ airplay_control_cipher_result_t airplay_control_cipher_create(
 
 /* Encodes one bounded [u16le length][ciphertext][tag] frame. */
 airplay_control_cipher_result_t airplay_control_cipher_encrypt(
+    airplay_control_cipher_t *cipher,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len);
+
+/* Encodes a whole RTSP message as one or more frames of at most
+ * AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES plaintext bytes each, mirroring
+ * Apple's C transport (`kMaxMessageWriteSize`).  Consecutive frames advance the
+ * write counter, and the peer concatenates their plaintext.  `output_capacity`
+ * must hold plaintext_len plus one overhead per chunk. */
+airplay_control_cipher_result_t airplay_control_cipher_encrypt_message(
     airplay_control_cipher_t *cipher,
     const uint8_t *plaintext,
     size_t plaintext_len,

@@ -264,6 +264,61 @@ static void test_limits(void)
     airplay_control_cipher_destroy(cipher);
 }
 
+static void test_chunked_message(void)
+{
+    uint8_t read_key[32];
+    uint8_t write_key[32];
+    make_keys(read_key, write_key);
+
+    airplay_control_cipher_t *receiver = NULL;
+    airplay_control_cipher_t *peer = NULL;
+    assert(airplay_control_cipher_create(read_key, write_key, &receiver) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+    assert(airplay_control_cipher_create(write_key, read_key, &peer) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+
+    /* A 1166-byte RTSP response (the board's 1076-byte auth-setup body plus
+     * its head) must become a 1024-byte frame and a 142-byte frame, exactly
+     * like Apple's kMaxMessageWriteSize transport. */
+    static uint8_t message[1166];
+    for (size_t i = 0U; i < sizeof(message); ++i) {
+        message[i] = (uint8_t)i;
+    }
+    const size_t frames =
+        (sizeof(message) + AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES - 1U) /
+        AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES;
+    assert(frames == 2U);
+
+    uint8_t encrypted[sizeof(message) + 2U * AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES];
+    size_t encrypted_len = 0U;
+    assert(airplay_control_cipher_encrypt_message(
+               peer, message, sizeof(message), encrypted, sizeof(encrypted),
+               &encrypted_len) == AIRPLAY_CONTROL_CIPHER_OK);
+    assert(encrypted_len ==
+           sizeof(message) + frames * AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES);
+    assert(((size_t)encrypted[0] | ((size_t)encrypted[1] << 8U)) ==
+           AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES);
+    const size_t second =
+        AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES +
+        AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES;
+    assert(((size_t)encrypted[second] | ((size_t)encrypted[second + 1U] << 8U)) ==
+           sizeof(message) - AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES);
+
+    uint8_t plaintext[sizeof(message)];
+    size_t consumed = 0U;
+    size_t plaintext_len = 0U;
+    assert(airplay_control_cipher_decrypt(receiver, encrypted, encrypted_len,
+                                          &consumed, plaintext,
+                                          sizeof(plaintext), &plaintext_len) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+    assert(consumed == encrypted_len);
+    assert(plaintext_len == sizeof(message));
+    assert(memcmp(plaintext, message, sizeof(message)) == 0);
+
+    airplay_control_cipher_destroy(peer);
+    airplay_control_cipher_destroy(receiver);
+}
+
 static void test_argument_checks(void)
 {
     uint8_t key[32] = {0};
@@ -293,6 +348,7 @@ int main(void)
     test_tampering_poisons();
     test_wrong_key();
     test_limits();
+    test_chunked_message();
     test_argument_checks();
     puts("airplay control cipher host test passed");
     return 0;

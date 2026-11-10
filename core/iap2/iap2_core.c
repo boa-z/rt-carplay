@@ -13,13 +13,17 @@
 #include <string.h>
 
 /*
- * The portable core has no platform logging dependency.  Keep the original
- * call sites but compile them out here; a platform can wire a real logger in
- * through the public API later.
+ * The link core follows the original ESP-IDF logging call sites, but routes
+ * them through the portable rtcp/log.h seam instead of a fixed no-op: a
+ * platform build with RTCP_LOG_CUSTOM (the RT-Thread port) then gets the
+ * message trace (csm_rx/csm_tx ids, sync limits, link state) needed to
+ * diagnose a live pairing, while a silent build costs nothing.
  */
-#define ESP_LOGD(tag, format, ...) do { (void)(tag); } while (0)
-#define ESP_LOGI(tag, format, ...) do { (void)(tag); } while (0)
-#define ESP_LOGW(tag, format, ...) do { (void)(tag); } while (0)
+#include "rtcp/log.h"
+
+#define ESP_LOGD(tag, format, ...) RTCP_LOGD(tag, format, ##__VA_ARGS__)
+#define ESP_LOGI(tag, format, ...) RTCP_LOGI(tag, format, ##__VA_ARGS__)
+#define ESP_LOGW(tag, format, ...) RTCP_LOGW(tag, format, ##__VA_ARGS__)
 
 #define IAP2_LINK_HEADER_BYTES 9U
 #define IAP2_LINK_CHECKSUM_BYTES 1U

@@ -305,14 +305,70 @@ static int mfi_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
                     size_t sig_cap, size_t *sig_len)
 {
     if (!s_mfi.ready) return RTCP_ESTATE;
-    return rtcp_mfi2c_sign(&s_mfi.device, challenge, len, sig, sig_cap,
-                           sig_len);
+
+    /* Bring-up visibility: the iAP2 MFiChallenge payload length is the first
+     * thing to check when signing fails (the 2.0C accepts exactly 20 bytes;
+     * a 32-byte challenge means the phone is speaking Auth 3.0 to a 2.0C). */
+    char challenge_head[3 * 8 + 1];
+    size_t shown = len < 8U ? len : 8U;
+    size_t pos = 0U;
+    for (size_t i = 0; i < shown; ++i) {
+        int written = rt_snprintf(&challenge_head[pos],
+                                  sizeof(challenge_head) - pos, "%02X ",
+                                  challenge[i]);
+        if (written <= 0) break;
+        pos += (size_t)written;
+    }
+    if (pos != 0U) challenge_head[pos - 1U] = '\0';
+
+    int result = rtcp_mfi2c_sign(&s_mfi.device, challenge, len, sig, sig_cap,
+                                 sig_len);
+    if (result != RTCP_OK) {
+        RTCP_LOGE("mfi", "sign failed rc=%d challenge len=%u head=%s",
+                  result, (unsigned)len, challenge_head);
+        return result;
+    }
+
+    pos = 0U;
+    shown = *sig_len < 8U ? *sig_len : 8U;
+    for (size_t i = 0; i < shown; ++i) {
+        int written = rt_snprintf(&challenge_head[pos],
+                                  sizeof(challenge_head) - pos, "%02X ",
+                                  sig[i]);
+        if (written <= 0) break;
+        pos += (size_t)written;
+    }
+    if (pos != 0U) challenge_head[pos - 1U] = '\0';
+
+    RTCP_LOGI("mfi", "signature %u bytes (challenge %u bytes head=%s)",
+              (unsigned)*sig_len, (unsigned)len, challenge_head);
+    return RTCP_OK;
 }
 
 static int mfi_read_cert(uint8_t *der, size_t cap, size_t *der_len)
 {
     if (!s_mfi.ready) return RTCP_ESTATE;
-    return rtcp_mfi2c_read_cert(&s_mfi.device, der, cap, der_len);
+    int result = rtcp_mfi2c_read_cert(&s_mfi.device, der, cap, der_len);
+    if (result != RTCP_OK) {
+        RTCP_LOGE("mfi", "certificate read failed rc=%d cap=%u",
+                  result, (unsigned)cap);
+        return result;
+    }
+
+    /* A 2.0C certificate is DER: 30 82 03 88 for the 908-byte part on this
+     * board.  A wrong header or a garbage tail means the 908-byte register
+     * read came back corrupted even though the I2C transfer reported
+     * success. */
+    size_t n = *der_len;
+    if (n >= 8U) {
+        RTCP_LOGI("mfi", "certificate %u bytes header %02X %02X %02X %02X "
+                  "tail %02X %02X %02X %02X", (unsigned)n,
+                  der[0], der[1], der[2], der[3],
+                  der[n - 4U], der[n - 3U], der[n - 2U], der[n - 1U]);
+    } else {
+        RTCP_LOGI("mfi", "certificate %u bytes", (unsigned)n);
+    }
+    return RTCP_OK;
 }
 
 static const struct rtcp_mfi s_mfi_ops = {

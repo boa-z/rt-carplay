@@ -157,6 +157,27 @@ static void link_event(iap2_session_event_t event, void *context)
     case IAP2_SESSION_EVENT_MFI_FAILED:
         IAP2_LOG("MFi authentication failed");
         break;
+    case IAP2_SESSION_EVENT_MFI_CERT_FAILED:
+        IAP2_LOG("MFi reason: certificate read or 0xAA01 send failed");
+        break;
+    case IAP2_SESSION_EVENT_MFI_CHALLENGE_INVALID:
+        IAP2_LOG("MFi reason: 0xAA02 challenge missing or length out of range");
+        break;
+    case IAP2_SESSION_EVENT_MFI_SIGN_FAILED:
+        IAP2_LOG("MFi reason: coprocessor sign failed or returned no signature");
+        break;
+    case IAP2_SESSION_EVENT_MFI_STATE_INVALID:
+        IAP2_LOG("MFi reason: 0xAA02/0xAA05 arrived out of sequence");
+        break;
+    case IAP2_SESSION_EVENT_MFI_ACK_FAILED:
+        IAP2_LOG("MFi reason: 0xAA03 challenge response was not link-acked");
+        break;
+    case IAP2_SESSION_EVENT_MFI_PHONE_REJECTED:
+        IAP2_LOG("MFi reason: phone sent 0xAA04 MFiAuthFailed");
+        break;
+    case IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED:
+        IAP2_LOG("MFi reason: 0xAA03 challenge response could not be queued");
+        break;
     case IAP2_SESSION_EVENT_SUBSCRIPTIONS_SENT:
         IAP2_LOG("wireless subscriptions sent");
         break;
@@ -495,9 +516,97 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_iap2, carplay_iap2,
  * Bring-up diagnostic: dump every transaction shape on the coprocessor bus
  * and scan the bus, so an unexpected probe result can be compared with the
  * raw bus behaviour.  Usage: carplay_mfi [bus] [addr]  (defaults i2c0/0x10).
+ *
+ *   carplay_mfi cert       read the certificate and print its length/head/tail
+ *   carplay_mfi cert raw   read the certificate and print the full DER
+ *   carplay_mfi sign       sign a fixed 20-byte challenge and print the result
  */
+#define IAP2_LINK_CERT_CAPACITY 1536U
+
+static const struct rtcp_mfi *cmd_mfi_ready(void)
+{
+    const struct rtcp_mfi *mfi = rtcp_mfi_lubanlite();
+
+    if (mfi != NULL) return mfi;
+    int result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
+                                          RTCARPLAY_MFI_I2C_ADDR);
+    if (result != RTCP_OK) {
+        rt_kprintf("carplay_mfi: coprocessor not ready rc=%d\n", result);
+        return NULL;
+    }
+    return rtcp_mfi_lubanlite();
+}
+
+static int cmd_carplay_mfi_cert(int argc, char **argv)
+{
+    const struct rtcp_mfi *mfi = cmd_mfi_ready();
+    if (mfi == NULL) return 0;
+
+    static uint8_t certificate[IAP2_LINK_CERT_CAPACITY];
+    size_t len = sizeof(certificate);
+    int result = mfi->read_cert(certificate, sizeof(certificate), &len);
+    if (result != RTCP_OK) {
+        rt_kprintf("carplay_mfi cert: read failed rc=%d\n", result);
+        return 0;
+    }
+
+    rt_kprintf("carplay_mfi cert: %u bytes\n", (unsigned)len);
+    bool raw = argc >= 3 && strcmp(argv[2], "raw") == 0;
+    size_t shown = raw ? len : (len < 16U ? len : 16U);
+    for (size_t offset = 0; offset < shown; offset += 16U) {
+        rt_kprintf("%04x:", (unsigned)offset);
+        for (size_t i = 0; i < 16U && offset + i < shown; ++i) {
+            rt_kprintf(" %02x", certificate[offset + i]);
+        }
+        rt_kprintf("\n");
+    }
+    if (!raw && len > shown) {
+        rt_kprintf("carplay_mfi cert raw  (print the full DER as hex)\n");
+    }
+    return 0;
+}
+
+static int cmd_carplay_mfi_sign(void)
+{
+    const struct rtcp_mfi *mfi = cmd_mfi_ready();
+    if (mfi == NULL) return 0;
+
+    static uint8_t signature[RTCP_MFI_SIG_MAX];
+    uint8_t challenge[RTCP_MFI_CHALLENGE_LEN];
+    for (size_t i = 0; i < sizeof(challenge); ++i) {
+        challenge[i] = (uint8_t)i;
+    }
+
+    size_t signature_len = 0U;
+    int result = mfi->sign(challenge, sizeof(challenge), signature,
+                           sizeof(signature), &signature_len);
+    rt_kprintf("carplay_mfi sign: rc=%d signature %u bytes\n", result,
+               (unsigned)signature_len);
+    if (result != RTCP_OK) return 0;
+
+    for (size_t offset = 0; offset < signature_len; offset += 16U) {
+        rt_kprintf("%04x:", (unsigned)offset);
+        for (size_t i = 0; i < 16U && offset + i < signature_len; ++i) {
+            rt_kprintf(" %02x", signature[offset + i]);
+        }
+        rt_kprintf("\n");
+    }
+    return 0;
+}
+
 static int cmd_carplay_mfi(int argc, char **argv)
 {
+    if (argc >= 2 && strcmp(argv[1], "cert") == 0) {
+        return cmd_carplay_mfi_cert(argc, argv);
+    }
+    if (argc >= 2 && strcmp(argv[1], "sign") == 0) {
+        return cmd_carplay_mfi_sign();
+    }
+    if (argc >= 2 && strcmp(argv[1], "dump") == 0) {
+        rtcp_mfi_lubanlite_dump(RTCARPLAY_MFI_I2C_BUS, RTCARPLAY_MFI_I2C_ADDR);
+        return 0;
+    }
+
     const char *bus_name = argc >= 2 ? argv[1] : RTCARPLAY_MFI_I2C_BUS;
     unsigned addr = RTCARPLAY_MFI_I2C_ADDR;
 

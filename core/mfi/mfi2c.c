@@ -26,6 +26,10 @@
 
 #include <string.h>
 
+#include "rtcp/log.h"
+
+#define TAG "mfi2c"
+
 #define MFI_REG_DEVICE_ID    0x04
 #define MFI_REG_ERROR        0x05
 #define MFI_REG_STATUS       0x10
@@ -147,46 +151,66 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
 
     if (dev == NULL || challenge == NULL || sig == NULL || sig_len == NULL)
         return RTCP_EINVAL;
-    if (len != RTCP_MFI_CHALLENGE_LEN)
+    if (len != RTCP_MFI_CHALLENGE_LEN) {
+        RTCP_LOGE(TAG, "sign=challenge_length_unsupported len=%u expected=%u",
+                  (unsigned)len, (unsigned)RTCP_MFI_CHALLENGE_LEN);
         return RTCP_EINVAL;
+    }
 
     buf[0] = 0x00;
     buf[1] = (uint8_t)RTCP_MFI_CHALLENGE_LEN;
     memcpy(&buf[2], challenge, len);
 
-    if (mfi_write(dev, MFI_REG_CHALLENGE, buf, sizeof(buf)) != RTCP_OK)
+    if (mfi_write(dev, MFI_REG_CHALLENGE, buf, sizeof(buf)) != RTCP_OK) {
+        RTCP_LOGE(TAG, "sign=challenge_write_failed");
         return RTCP_EIO;
+    }
 
     mfi_delay(dev, MFI_SIGN_DELAY_MS);
 
-    if (mfi_write(dev, MFI_REG_STATUS, &start, 1) != RTCP_OK)
+    if (mfi_write(dev, MFI_REG_STATUS, &start, 1) != RTCP_OK) {
+        RTCP_LOGE(TAG, "sign=start_write_failed");
         return RTCP_EIO;
+    }
 
     for (i = 0; i < MFI_STATUS_POLLS; i++) {
         mfi_delay(dev, MFI_STATUS_POLL_MS);
 
         if (mfi_read(dev, MFI_REG_STATUS, &status, 1, 1, 0) != RTCP_OK)
             continue;
-        if (status & MFI_STATUS_ERROR)
+        if (status & MFI_STATUS_ERROR) {
+            RTCP_LOGE(TAG, "sign=status_error status=0x%02x poll=%d",
+                      (unsigned)status, i);
             return RTCP_EIO;
+        }
         if (status == MFI_STATUS_SUCCESS)
             break;
     }
 
-    if (status != MFI_STATUS_SUCCESS)
+    if (status != MFI_STATUS_SUCCESS) {
+        RTCP_LOGE(TAG, "sign=status_timeout last=0x%02x polls=%u",
+                  (unsigned)status, (unsigned)MFI_STATUS_POLLS);
         return RTCP_ETIMEDOUT;
+    }
 
     if (mfi_read(dev, MFI_REG_SIG_LEN, slen, sizeof(slen),
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK)
+                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
+        RTCP_LOGE(TAG, "sign=siglen_read_failed");
         return RTCP_EIO;
+    }
 
     n = ((size_t)slen[0] << 8) | slen[1];
-    if (n == 0 || n > sig_cap)
+    if (n == 0 || n > sig_cap) {
+        RTCP_LOGE(TAG, "sign=siglen_invalid len=%u cap=%u",
+                  (unsigned)n, (unsigned)sig_cap);
         return RTCP_EIO;
+    }
 
     if (mfi_read(dev, MFI_REG_SIG, sig, n,
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK)
+                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
+        RTCP_LOGE(TAG, "sign=signature_read_failed len=%u", (unsigned)n);
         return RTCP_EIO;
+    }
 
     *sig_len = n;
     return RTCP_OK;
@@ -202,16 +226,23 @@ int rtcp_mfi2c_read_cert(rtcp_mfi2c_t *dev, uint8_t *der, size_t cap,
         return RTCP_EINVAL;
 
     if (mfi_read(dev, MFI_REG_CERT_LEN, clen, sizeof(clen),
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK)
+                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
+        RTCP_LOGE(TAG, "cert=length_read_failed");
         return RTCP_EIO;
+    }
 
     n = ((size_t)clen[0] << 8) | clen[1];
-    if (n == 0 || n > cap || n > RTCP_MFI_CERT_MAX)
+    if (n == 0 || n > cap || n > RTCP_MFI_CERT_MAX) {
+        RTCP_LOGE(TAG, "cert=length_invalid len=%u cap=%u max=%u",
+                  (unsigned)n, (unsigned)cap, (unsigned)RTCP_MFI_CERT_MAX);
         return RTCP_EIO;
+    }
 
     if (mfi_read(dev, MFI_REG_CERT, der, n,
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK)
+                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
+        RTCP_LOGE(TAG, "cert=body_read_failed len=%u", (unsigned)n);
         return RTCP_EIO;
+    }
 
     *der_len = n;
     return RTCP_OK;

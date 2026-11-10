@@ -369,6 +369,7 @@ int main(void)
     feed_peer_csm(session, 0xaa04, NULL, 0, 100);
     drain_tx(session, 101);
     assert(!iap2_session_is_authenticated(session));
+    assert(event_seen(h, IAP2_SESSION_EVENT_MFI_PHONE_REJECTED));
     assert(event_seen(h, IAP2_SESSION_EVENT_MFI_FAILED));
 
     iap2_session_link_down(session);

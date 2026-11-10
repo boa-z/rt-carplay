@@ -70,6 +70,14 @@ static void emit_event(iap2_session_t *session, iap2_session_event_t event)
     }
 }
 
+/* Emit the specific reason first, then the umbrella MFI_FAILED event so an
+ * existing consumer that only knows the generic event still sees it. */
+static void emit_mfi_failure(iap2_session_t *session, iap2_session_event_t reason)
+{
+    emit_event(session, reason);
+    emit_event(session, IAP2_SESSION_EVENT_MFI_FAILED);
+}
+
 static bool send_csm(iap2_session_t *session,
                      uint16_t message_id,
                      const uint8_t *body,
@@ -190,15 +198,26 @@ static void handle_authentication_certificate(iap2_session_t *session,
 {
     uint8_t certificate[IAP2_SESSION_CERT_CAPACITY];
     size_t certificate_len = 0U;
-    if (!read_certificate(session, certificate, &certificate_len)) return;
+    if (!read_certificate(session, certificate, &certificate_len)) {
+        iap2_mfi_auth_mark_failed(&session->auth);
+        emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_CERT_FAILED);
+        return;
+    }
 
     uint8_t body[IAP2_SESSION_CERT_CAPACITY + 4U];
     size_t body_len = iap2_param_encode(body, sizeof(body), 0,
                                         certificate, certificate_len);
-    if (body_len == 0U) return;
+    if (body_len == 0U) {
+        iap2_mfi_auth_mark_failed(&session->auth);
+        emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_CERT_FAILED);
+        return;
+    }
     if (send_csm(session, IAP2_MSG_MFI_CERTIFICATE, body, body_len,
                  NULL, NULL, now_ms)) {
         emit_event(session, IAP2_SESSION_EVENT_MFI_CERTIFICATE_SENT);
+    } else {
+        iap2_mfi_auth_mark_failed(&session->auth);
+        emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_CERT_FAILED);
     }
 }
 
@@ -210,7 +229,7 @@ static void challenge_response_acked(uint16_t message_id, void *context)
     if (message_id != IAP2_MSG_MFI_CHALLENGE_RESPONSE ||
         !iap2_mfi_auth_mark_challenge_response_acked(&session->auth)) {
         iap2_mfi_auth_mark_failed(&session->auth);
-        emit_event(session, IAP2_SESSION_EVENT_MFI_FAILED);
+        emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_ACK_FAILED);
     }
 }
 
@@ -225,6 +244,7 @@ static bool handle_authentication_challenge(iap2_session_t *session,
     if (mfi == NULL || mfi->sign == NULL ||
         !iap2_param_find_single(body, body_len, 0, &challenge, &challenge_len) ||
         challenge_len == 0U || challenge_len > IAP2_SESSION_MAX_CHALLENGE_BYTES) {
+        emit_event(session, IAP2_SESSION_EVENT_MFI_CHALLENGE_INVALID);
         return false;
     }
 
@@ -233,15 +253,20 @@ static bool handle_authentication_challenge(iap2_session_t *session,
     if (mfi->sign(challenge, challenge_len, signature, sizeof(signature),
                   &signature_len) != RTCP_OK ||
         signature_len == 0U || signature_len > sizeof(signature)) {
+        emit_event(session, IAP2_SESSION_EVENT_MFI_SIGN_FAILED);
         return false;
     }
 
     uint8_t response[IAP2_SESSION_SIGNATURE_CAPACITY + 4U];
     size_t response_len = iap2_param_encode(response, sizeof(response), 0,
                                             signature, signature_len);
-    if (response_len == 0U) return false;
-    return send_csm(session, IAP2_MSG_MFI_CHALLENGE_RESPONSE, response,
-                    response_len, challenge_response_acked, session, now_ms);
+    if (response_len != 0U &&
+        send_csm(session, IAP2_MSG_MFI_CHALLENGE_RESPONSE, response,
+                 response_len, challenge_response_acked, session, now_ms)) {
+        return true;
+    }
+    emit_event(session, IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED);
+    return false;
 }
 
 static void send_wireless_subscriptions(iap2_session_t *session, uint64_t now_ms)
@@ -565,7 +590,7 @@ void iap2_session_handle_message(iap2_session_t *session,
         if (session->mfi_response_pending ||
             !iap2_mfi_auth_can_respond_to_challenge(&session->auth) ||
             !iap2_mfi_auth_mark_challenge_response_queued(&session->auth)) {
-            emit_event(session, IAP2_SESSION_EVENT_MFI_FAILED);
+            emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_STATE_INVALID);
             break;
         }
         session->mfi_response_pending = true;
@@ -578,11 +603,11 @@ void iap2_session_handle_message(iap2_session_t *session,
     case IAP2_MSG_MFI_AUTH_FAILED:
         iap2_mfi_auth_mark_failed(&session->auth);
         reset_wireless_negotiation(session);
-        emit_event(session, IAP2_SESSION_EVENT_MFI_FAILED);
+        emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_PHONE_REJECTED);
         break;
     case IAP2_MSG_MFI_AUTH_SUCCEEDED:
         if (!iap2_mfi_auth_mark_authenticated(&session->auth)) {
-            emit_event(session, IAP2_SESSION_EVENT_MFI_FAILED);
+            emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_STATE_INVALID);
             break;
         }
         emit_event(session, IAP2_SESSION_EVENT_MFI_AUTHENTICATED);

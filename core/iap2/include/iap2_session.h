@@ -53,6 +53,21 @@ typedef enum {
     IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT,
     IAP2_SESSION_EVENT_LINK_READY,
     IAP2_SESSION_EVENT_LINK_DEAD,
+
+    /*
+     * Specific reasons behind IAP2_SESSION_EVENT_MFI_FAILED.  Each is
+     * emitted immediately before the generic MFI_FAILED event, so the
+     * umbrella event keeps its meaning for existing consumers while a
+     * bring-up log can tell a phone rejection (0xAA04) apart from a local
+     * certificate/signature failure.
+     */
+    IAP2_SESSION_EVENT_MFI_CERT_FAILED,       /* cert read or 0xAA01 send failed */
+    IAP2_SESSION_EVENT_MFI_CHALLENGE_INVALID, /* 0xAA02 body missing/bad length */
+    IAP2_SESSION_EVENT_MFI_SIGN_FAILED,       /* coprocessor sign returned an error */
+    IAP2_SESSION_EVENT_MFI_STATE_INVALID,     /* 0xAA02/0xAA05 out of sequence */
+    IAP2_SESSION_EVENT_MFI_ACK_FAILED,        /* 0xAA03 was not link-acked */
+    IAP2_SESSION_EVENT_MFI_PHONE_REJECTED,    /* phone sent 0xAA04 */
+    IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED, /* 0xAA03 could not be queued */
 } iap2_session_event_t;
 
 typedef bool (*iap2_session_get_wifi_cb_t)(iap2_session_wifi_t *out, void *context);

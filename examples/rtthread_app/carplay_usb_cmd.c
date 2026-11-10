@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "carplay_app.h"
+#include "carplay_mfi_provider.h"
 #include "iap2_session.h"
 #include "iap2_stream.h"
 #include "lockdown.h"
@@ -51,6 +52,10 @@
 #define APPLE_CARPLAY_CONFIGS_WINDEX 0x0004U
 
 #define MUX_REPLY_MAX 2048U
+
+/* Defined with the wired iAP2 state below; the detach event only raises the
+ * stop flag so the USB hub thread never blocks on the iAP2 thread. */
+static void iap2_usb_request_stop(void);
 
 static const char *speed_name(uint8_t speed)
 {
@@ -76,6 +81,9 @@ static void usb_event(struct rtcp_usb *usb, rtcp_usb_event_t event, void *user)
         rt_kprintf("[carplay_usb] event=attached\n");
     } else {
         rt_kprintf("[carplay_usb] event=detached\n");
+        /* The carkit stream is gone with the device.  Ask the iAP2 thread to
+         * stop; it releases the stream and MFi provider in its own context. */
+        iap2_usb_request_stop();
     }
 }
 
@@ -536,6 +544,7 @@ typedef struct {
     unsigned events;
     bool airplay_unavailable_logged;
     char ip_address[64];
+    const struct rtcp_mfi *mfi; /* installed AirPlay /auth-setup provider */
 } iap2_usb_link_t;
 
 static iap2_usb_link_t s_iap2_usb;
@@ -697,6 +706,8 @@ static void iap2_usb_thread(void *parameter)
     iap2_session_link_down(link->session);
     iap2_session_destroy(link->session);
     link->session = NULL;
+    carplay_mfi_provider_release(link->mfi);
+    link->mfi = NULL;
     link->running = false;
     rt_kprintf("[carplay_usb] iap2: stopped (events=%u)\n", link->events);
 }
@@ -741,7 +752,13 @@ static int cmd_iap2(void)
     iap2_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.identity = identity;
-    config.mfi = iap2_usb_mfi();
+    s_iap2_usb.mfi = iap2_usb_mfi();
+    config.mfi = s_iap2_usb.mfi;
+    if (s_iap2_usb.mfi != NULL &&
+        carplay_mfi_provider_install(s_iap2_usb.mfi) != RTCP_OK) {
+        rt_kprintf("[carplay_usb] iap2: AirPlay /auth-setup MFi provider "
+                   "unavailable; auth-setup would return 503\n");
+    }
     config.tx = iap2_usb_tx;
     config.get_airplay = iap2_usb_get_airplay;
     config.on_event = iap2_usb_event;
@@ -751,6 +768,8 @@ static int cmd_iap2(void)
 
     s_iap2_usb.session = iap2_session_create(&config);
     if (s_iap2_usb.session == NULL) {
+        carplay_mfi_provider_release(s_iap2_usb.mfi);
+        s_iap2_usb.mfi = NULL;
         rt_kprintf("[carplay_usb] iap2: cannot allocate the session\n");
         return 0;
     }
@@ -764,6 +783,8 @@ static int cmd_iap2(void)
     if (s_iap2_usb.thread == NULL) {
         iap2_session_destroy(s_iap2_usb.session);
         s_iap2_usb.session = NULL;
+        carplay_mfi_provider_release(s_iap2_usb.mfi);
+        s_iap2_usb.mfi = NULL;
         s_iap2_usb.running = false;
         rt_kprintf("[carplay_usb] iap2: cannot create the link thread\n");
         return 0;
@@ -776,26 +797,47 @@ static int cmd_iap2(void)
     return 0;
 }
 
-static int cmd_iap2_stop(void)
+static void iap2_usb_request_stop(void)
+{
+    if (s_iap2_usb.running) {
+        s_iap2_usb.run = false;
+        rt_kprintf("[carplay_usb] iap2: stop requested\n");
+    }
+}
+
+/* Returns true only when the iAP2 thread has finished and is no longer
+ * touching the carkit stream.  Callers that free the stream must check it:
+ * closing underneath a live thread would free its TLS/mux state while the
+ * thread can still read from it. */
+static bool cmd_iap2_stop(void)
 {
     if (!s_iap2_usb.running) {
         rt_kprintf("[carplay_usb] iap2: not running\n");
-        return 0;
+        return true;
     }
     s_iap2_usb.run = false;
     for (unsigned waited = 0U; s_iap2_usb.running && waited < 3000U;
          waited += 10U) {
         rt_thread_mdelay(10);
     }
-    rt_kprintf("[carplay_usb] iap2: %s\n",
-               s_iap2_usb.running ? "stop timed out" : "stopped");
-    return 0;
+    if (s_iap2_usb.running) {
+        rt_kprintf("[carplay_usb] iap2: stop timed out; the thread still "
+                   "owns the carkit stream\n");
+        return false;
+    }
+    rt_kprintf("[carplay_usb] iap2: stopped\n");
+    return true;
 }
 
 static int cmd_unpair(void)
 {
-    if (s_iap2_usb.running) {
-        (void)cmd_iap2_stop();
+    /* Never close the lockdown session while the iAP2 thread can still use
+     * its stream.  A timed-out stop leaves the thread alive; the user can
+     * retry after it notices the link is gone. */
+    if (!cmd_iap2_stop()) {
+        rt_kprintf("[carplay_usb] unpair: refused while the iAP2 thread is "
+                   "alive; retry 'carplay_usb iap2stop'\n");
+        return 0;
     }
     rtcp_lockdown_session_close(&s_lockdown_session);
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
@@ -805,17 +847,33 @@ static int cmd_unpair(void)
 
 static int cmd_net(void)
 {
+    static rtcp_usb_device_t device;
     char address[64];
     bool valid = false;
     bool up = rtcp_lubanlite_wired_net_up();
     bool found = rtcp_lubanlite_wired_ipv6(address, sizeof(address), &valid);
+    bool apple_ethernet = false;
 
-    rt_kprintf("[carplay_usb] net: ncm=%s\n", up ? "up" : "down");
+    if (rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context,
+                                           &device) == RTCP_OK) {
+        apple_ethernet = rtcp_usb_find_interface(
+                             &device, RTCP_USB_CLASS_VENDOR,
+                             RTCP_USB_APPLE_SUBCLASS_ETH,
+                             RTCP_USB_APPLE_PROTOCOL_ETH) >= 0;
+    }
+
+    rt_kprintf("[carplay_usb] net: ncm=%s apple_ethernet=%s\n",
+               up ? "up" : "down", apple_ethernet ? "present" : "absent");
     if (found) {
         rt_kprintf("[carplay_usb] net: ipv6=%s (%s)\n", address,
                    valid ? "valid" : "tentative");
     } else {
         rt_kprintf("[carplay_usb] net: ipv6=unavailable\n");
+        if (apple_ethernet && !up) {
+            rt_kprintf("[carplay_usb] net: this iPhone exposes Apple "
+                       "Ethernet (ff/fd/01), not CDC-NCM; the NCM netif "
+                       "cannot come up until that function is driven\n");
+        }
     }
     return 0;
 }
@@ -860,7 +918,7 @@ static int cmd_carplay_usb(int argc, char **argv)
         return cmd_iap2();
     }
     if (strcmp(what, "iap2stop") == 0) {
-        return cmd_iap2_stop();
+        return cmd_iap2_stop() ? 0 : 1;
     }
     if (strcmp(what, "net") == 0) {
         return cmd_net();

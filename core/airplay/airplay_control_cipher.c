@@ -165,6 +165,18 @@ airplay_control_cipher_result_t airplay_control_cipher_encrypt_message(
     return AIRPLAY_CONTROL_CIPHER_OK;
 }
 
+airplay_control_cipher_result_t airplay_control_cipher_encrypt_message_single(
+    airplay_control_cipher_t *cipher,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len)
+{
+    return encrypt_frame(cipher, plaintext, plaintext_len, output,
+                         output_capacity, output_len);
+}
+
 airplay_control_cipher_result_t airplay_control_cipher_decrypt(
     airplay_control_cipher_t *cipher,
     const uint8_t *input,

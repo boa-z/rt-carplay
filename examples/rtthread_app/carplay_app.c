@@ -1607,6 +1607,33 @@ static int cmd_carplay_ctrl(int argc, char **argv)
     return 0;
 }
 
+/* Wireless A/B knob for the auth-setup close: Apple's transport chunks a
+ * reply at 1024 plaintext bytes, but the observed controller closes right
+ * after the 1166-byte auth-setup reply.  Flip framing here and retest without
+ * reflashing; the default (chunked) is unchanged. */
+static int cmd_carplay_ab(int argc, char **argv)
+{
+    if (!s_app.running || s_app.server == NULL) {
+        rt_kprintf("carplay_ab: receiver is not running\n");
+        return 0;
+    }
+    if (argc > 1) {
+        if (strcmp(argv[1], "single") == 0) {
+            airplay_rtsp_server_set_single_cipher_frame(s_app.server, true);
+        } else if (strcmp(argv[1], "chunked") == 0) {
+            airplay_rtsp_server_set_single_cipher_frame(s_app.server, false);
+        } else {
+            rt_kprintf("usage: carplay_ab [single|chunked]\n");
+            return 0;
+        }
+    }
+    rt_kprintf("carplay_ab: ControlCipher framing %s\n",
+               airplay_rtsp_server_single_cipher_frame(s_app.server)
+                   ? "single-frame"
+                   : "chunked (1024 B)");
+    return 0;
+}
+
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_start, carplay_start,
                      Start the rt-carplay receiver);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_stop, carplay_stop,
@@ -1619,6 +1646,8 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_randtest, carplay_randtest,
                      Verify the CE TRNG: two calls must differ);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_ctrl, carplay_ctrl,
                      CarPlay Control browse/connect: on|off|connect|status);
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_ab, carplay_ab,
+                     ControlCipher A/B framing: single|chunked);
 #if defined(RTCARPLAY_BT)
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_bt, carplay_bt,
                      Bluetooth RFCOMM bring-up: start|stop|status);

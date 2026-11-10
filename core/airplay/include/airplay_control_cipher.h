@@ -53,6 +53,19 @@ airplay_control_cipher_result_t airplay_control_cipher_encrypt_message(
     size_t output_capacity,
     size_t *output_len);
 
+/* Diagnostic A/B for the wireless bring-up: encode the whole message as ONE
+ * frame instead of the 1024-byte chunking above.  The message must fit
+ * AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES; larger messages return
+ * AIRPLAY_CONTROL_CIPHER_FRAME_TOO_LARGE.  Interoperability with a real
+ * controller is unverified; the default path stays chunked. */
+airplay_control_cipher_result_t airplay_control_cipher_encrypt_message_single(
+    airplay_control_cipher_t *cipher,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len);
+
 /* Incrementally consumes encrypted bytes. `input_consumed` reports exactly
  * how much of this chunk was accepted. Complete plaintext frames are appended
  * to output; partial ciphertext remains in the cipher until the next call.

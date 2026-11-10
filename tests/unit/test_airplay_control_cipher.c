@@ -319,6 +319,57 @@ static void test_chunked_message(void)
     airplay_control_cipher_destroy(receiver);
 }
 
+static void test_single_frame_message(void)
+{
+    uint8_t read_key[32];
+    uint8_t write_key[32];
+    make_keys(read_key, write_key);
+
+    airplay_control_cipher_t *receiver = NULL;
+    airplay_control_cipher_t *peer = NULL;
+    assert(airplay_control_cipher_create(read_key, write_key, &receiver) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+    assert(airplay_control_cipher_create(write_key, read_key, &peer) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+
+    /* The A/B alternative for the same 1166-byte auth-setup reply: one
+     * frame, so the wire length is plaintext + one 18-byte overhead. */
+    static uint8_t message[1166];
+    for (size_t i = 0U; i < sizeof(message); ++i) {
+        message[i] = (uint8_t)(i * 3U);
+    }
+    uint8_t encrypted[sizeof(message) + AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES];
+    size_t encrypted_len = 0U;
+    assert(airplay_control_cipher_encrypt_message_single(
+               peer, message, sizeof(message), encrypted, sizeof(encrypted),
+               &encrypted_len) == AIRPLAY_CONTROL_CIPHER_OK);
+    assert(encrypted_len ==
+           sizeof(message) + AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES);
+    assert(((size_t)encrypted[0] | ((size_t)encrypted[1] << 8U)) ==
+           sizeof(message));
+
+    uint8_t plaintext[sizeof(message)];
+    size_t consumed = 0U;
+    size_t plaintext_len = 0U;
+    assert(airplay_control_cipher_decrypt(receiver, encrypted, encrypted_len,
+                                          &consumed, plaintext,
+                                          sizeof(plaintext), &plaintext_len) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+    assert(consumed == encrypted_len);
+    assert(plaintext_len == sizeof(message));
+    assert(memcmp(plaintext, message, sizeof(message)) == 0);
+
+    /* A message that cannot fit one frame is rejected, not split. */
+    static uint8_t huge[AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES + 1U];
+    assert(airplay_control_cipher_encrypt_message_single(
+               peer, huge, sizeof(huge), encrypted, sizeof(encrypted),
+               &encrypted_len) ==
+           AIRPLAY_CONTROL_CIPHER_FRAME_TOO_LARGE);
+
+    airplay_control_cipher_destroy(peer);
+    airplay_control_cipher_destroy(receiver);
+}
+
 static void test_argument_checks(void)
 {
     uint8_t key[32] = {0};
@@ -349,6 +400,7 @@ int main(void)
     test_wrong_key();
     test_limits();
     test_chunked_message();
+    test_single_frame_message();
     test_argument_checks();
     puts("airplay control cipher host test passed");
     return 0;

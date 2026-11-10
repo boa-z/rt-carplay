@@ -94,6 +94,7 @@ the duplicate include.
 ```
 carplay_start                 # wireless: SoftAP + mDNS + AirPlay, prints the PIN
 carplay_start wired           # wired: IPv6 AirPlay on the NCM link, no AP/mDNS
+carplay_ab single|chunked     # wireless A/B: ControlCipher reply framing
 carplay_status                # running/stopped, display size, PIN, audio counters
 carplay_touch down 640 240    # inject touch in display pixels (panel runs too)
 carplay_touch move 700 260
@@ -166,6 +167,13 @@ endpoint exists).  A `tentative` address has not passed duplicate-address
 detection yet and must not be advertised.  The netif is named `u1` by the
 CherryUSB lwIP glue and needs a configuration where the phone exposes its NCM
 function — check `carplay_usb status`.
+
+`carplay_ab` toggles how encrypted RTSP replies are sealed: `chunked` (the
+default, Apple's 1024-byte `kMaxMessageWriteSize` framing) or `single`
+(one frame per reply, at most 4096 bytes of plaintext).  The controller was
+observed to close right after the 1166-byte auth-setup reply; this knob lets
+that framing hypothesis be tested on the board without reflashing.  It only
+affects replies that switch to ControlCipher, i.e. after Pair-Verify.
 
 `carplay_usb start` must run before the phone is plugged: the configuration
 hook only runs inside CherryUSB enumeration, and the phone exposes its CarPlay

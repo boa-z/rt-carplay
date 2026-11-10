@@ -92,6 +92,14 @@ bool airplay_rtsp_server_send_hid_report(airplay_rtsp_server_t *server,
                                          const uint8_t *report,
                                          size_t report_len);
 
+/* Wireless A/B diagnostic: seal each whole RTSP reply as one ControlCipher
+ * frame instead of Apple's 1024-byte chunking.  Replies larger than the
+ * maximum frame stay chunked.  Off by default; safe to flip at runtime from
+ * another thread (the poll thread reads it when sending the next reply). */
+void airplay_rtsp_server_set_single_cipher_frame(airplay_rtsp_server_t *server,
+                                                 bool enabled);
+bool airplay_rtsp_server_single_cipher_frame(const airplay_rtsp_server_t *server);
+
 /* Stops the connection and all endpoints.  Must be called from the poll
  * thread; no callback is invoked afterwards. */
 void airplay_rtsp_server_stop(airplay_rtsp_server_t *server);

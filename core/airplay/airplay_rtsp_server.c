@@ -67,6 +67,7 @@ struct airplay_rtsp_server {
     int client_fd;
     uint16_t port;
     uint8_t family;
+    volatile bool single_cipher_frame;
     rtcp_addr_t peer;
     bool stopping;
     unsigned next_connection_id;
@@ -472,10 +473,17 @@ static bool send_response(airplay_rtsp_server_t *server,
                                connection->response, response_len);
     }
     size_t encrypted_len = 0U;
-    airplay_control_cipher_result_t result =
-        airplay_control_cipher_encrypt_message(
+    airplay_control_cipher_result_t result;
+    if (server->single_cipher_frame &&
+        response_len <= AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES) {
+        result = airplay_control_cipher_encrypt_message_single(
             connection->cipher, connection->response, response_len,
             connection->io, sizeof(connection->io), &encrypted_len);
+    } else {
+        result = airplay_control_cipher_encrypt_message(
+            connection->cipher, connection->response, response_len,
+            connection->io, sizeof(connection->io), &encrypted_len);
+    }
     if (result != AIRPLAY_CONTROL_CIPHER_OK) return false;
     if (wire_len != NULL) *wire_len = encrypted_len;
     if (frames != NULL) {
@@ -483,6 +491,10 @@ static bool send_response(airplay_rtsp_server_t *server,
                               AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES -
                               1U) /
                              AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES);
+        if (server->single_cipher_frame &&
+            response_len <= AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES) {
+            *frames = 1U;
+        }
     }
     bool sent = socket_send_all(server->net, server->client_fd, connection->io,
                                 encrypted_len);
@@ -829,6 +841,17 @@ bool airplay_rtsp_server_is_connected(const airplay_rtsp_server_t *server)
 bool airplay_rtsp_server_is_encrypted(const airplay_rtsp_server_t *server)
 {
     return server != NULL && server->connection.cipher != NULL;
+}
+
+void airplay_rtsp_server_set_single_cipher_frame(airplay_rtsp_server_t *server,
+                                                 bool enabled)
+{
+    if (server != NULL) server->single_cipher_frame = enabled;
+}
+
+bool airplay_rtsp_server_single_cipher_frame(const airplay_rtsp_server_t *server)
+{
+    return server != NULL && server->single_cipher_frame;
 }
 
 bool airplay_rtsp_server_get_peer(const airplay_rtsp_server_t *server,

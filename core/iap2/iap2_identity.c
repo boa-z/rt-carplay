@@ -1,12 +1,18 @@
 /*
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Based on DiPlay's wireless iAP2 IdentificationInformation field mapping.
- * See THIRD_PARTY_NOTICES.md and COPYING for attribution and terms.
+ * Based on DiPlay's iAP2 IdentificationInformation field mapping.
+ * The wired profile follows DiPlay/Carplay-S3 (USBHostTransportComponent,
+ * group 16); see THIRD_PARTY_NOTICES.md and COPYING for attribution and terms.
  */
 #include "iap2_identity.h"
 
 #include <string.h>
+
+typedef enum {
+    IDENTITY_PROFILE_WIRELESS = 0,
+    IDENTITY_PROFILE_WIRED_USB,
+} identity_profile_t;
 
 static void write_be16(uint8_t *out, uint16_t value)
 {
@@ -141,21 +147,14 @@ bool iap2_identity_parse_unsupported_messages(const uint8_t *body,
     return true;
 }
 
-bool iap2_identity_build_wireless(const iap2_identity_config_t *config,
-                                  uint8_t *output,
-                                  size_t output_capacity,
-                                  size_t *output_len)
-{
-    return iap2_identity_build_wireless_omitting(config, NULL, 0U, output,
-                                                 output_capacity, output_len);
-}
-
-bool iap2_identity_build_wireless_omitting(const iap2_identity_config_t *config,
-                                           const uint16_t *omitted_message_ids,
-                                           size_t omitted_message_count,
-                                           uint8_t *output,
-                                           size_t output_capacity,
-                                           size_t *output_len)
+static bool build_identification(const iap2_identity_config_t *config,
+                                 identity_profile_t profile,
+                                 uint8_t car_play_interface_number,
+                                 const uint16_t *omitted_message_ids,
+                                 size_t omitted_message_count,
+                                 uint8_t *output,
+                                 size_t output_capacity,
+                                 size_t *output_len)
 {
     if (config == NULL || output == NULL || output_len == NULL ||
         (omitted_message_ids == NULL && omitted_message_count != 0U) ||
@@ -163,32 +162,56 @@ bool iap2_identity_build_wireless_omitting(const iap2_identity_config_t *config,
         config->name == NULL || config->model_identifier == NULL ||
         config->manufacturer == NULL || config->serial_number == NULL ||
         config->firmware_version == NULL || config->hardware_version == NULL ||
-        config->language == NULL ||
-        config->wifi_ssid == NULL || config->wifi_ssid[0] == '\0' ||
-        strlen(config->wifi_ssid) > 32U) {
+        config->language == NULL) {
+        return false;
+    }
+    if (profile == IDENTITY_PROFILE_WIRELESS &&
+        (config->wifi_ssid == NULL || config->wifi_ssid[0] == '\0' ||
+         strlen(config->wifi_ssid) > 32U)) {
         return false;
     }
 
     size_t used = 0;
-    /* Match DiPlay's wireless accessory message list, excluding its app-specific EA channel. */
-    const uint16_t sent_messages[] = {
+    /*
+     * Wireless: DiPlay's wireless list, excluding its app-specific EA
+     * channel.  Wired: the DiPlay/Carplay-S3 wired control profile: the
+     * power-source update replaces the Wi-Fi configuration offer and no
+     * Bluetooth/WirelessCarPlay transport is advertised.
+     */
+    static const uint16_t wireless_sent[] = {
         0xaa01, 0xaa03, 0x5000, 0x5002, 0x5200, 0x5203, 0xae00, 0xae02,
         0x4157, 0x4159, 0x4154, 0x4156, 0x4301, 0x5703,
     };
-    const uint16_t received_messages[] = {
+    static const uint16_t wireless_received[] = {
         0xaa00, 0xaa02, 0xaa04, 0xaa05, 0x5001, 0x5201, 0x5202, 0xae01,
         0x4158, 0x4155, 0x4300, 0x4e0d, 0x4e0e, 0x5702,
     };
-    uint16_t filtered_sent[sizeof(sent_messages) / sizeof(sent_messages[0])];
+    static const uint16_t wired_sent[] = {
+        0xaa01, 0xaa03, 0x5000, 0x5002, 0x5200, 0x5203, 0xae00, 0xae02,
+        0x4157, 0x4159, 0x4154, 0x4156, 0xae03, 0x4301,
+    };
+    static const uint16_t wired_received[] = {
+        0xaa00, 0xaa02, 0xaa04, 0xaa05, 0x5001, 0x5201, 0x5202, 0xae01,
+        0x4158, 0x4155, 0x4300,
+    };
+    const bool wired = profile == IDENTITY_PROFILE_WIRED_USB;
+    const uint16_t *sent_messages = wired ? wired_sent : wireless_sent;
+    size_t sent_count = wired ? sizeof(wired_sent) / sizeof(wired_sent[0])
+                              : sizeof(wireless_sent) / sizeof(wireless_sent[0]);
+    const uint16_t *received_messages = wired ? wired_received : wireless_received;
+    size_t received_count = wired ? sizeof(wired_received) / sizeof(wired_received[0])
+                                  : sizeof(wireless_received) / sizeof(wireless_received[0]);
+
+    uint16_t filtered_sent[16];
     size_t filtered_sent_count = 0U;
-    for (size_t i = 0U; i < sizeof(sent_messages) / sizeof(sent_messages[0]); ++i) {
+    for (size_t i = 0U; i < sent_count; ++i) {
         if (!is_message_omitted(sent_messages[i], omitted_message_ids, omitted_message_count)) {
             filtered_sent[filtered_sent_count++] = sent_messages[i];
         }
     }
-    uint16_t filtered_received[sizeof(received_messages) / sizeof(received_messages[0])];
+    uint16_t filtered_received[16];
     size_t filtered_received_count = 0U;
-    for (size_t i = 0U; i < sizeof(received_messages) / sizeof(received_messages[0]); ++i) {
+    for (size_t i = 0U; i < received_count; ++i) {
         if (!is_message_omitted(received_messages[i], omitted_message_ids, omitted_message_count)) {
             filtered_received[filtered_received_count++] = received_messages[i];
         }
@@ -202,7 +225,7 @@ bool iap2_identity_build_wireless_omitting(const iap2_identity_config_t *config,
         !append_string(output, output_capacity, &used, 5, config->hardware_version) ||
         !append_u16_list(output, output_capacity, &used, 6, filtered_sent, filtered_sent_count) ||
         !append_u16_list(output, output_capacity, &used, 7, filtered_received, filtered_received_count) ||
-        !append_u8(output, output_capacity, &used, 8, 0) ||
+        !append_u8(output, output_capacity, &used, 8, wired ? 2U : 0U) ||
         !append_u16(output, output_capacity, &used, 9, 20)) {
         return false;
     }
@@ -221,32 +244,49 @@ bool iap2_identity_build_wireless_omitting(const iap2_identity_config_t *config,
         return false;
     }
 
-    uint8_t bluetooth_transport[128];
-    size_t bluetooth_transport_len = 0;
-    static const uint8_t transport_name[] = "blue";
-    if (!append_u16(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 0, 0) ||
-        !append_string(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 1, "blue") ||
-        !append_void(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 2) ||
-        !append_parameter(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len,
-                          3, config->bluetooth_address, sizeof(config->bluetooth_address)) ||
-        !append_parameter(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len,
-                          4, transport_name, sizeof(transport_name)) ||
-        !append_void(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 5) ||
-        !append_group(output, output_capacity, &used, 17,
-                      bluetooth_transport, bluetooth_transport_len)) {
-        return false;
-    }
+    if (wired) {
+        uint8_t usb_transport[128];
+        size_t usb_transport_len = 0;
+        if (!append_u16(usb_transport, sizeof(usb_transport), &usb_transport_len, 0, 0) ||
+            !append_string(usb_transport, sizeof(usb_transport), &usb_transport_len, 1,
+                           "USBHostTransport") ||
+            !append_void(usb_transport, sizeof(usb_transport), &usb_transport_len, 2) ||
+            !append_u8(usb_transport, sizeof(usb_transport), &usb_transport_len, 3,
+                       car_play_interface_number) ||
+            !append_void(usb_transport, sizeof(usb_transport), &usb_transport_len, 4) ||
+            !append_group(output, output_capacity, &used, 16,
+                          usb_transport, usb_transport_len)) {
+            return false;
+        }
+    } else {
+        uint8_t bluetooth_transport[128];
+        size_t bluetooth_transport_len = 0;
+        static const uint8_t transport_name[] = "blue";
+        if (!append_u16(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 0, 0) ||
+            !append_string(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 1, "blue") ||
+            !append_void(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 2) ||
+            !append_parameter(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len,
+                              3, config->bluetooth_address, sizeof(config->bluetooth_address)) ||
+            !append_parameter(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len,
+                              4, transport_name, sizeof(transport_name)) ||
+            !append_void(bluetooth_transport, sizeof(bluetooth_transport), &bluetooth_transport_len, 5) ||
+            !append_group(output, output_capacity, &used, 17,
+                          bluetooth_transport, bluetooth_transport_len)) {
+            return false;
+        }
 
-    uint8_t wifi_transport[128];
-    size_t wifi_transport_len = 0;
-    if (!append_u16(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 0, 1) ||
-        !append_string(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 1, config->wifi_ssid) ||
-        !append_void(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 2) ||
-        !append_u16(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 3, 1) ||
-        !append_void(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 4) ||
-        !append_void(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 5) ||
-        !append_group(output, output_capacity, &used, 24, wifi_transport, wifi_transport_len)) {
-        return false;
+        uint8_t wifi_transport[128];
+        size_t wifi_transport_len = 0;
+        if (!append_u16(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 0, 1) ||
+            !append_string(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 1, config->wifi_ssid) ||
+            !append_void(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 2) ||
+            !append_u16(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 3, 1) ||
+            !append_void(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 4) ||
+            !append_void(wifi_transport, sizeof(wifi_transport), &wifi_transport_len, 5) ||
+            !append_group(output, output_capacity, &used, 24,
+                          wifi_transport, wifi_transport_len)) {
+            return false;
+        }
     }
 
     uint8_t route_guidance[96];
@@ -264,4 +304,50 @@ bool iap2_identity_build_wireless_omitting(const iap2_identity_config_t *config,
 
     *output_len = used;
     return true;
+}
+
+bool iap2_identity_build_wireless(const iap2_identity_config_t *config,
+                                  uint8_t *output,
+                                  size_t output_capacity,
+                                  size_t *output_len)
+{
+    return iap2_identity_build_wireless_omitting(config, NULL, 0U, output,
+                                                 output_capacity, output_len);
+}
+
+bool iap2_identity_build_wireless_omitting(const iap2_identity_config_t *config,
+                                           const uint16_t *omitted_message_ids,
+                                           size_t omitted_message_count,
+                                           uint8_t *output,
+                                           size_t output_capacity,
+                                           size_t *output_len)
+{
+    return build_identification(config, IDENTITY_PROFILE_WIRELESS, 0U,
+                                omitted_message_ids, omitted_message_count,
+                                output, output_capacity, output_len);
+}
+
+bool iap2_identity_build_wired(const iap2_identity_config_t *config,
+                               uint8_t car_play_interface_number,
+                               uint8_t *output,
+                               size_t output_capacity,
+                               size_t *output_len)
+{
+    return iap2_identity_build_wired_omitting(config, car_play_interface_number,
+                                              NULL, 0U, output, output_capacity,
+                                              output_len);
+}
+
+bool iap2_identity_build_wired_omitting(const iap2_identity_config_t *config,
+                                        uint8_t car_play_interface_number,
+                                        const uint16_t *omitted_message_ids,
+                                        size_t omitted_message_count,
+                                        uint8_t *output,
+                                        size_t output_capacity,
+                                        size_t *output_len)
+{
+    return build_identification(config, IDENTITY_PROFILE_WIRED_USB,
+                                car_play_interface_number, omitted_message_ids,
+                                omitted_message_count, output, output_capacity,
+                                output_len);
 }

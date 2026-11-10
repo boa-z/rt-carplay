@@ -176,4 +176,10 @@ bool rtcp_usb_interface_bulk_endpoints(const rtcp_usb_interface_t *interface,
  * replacement for "configuration number 6". */
 bool rtcp_usb_is_carplay_configuration(const rtcp_usb_device_t *device);
 
+/* CarPlay NCM control interface number in the selected configuration, taken
+ * from the descriptor (CDC-NCM control interface, or Apple Ethernet when the
+ * device exposes no NCM function).  iAP2 USBHostTransportComponent parameter
+ * 3 carries this number.  Returns RTCP_ENOENT when neither interface exists. */
+int rtcp_usb_carplay_interface_number(const rtcp_usb_device_t *device);
+
 #endif /* RTCP_USB_H */

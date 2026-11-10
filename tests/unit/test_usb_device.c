@@ -112,6 +112,9 @@ static void test_parse_carplay_configuration(void)
     assert(in == 0x87U);
 
     assert(rtcp_usb_is_carplay_configuration(&device));
+    /* The iAP2 interface number comes from the NCM control interface
+     * descriptor (interface 1 here), never from a fixed reference value. */
+    assert(rtcp_usb_carplay_interface_number(&device) == 1);
 }
 
 static void test_carplay_configuration_with_apple_ethernet(void)
@@ -134,6 +137,8 @@ static void test_carplay_configuration_with_apple_ethernet(void)
     assert(rtcp_usb_parse_configuration(&device, builder.data, length) ==
            RTCP_OK);
     assert(rtcp_usb_is_carplay_configuration(&device));
+    /* No NCM function: fall back to Apple Ethernet's interface number. */
+    assert(rtcp_usb_carplay_interface_number(&device) == 1);
 }
 
 static void test_default_configuration_is_not_carplay(void)
@@ -157,6 +162,7 @@ static void test_default_configuration_is_not_carplay(void)
            RTCP_OK);
     assert(!rtcp_usb_is_carplay_configuration(&device));
     assert(rtcp_usb_find_interface(&device, 0x02, 0x0d, 0) == RTCP_ENOENT);
+    assert(rtcp_usb_carplay_interface_number(&device) == RTCP_ENOENT);
 }
 
 static void test_lookup_rejects_wrong_protocol(void)

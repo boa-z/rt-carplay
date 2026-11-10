@@ -46,3 +46,16 @@ bool iap2_carplay_build_start_session(
     uint8_t *output,
     size_t output_capacity,
     size_t *output_len);
+
+/*
+ * Builds the wired CarPlayStartSession body.  Wired sessions carry the
+ * accessory's NCM-side IP addresses in wired_attributes (parameter group 0)
+ * instead of Wi-Fi credentials; the caller therefore fills ip_addresses with
+ * addresses reachable over the USB NCM link (IPv6 link-local in the
+ * references).  ssid/passphrase/channel/security_type are ignored.
+ */
+bool iap2_carplay_build_start_session_wired(
+    const iap2_carplay_start_session_config_t *config,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len);

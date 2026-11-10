@@ -167,3 +167,53 @@ bool iap2_carplay_build_start_session(
     *output_len = used;
     return true;
 }
+
+bool iap2_carplay_build_start_session_wired(
+    const iap2_carplay_start_session_config_t *config,
+    uint8_t *output,
+    size_t output_capacity,
+    size_t *output_len)
+{
+    if (output_len != NULL) {
+        *output_len = 0;
+    }
+    if (config == NULL || output == NULL || output_len == NULL ||
+        config->ip_addresses == NULL || config->ip_address_count == 0 ||
+        config->airplay_port == 0 || config->airplay_port > UINT16_MAX ||
+        config->device_identifier == NULL || config->public_key == NULL ||
+        config->source_version == NULL ||
+        config->public_key[0] == '\0' || config->source_version[0] == '\0' ||
+        config->device_identifier[0] == '\0') {
+        return false;
+    }
+
+    /*
+     * Wired attributes (group 0) hold one or more address strings.  The
+     * references send a single IPv6 link-local address on the NCM link.
+     */
+    size_t used = 0;
+    uint8_t wired[512];
+    size_t wired_len = 0;
+    for (size_t i = 0; i < config->ip_address_count; ++i) {
+        const char *address = config->ip_addresses[i];
+        if (address == NULL || address[0] == '\0' || strlen(address) > 45U ||
+            !append_string(wired, sizeof(wired), &wired_len, 0, address)) {
+            return false;
+        }
+    }
+    if (!append_parameter(output, output_capacity, &used, 0, wired, wired_len)) {
+        return false;
+    }
+
+    uint8_t port[4];
+    write_be32(port, config->airplay_port);
+    if (!append_parameter(output, output_capacity, &used, 2, port, sizeof(port)) ||
+        !append_string(output, output_capacity, &used, 3, config->device_identifier) ||
+        !append_string(output, output_capacity, &used, 4, config->public_key) ||
+        !append_string(output, output_capacity, &used, 5, config->source_version)) {
+        return false;
+    }
+
+    *output_len = used;
+    return true;
+}

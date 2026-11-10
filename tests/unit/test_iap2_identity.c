@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "iap2_identity.h"
 
@@ -110,6 +111,61 @@ int main(void)
                                                      &omitted_count));
 
     assert(!iap2_identity_build_wireless(&config, body, 8, &body_len));
+
+    /* Wired USB-host profile: no SSID requirement, USBHostTransportComponent
+     * (group 16), power capability 2 and the wired message lists. */
+    iap2_identity_config_t wired_config = config;
+    wired_config.wifi_ssid = NULL;
+    assert(!iap2_identity_build_wireless(&wired_config, body, sizeof(body),
+                                         &body_len));
+    assert(iap2_identity_build_wired(&wired_config, 3U, body, sizeof(body),
+                                     &body_len));
+    assert(find_parameter(body, body_len, 8, &payload, &payload_len));
+    assert(payload_len == 1U && payload[0] == 2U);
+    assert(find_parameter(body, body_len, 6, &payload, &payload_len));
+    assert(payload_len == 28 && read_be16(payload) == 0xaa01 &&
+           list_contains(payload, payload_len, 0xae03) &&
+           !list_contains(payload, payload_len, 0x5703) &&
+           read_be16(payload + 26) == 0x4301);
+    assert(find_parameter(body, body_len, 7, &payload, &payload_len));
+    assert(payload_len == 22 && read_be16(payload) == 0xaa00 &&
+           list_contains(payload, payload_len, 0x4300) &&
+           !list_contains(payload, payload_len, 0x4e0d));
+
+    const uint8_t *group = NULL;
+    size_t group_len = 0U;
+    assert(find_parameter(body, body_len, 16, &group, &group_len));
+    assert(find_parameter(group, group_len, 0, &payload, &payload_len));
+    assert(payload_len == 2U && read_be16(payload) == 0U);
+    assert(find_parameter(group, group_len, 1, &payload, &payload_len));
+    assert(payload_len == sizeof("USBHostTransport"));
+    assert(memcmp(payload, "USBHostTransport", payload_len) == 0);
+    assert(find_parameter(group, group_len, 2, &payload, &payload_len));
+    assert(payload_len == 0U);
+    assert(find_parameter(group, group_len, 3, &payload, &payload_len));
+    assert(payload_len == 1U && payload[0] == 3U);
+    assert(find_parameter(group, group_len, 4, &payload, &payload_len));
+    assert(payload_len == 0U);
+    assert(!find_parameter(body, body_len, 17, &payload, &payload_len));
+    assert(!find_parameter(body, body_len, 24, &payload, &payload_len));
+    assert(find_parameter(body, body_len, 30, &payload, &payload_len));
+
+    /* The negative parse checks above cleared the count; re-parse. */
+    assert(iap2_identity_parse_unsupported_messages(rejected, sizeof(rejected),
+                                                    omitted,
+                                                    IAP2_IDENTITY_MAX_OMITTED_MESSAGES,
+                                                    &omitted_count));
+    assert(omitted_count == 2U);
+    assert(iap2_identity_build_wired_omitting(&wired_config, 3U, omitted,
+                                              omitted_count, body, sizeof(body),
+                                              &body_len));
+    assert(find_parameter(body, body_len, 6, &payload, &payload_len));
+    assert(!list_contains(payload, payload_len, 0x4301));
+    assert(list_contains(payload, payload_len, 0xae03));
+    assert(find_parameter(body, body_len, 7, &payload, &payload_len));
+    assert(!list_contains(payload, payload_len, 0x4300));
+    assert(find_parameter(body, body_len, 16, &group, &group_len));
+
     puts("iap2_identity host test passed");
     return 0;
 }

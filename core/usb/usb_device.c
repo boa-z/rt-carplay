@@ -211,3 +211,21 @@ bool rtcp_usb_is_carplay_configuration(const rtcp_usb_device_t *device)
                                 RTCP_USB_APPLE_PROTOCOL_ETH) >= 0;
     return has_mux && (has_ncm || has_apple_eth);
 }
+
+int rtcp_usb_carplay_interface_number(const rtcp_usb_device_t *device)
+{
+    if (device == NULL) {
+        return RTCP_ENOENT;
+    }
+    int index = rtcp_usb_find_interface(device, RTCP_USB_CLASS_CDC,
+                                        RTCP_USB_CDC_SUBCLASS_NCM, 0U);
+    if (index < 0) {
+        index = rtcp_usb_find_interface(device, RTCP_USB_CLASS_VENDOR,
+                                        RTCP_USB_APPLE_SUBCLASS_ETH,
+                                        RTCP_USB_APPLE_PROTOCOL_ETH);
+    }
+    if (index < 0) {
+        return RTCP_ENOENT;
+    }
+    return (int)device->interfaces[index].number;
+}

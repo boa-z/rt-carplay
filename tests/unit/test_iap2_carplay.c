@@ -124,6 +124,46 @@ int main(void)
     config.ip_address_count = 0;
     assert(!iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len));
 
+    /* Wired StartSession: wired_attributes (group 0) carry the NCM-side
+     * addresses, no Wi-Fi parameters are present and the SSID/passphrase are
+     * not required. */
+    const char *wired_ips[] = {"fe80::1c2d:3e4f:5a6b:7c8d", "fd00::1"};
+    config.ssid = NULL;
+    config.passphrase = NULL;
+    config.channel = 0;
+    config.security_type = 0;
+    config.ip_addresses = wired_ips;
+    config.ip_address_count = 2;
+    assert(iap2_carplay_build_start_session_wired(&config, body, sizeof(body),
+                                                  &body_len));
+    const uint8_t *wired = NULL;
+    size_t wired_len = 0;
+    assert(find_parameter(body, body_len, 0, &wired, &wired_len));
+    assert(wired_len == 4U + sizeof("fe80::1c2d:3e4f:5a6b:7c8d") +
+                       4U + sizeof("fd00::1"));
+    assert(find_parameter(wired, wired_len, 0, &field, &field_len));
+    assert(field_len == sizeof("fe80::1c2d:3e4f:5a6b:7c8d"));
+    assert(memcmp(field, "fe80::1c2d:3e4f:5a6b:7c8d", field_len) == 0);
+    assert(!find_parameter(body, body_len, 1, &field, &field_len));
+    assert(find_parameter(body, body_len, 2, &field, &field_len));
+    assert(field_len == 4 && read_be32(field) == 7000);
+    assert(find_parameter(body, body_len, 3, &field, &field_len));
+    assert(field_len == sizeof("authorized-device-id"));
+    assert(find_parameter(body, body_len, 4, &field, &field_len));
+    assert(field_len == sizeof("provider-public-key"));
+    assert(find_parameter(body, body_len, 5, &field, &field_len));
+    assert(field_len == sizeof("1.0"));
+    assert(!iap2_carplay_build_start_session_wired(&config, body, 8, &body_len));
+    assert(body_len == 0);
+    config.ip_address_count = 0;
+    assert(!iap2_carplay_build_start_session_wired(&config, body, sizeof(body),
+                                                   &body_len));
+    config.ip_address_count = 2;
+    config.device_identifier = NULL;
+    assert(!iap2_carplay_build_start_session_wired(&config, body, sizeof(body),
+                                                   &body_len));
+    config.device_identifier = "authorized-device-id";
+
     puts("iap2_carplay host test passed");
     return 0;
 }

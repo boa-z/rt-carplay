@@ -32,6 +32,30 @@ bool iap2_identity_build_wireless_omitting(const iap2_identity_config_t *config,
                                            size_t output_capacity,
                                            size_t *output_len);
 
+/*
+ * Builds IdentificationInformation for a wired USB-host transport
+ * (USBHostTransportComponent, group 16).  car_play_interface_number is the
+ * CarPlay NCM control interface number from the device's active
+ * configuration; the references use 3.  Wired identification carries no
+ * Bluetooth or WirelessCarPlay transport components and does not need
+ * wifi_ssid, but advertises PowerSourceUpdate (0xAE03) and power-providing
+ * capability Advanced (2).
+ */
+bool iap2_identity_build_wired(const iap2_identity_config_t *config,
+                               uint8_t car_play_interface_number,
+                               uint8_t *output,
+                               size_t output_capacity,
+                               size_t *output_len);
+
+/* Wired variant of iap2_identity_build_wireless_omitting(). */
+bool iap2_identity_build_wired_omitting(const iap2_identity_config_t *config,
+                                        uint8_t car_play_interface_number,
+                                        const uint16_t *omitted_message_ids,
+                                        size_t omitted_message_count,
+                                        uint8_t *output,
+                                        size_t output_capacity,
+                                        size_t *output_len);
+
 /* Extracts unsupported message IDs from a rejection containing only parameters 6/7. */
 bool iap2_identity_parse_unsupported_messages(const uint8_t *body,
                                               size_t body_len,

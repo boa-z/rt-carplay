@@ -68,6 +68,12 @@ uint16_t airplay_rtsp_server_get_port(const airplay_rtsp_server_t *server);
 bool airplay_rtsp_server_is_connected(const airplay_rtsp_server_t *server);
 bool airplay_rtsp_server_is_encrypted(const airplay_rtsp_server_t *server);
 
+/* Address of the currently attached RTSP client, when it is IPv4.  The
+ * CarPlay Control browser uses it to address a unicast mDNS query at the
+ * phone, which does not depend on multicast forwarding through the soft-AP. */
+bool airplay_rtsp_server_get_peer(const airplay_rtsp_server_t *server,
+                                  rtcp_addr_t *peer);
+
 /* Services the RTSP connection and every media endpoint.  timeout_ms bounds
  * the wait for socket activity; 0 polls and returns immediately. */
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms);

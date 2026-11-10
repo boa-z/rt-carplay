@@ -549,12 +549,14 @@ static bool process_stream(airplay_rtsp_server_t *server,
         connection->tx_frames += frames;
         consume_stream(connection, consumed);
         RTCP_LOGI(TAG, "rtsp_request=handled id=%u ms=%u method=%s path=%s "
-                  "cseq=%s bytes=%u status=%u response_plain=%u "
-                  "response_wire=%u frames=%u",
+                  "cseq=%s bytes=%u",
                   connection->id,
                   (unsigned)(server_now_ms(server) - connection->opened_ms),
                   connection->request.method, connection->request.path,
-                  connection->request.cseq, (unsigned)consumed, status,
+                  connection->request.cseq, (unsigned)consumed);
+        RTCP_LOGI(TAG, "rtsp_response id=%u cseq=%s status=%u plain=%u "
+                  "wire=%u frames=%u",
+                  connection->id, connection->request.cseq, status,
                   (unsigned)response_len, (unsigned)wire_len, frames);
         memset(&connection->request, 0, sizeof(connection->request));
 
@@ -618,12 +620,14 @@ static void server_teardown_connection(airplay_rtsp_server_t *server,
                                        const char *reason)
 {
     if (server->client_fd < 0 && server->session == NULL) return;
-    RTCP_LOGI(TAG, "rtsp_client=disconnected id=%u reason=%s lifetime_ms=%u "
-              "requests=%u rx_bytes=%u tx_bytes=%u tx_frames=%u",
+    RTCP_LOGI(TAG, "rtsp_client=disconnected id=%u reason=%s lifetime_ms=%u",
               server->connection.id, reason,
               (unsigned)(server_now_ms(server) -
-                         server->connection.opened_ms),
-              server->connection.requests, (unsigned)server->connection.rx_bytes,
+                         server->connection.opened_ms));
+    RTCP_LOGI(TAG, "rtsp_session_stats id=%u requests=%u rx_bytes=%u "
+              "tx_bytes=%u tx_frames=%u",
+              server->connection.id, server->connection.requests,
+              (unsigned)server->connection.rx_bytes,
               (unsigned)server->connection.tx_bytes,
               server->connection.tx_frames);
     if (server->session != NULL) {
@@ -700,9 +704,9 @@ static void server_accept(airplay_rtsp_server_t *server)
         server_teardown_connection(server, "session_create_failed");
         return;
     }
-    RTCP_LOGI(TAG, "rtsp_client=connected id=%u peer_port=%u ms=%u",
-              server->connection.id, (unsigned)peer.port,
-              (unsigned)server->connection.opened_ms);
+    RTCP_LOGI(TAG, "rtsp_client=connected id=%u peer=%u.%u.%u.%u port=%u",
+              server->connection.id, peer.addr[0], peer.addr[1], peer.addr[2],
+              peer.addr[3], (unsigned)peer.port);
 }
 
 static void server_read_client(airplay_rtsp_server_t *server)
@@ -815,6 +819,17 @@ bool airplay_rtsp_server_is_connected(const airplay_rtsp_server_t *server)
 bool airplay_rtsp_server_is_encrypted(const airplay_rtsp_server_t *server)
 {
     return server != NULL && server->connection.cipher != NULL;
+}
+
+bool airplay_rtsp_server_get_peer(const airplay_rtsp_server_t *server,
+                                  rtcp_addr_t *peer)
+{
+    if (server == NULL || peer == NULL || server->client_fd < 0 ||
+        server->peer.family != RTCP_AF_INET) {
+        return false;
+    }
+    *peer = server->peer;
+    return true;
 }
 
 bool airplay_rtsp_server_send_hid_report(airplay_rtsp_server_t *server,

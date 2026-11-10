@@ -178,6 +178,15 @@ typedef struct {
     unsigned ctrl_attempts;
     unsigned ctrl_responses;
     int ctrl_last_status;
+    /* Last IPv4 peer that opened an RTSP connection: the phone on our AP.
+     * Used for a unicast mDNS query as well as the multicast one. */
+    uint8_t ctrl_peer_ipv4[4];
+    bool ctrl_peer_valid;
+    unsigned browse_queries;
+    unsigned browse_tx_errors;
+    unsigned browse_packets;
+    unsigned browse_updates;
+    char ctrl_last_endpoint[MDNS_MAX_NAME];
 
     carplay_app_screen_cb_t on_screen;
     void *screen_context;
@@ -558,6 +567,17 @@ static void shutdown_stack(app_state_t *app)
     memset(app, 0, sizeof(*app));
 }
 
+static bool bytes_contain(const uint8_t *bytes, size_t length,
+                          const char *needle)
+{
+    size_t needle_len = strlen(needle);
+    if (needle_len == 0U || length < needle_len) return false;
+    for (size_t i = 0U; i + needle_len <= length; ++i) {
+        if (memcmp(bytes + i, needle, needle_len) == 0) return true;
+    }
+    return false;
+}
+
 /* Every packet received on the shared mDNS socket also feeds the browser. */
 static void mdns_packet_sink(const uint8_t *packet, size_t packet_len,
                              const rtcp_addr_t *from, void *context)
@@ -566,39 +586,98 @@ static void mdns_packet_sink(const uint8_t *packet, size_t packet_len,
     if (app->browser == NULL || !app->ctrl_enabled) return;
     const uint8_t *ipv4 = NULL;
     if (from != NULL && from->family == RTCP_AF_INET) ipv4 = from->addr;
-    (void)mdns_browser_handle_packet(app->browser, packet, packet_len, ipv4,
-                                     (uint32_t)app->os.now_ms());
+    bool control = bytes_contain(packet, packet_len, "_carplay-ctrl");
+    bool airplay = bytes_contain(packet, packet_len, "_airplay");
+    bool response =
+        packet_len >= 3U && (packet[2] & 0x80U) != 0U; /* DNS QR bit */
+    int updates = mdns_browser_handle_packet(app->browser, packet, packet_len,
+                                             ipv4,
+                                             (uint32_t)app->os.now_ms());
+    ++app->browse_packets;
+    if (updates > 0) app->browse_updates += (unsigned)updates;
+    if (app->browse_packets <= 10U || (app->browse_packets % 64U) == 0U ||
+        (response && control)) {
+        APP_LOG("mdns_rx #%u from=%u.%u.%u.%u bytes=%u response=%u ctrl=%u "
+                "airplay=%u updates=%d",
+                app->browse_packets, ipv4 != NULL ? ipv4[0] : 0U,
+                ipv4 != NULL ? ipv4[1] : 0U, ipv4 != NULL ? ipv4[2] : 0U,
+                ipv4 != NULL ? ipv4[3] : 0U, (unsigned)packet_len,
+                response ? 1U : 0U, control ? 1U : 0U, airplay ? 1U : 0U,
+                updates);
+    }
 }
 
 /*
  * Browses _carplay-ctrl._tcp and performs the reverse connect-out.  Runs in
  * the poll thread; carplay_ctrl_connect() bounds the handshake and the status
  * read at CARPLAY_CTRL_TIMEOUT_MS each, so a silent endpoint cannot stall
- * mDNS/RTSP for long.  Once the phone has attached to our RTSP port the nudge
- * is no longer needed and is suppressed for the rest of the session.
+ * mDNS/RTSP for long.  Once the phone's event channel is up the nudge is no
+ * longer needed and is suppressed for the rest of the session.
  */
 static void carplay_ctrl_tick(app_state_t *app, uint32_t now_ms)
 {
     if (app->browser == NULL || !app->ctrl_enabled) return;
+
+    /* Learn the phone's Wi-Fi address from its RTSP connection, then query it
+     * directly as well as via multicast.  The unicast query does not depend
+     * on multicast delivery through the soft-AP. */
+    rtcp_addr_t peer;
+    if (airplay_rtsp_server_get_peer(app->server, &peer)) {
+        memcpy(app->ctrl_peer_ipv4, peer.addr, 4U);
+        app->ctrl_peer_valid = true;
+    }
 
     if (mdns_browser_query_due(app->browser, now_ms)) {
         uint8_t query[512];
         size_t query_len = mdns_browser_build_query(app->browser, query,
                                                     sizeof(query));
         if (query_len != 0U) {
-            (void)mdns_responder_send(app->mdns, &rtcp_net_rtthread, query,
-                                      query_len);
+            ++app->browse_queries;
+            int multicast_rc = mdns_responder_send(
+                app->mdns, &rtcp_net_rtthread, query, query_len);
+            int unicast_rc = RTCP_ESTATE;
+            if (app->ctrl_peer_valid) {
+                rtcp_addr_t destination;
+                memset(&destination, 0, sizeof(destination));
+                destination.family = RTCP_AF_INET;
+                memcpy(destination.addr, app->ctrl_peer_ipv4, 4U);
+                destination.port = MDNS_PORT;
+                unicast_rc = mdns_responder_send_to(
+                    app->mdns, &rtcp_net_rtthread, &destination, query,
+                    query_len);
+            }
+            if (multicast_rc < 0) ++app->browse_tx_errors;
+            if (unicast_rc < 0 && app->ctrl_peer_valid) ++app->browse_tx_errors;
+            if (app->browse_queries <= 3U ||
+                (app->browse_queries % 15U) == 0U) {
+                if (app->ctrl_peer_valid) {
+                    APP_LOG("carplay_ctrl=query #%u multicast_rc=%d "
+                            "unicast_rc=%d peer=%u.%u.%u.%u",
+                            app->browse_queries, multicast_rc, unicast_rc,
+                            app->ctrl_peer_ipv4[0], app->ctrl_peer_ipv4[1],
+                            app->ctrl_peer_ipv4[2], app->ctrl_peer_ipv4[3]);
+                } else {
+                    APP_LOG("carplay_ctrl=query #%u multicast_rc=%d "
+                            "unicast=none",
+                            app->browse_queries, multicast_rc);
+                }
+            }
         }
         mdns_browser_mark_queried(app->browser, now_ms);
     }
 
-    if (app->airplay_connected ||
-        airplay_rtsp_server_is_connected(app->server)) {
-        return;
-    }
+    if (app->airplay_connected) return;
     const mdns_browser_endpoint_t *endpoint =
         mdns_browser_best(app->browser, now_ms);
     if (endpoint == NULL) return;
+    if (strcmp(app->ctrl_last_endpoint, endpoint->instance) != 0) {
+        strncpy(app->ctrl_last_endpoint, endpoint->instance,
+                sizeof(app->ctrl_last_endpoint) - 1U);
+        APP_LOG("carplay_ctrl=endpoint ip=%u.%u.%u.%u port=%u instance=%s",
+                endpoint->ipv4[0], endpoint->ipv4[1], endpoint->ipv4[2],
+                endpoint->ipv4[3], (unsigned)endpoint->port,
+                endpoint->instance);
+    }
     if (app->ctrl_last_attempt_ms != 0U &&
         (uint32_t)(now_ms - app->ctrl_last_attempt_ms) <
             CARPLAY_CTRL_RETRY_MS) {
@@ -1440,10 +1519,22 @@ static int cmd_carplay_ctrl(int argc, char **argv)
                    (unsigned long long)s_app.ctrl_device_id,
                    s_app.ctrl_attempts, s_app.ctrl_responses,
                    s_app.ctrl_last_status);
+        rt_kprintf("  browse: queries %u, tx errors %u, packets %u, "
+                   "updates %u\n",
+                   s_app.browse_queries, s_app.browse_tx_errors,
+                   s_app.browse_packets, s_app.browse_updates);
+        if (s_app.ctrl_peer_valid) {
+            rt_kprintf("  unicast peer %u.%u.%u.%u\n",
+                       s_app.ctrl_peer_ipv4[0], s_app.ctrl_peer_ipv4[1],
+                       s_app.ctrl_peer_ipv4[2], s_app.ctrl_peer_ipv4[3]);
+        } else {
+            rt_kprintf("  unicast peer: none\n");
+        }
         if (endpoint != NULL) {
-            rt_kprintf("  endpoint %u.%u.%u.%u:%u\n", endpoint->ipv4[0],
-                       endpoint->ipv4[1], endpoint->ipv4[2],
-                       endpoint->ipv4[3], (unsigned)endpoint->port);
+            rt_kprintf("  endpoint %u.%u.%u.%u:%u instance=%s\n",
+                       endpoint->ipv4[0], endpoint->ipv4[1],
+                       endpoint->ipv4[2], endpoint->ipv4[3],
+                       (unsigned)endpoint->port, endpoint->instance);
         }
         return 0;
     }

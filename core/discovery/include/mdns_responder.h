@@ -85,3 +85,11 @@ int mdns_responder_poll_ex(mdns_responder_t *responder,
  * error. */
 int mdns_responder_send(mdns_responder_t *responder, const struct rtcp_net *net,
                         const void *packet, size_t packet_len);
+
+/* Same, but to an explicit destination.  A unicast PTR query to the peer's
+ * :5353 is the fallback when multicast delivery on the soft-AP is unreliable;
+ * Apple's mDNSResponder answers it (the querier sets the QU bit). */
+int mdns_responder_send_to(mdns_responder_t *responder,
+                           const struct rtcp_net *net,
+                           const rtcp_addr_t *destination, const void *packet,
+                           size_t packet_len);

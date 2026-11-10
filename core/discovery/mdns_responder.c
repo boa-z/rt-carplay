@@ -486,6 +486,19 @@ void mdns_responder_close(mdns_responder_t *responder, const struct rtcp_net *ne
     responder->fd = -1;
 }
 
+int mdns_responder_send_to(mdns_responder_t *responder,
+                           const struct rtcp_net *net,
+                           const rtcp_addr_t *destination, const void *packet,
+                           size_t packet_len)
+{
+    if (responder == NULL || net == NULL || net->udp_sendto == NULL ||
+        destination == NULL || packet == NULL || packet_len == 0U ||
+        responder->fd < 0) {
+        return RTCP_EINVAL;
+    }
+    return net->udp_sendto(responder->fd, destination, packet, packet_len);
+}
+
 int mdns_responder_send(mdns_responder_t *responder, const struct rtcp_net *net,
                         const void *packet, size_t packet_len)
 {

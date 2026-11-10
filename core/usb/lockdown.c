@@ -2,21 +2,10 @@
 #include "lockdown.h"
 
 #include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
 
+#include "rtcp/plist.h"
 #include "rtcp/rtcp.h"
-
-#define LOCKDOWN_PLIST_HEADER \
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" \
-    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" " \
-    "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" \
-    "<plist version=\"1.0\">\n" \
-    "<dict>\n"
-
-#define LOCKDOWN_PLIST_FOOTER \
-    "</dict>\n" \
-    "</plist>\n"
 
 static bool is_bare_token(const char *value)
 {
@@ -35,80 +24,224 @@ static bool is_bare_token(const char *value)
     return true;
 }
 
+static bool writer_usable(const uint8_t *output, size_t capacity)
+{
+    return output != NULL && capacity != 0U;
+}
+
+static size_t finish(rtcp_plist_writer_t *writer)
+{
+    return rtcp_plist_finish(writer);
+}
+
 size_t rtcp_lockdown_build_get_value(uint8_t *output, size_t capacity,
                                      const char *label, const char *key)
 {
-    if (output == NULL || !is_bare_token(label) || !is_bare_token(key)) {
+    if (!writer_usable(output, capacity) || !is_bare_token(label) ||
+        !is_bare_token(key)) {
         return 0U;
     }
-    int written = snprintf(
-        (char *)output, capacity,
-        LOCKDOWN_PLIST_HEADER
-        "<key>Label</key><string>%s</string>\n"
-        "<key>Request</key><string>GetValue</string>\n"
-        "<key>Key</key><string>%s</string>\n" LOCKDOWN_PLIST_FOOTER,
-        label, key);
-    if (written < 0 || (size_t)written >= capacity) {
+    rtcp_plist_writer_t writer;
+    rtcp_plist_writer_init(&writer, output, capacity);
+    if (!rtcp_plist_begin_dict(&writer) ||
+        !rtcp_plist_key(&writer, "Label") ||
+        !rtcp_plist_string(&writer, label) ||
+        !rtcp_plist_key(&writer, "Request") ||
+        !rtcp_plist_string(&writer, "GetValue") ||
+        !rtcp_plist_key(&writer, "Key") ||
+        !rtcp_plist_string(&writer, key) ||
+        !rtcp_plist_end_dict(&writer)) {
         return 0U;
     }
-    return (size_t)written;
+    return finish(&writer);
 }
 
-/* Bounded byte search: the XML buffer is not NUL terminated. */
-static const uint8_t *find_bytes(const uint8_t *haystack, size_t haystack_len,
-                                 const char *needle, size_t needle_len)
+size_t rtcp_lockdown_build_set_value(uint8_t *output, size_t capacity,
+                                     const char *label, const char *key,
+                                     const char *value)
 {
-    if (needle_len == 0U || haystack_len < needle_len) {
-        return NULL;
+    if (!writer_usable(output, capacity) || !is_bare_token(label) ||
+        !is_bare_token(key) || value == NULL) {
+        return 0U;
     }
-    for (size_t i = 0U; i + needle_len <= haystack_len; ++i) {
-        if (memcmp(haystack + i, needle, needle_len) == 0) {
-            return haystack + i;
+    rtcp_plist_writer_t writer;
+    rtcp_plist_writer_init(&writer, output, capacity);
+    if (!rtcp_plist_begin_dict(&writer) ||
+        !rtcp_plist_key(&writer, "Label") ||
+        !rtcp_plist_string(&writer, label) ||
+        !rtcp_plist_key(&writer, "Request") ||
+        !rtcp_plist_string(&writer, "SetValue") ||
+        !rtcp_plist_key(&writer, "Key") ||
+        !rtcp_plist_string(&writer, key) ||
+        !rtcp_plist_key(&writer, "Value") ||
+        !rtcp_plist_string(&writer, value) ||
+        !rtcp_plist_end_dict(&writer)) {
+        return 0U;
+    }
+    return finish(&writer);
+}
+
+size_t rtcp_lockdown_build_start_session(uint8_t *output, size_t capacity,
+                                         const char *label,
+                                         const char *host_id,
+                                         const char *system_buid)
+{
+    if (!writer_usable(output, capacity) || !is_bare_token(label) ||
+        !is_bare_token(host_id) || !is_bare_token(system_buid)) {
+        return 0U;
+    }
+    rtcp_plist_writer_t writer;
+    rtcp_plist_writer_init(&writer, output, capacity);
+    if (!rtcp_plist_begin_dict(&writer) ||
+        !rtcp_plist_key(&writer, "Label") ||
+        !rtcp_plist_string(&writer, label) ||
+        !rtcp_plist_key(&writer, "Request") ||
+        !rtcp_plist_string(&writer, "StartSession") ||
+        !rtcp_plist_key(&writer, "HostID") ||
+        !rtcp_plist_string(&writer, host_id) ||
+        !rtcp_plist_key(&writer, "SystemBUID") ||
+        !rtcp_plist_string(&writer, system_buid) ||
+        !rtcp_plist_end_dict(&writer)) {
+        return 0U;
+    }
+    return finish(&writer);
+}
+
+size_t rtcp_lockdown_build_start_service(uint8_t *output, size_t capacity,
+                                         const char *service)
+{
+    if (!writer_usable(output, capacity) || !is_bare_token(service)) {
+        return 0U;
+    }
+    rtcp_plist_writer_t writer;
+    rtcp_plist_writer_init(&writer, output, capacity);
+    if (!rtcp_plist_begin_dict(&writer) ||
+        !rtcp_plist_key(&writer, "Request") ||
+        !rtcp_plist_string(&writer, "StartService") ||
+        !rtcp_plist_key(&writer, "Service") ||
+        !rtcp_plist_string(&writer, service) ||
+        !rtcp_plist_end_dict(&writer)) {
+        return 0U;
+    }
+    return finish(&writer);
+}
+
+size_t rtcp_lockdown_build_pair(
+    uint8_t *output, size_t capacity, const char *label, const char *host_id,
+    const char *system_buid, const uint8_t *device_certificate,
+    size_t device_certificate_length, const uint8_t *host_certificate,
+    size_t host_certificate_length, const uint8_t *root_certificate,
+    size_t root_certificate_length)
+{
+    if (!writer_usable(output, capacity) || !is_bare_token(label) ||
+        !is_bare_token(host_id) || !is_bare_token(system_buid) ||
+        device_certificate == NULL || device_certificate_length == 0U ||
+        host_certificate == NULL || host_certificate_length == 0U ||
+        root_certificate == NULL || root_certificate_length == 0U) {
+        return 0U;
+    }
+    rtcp_plist_writer_t writer;
+    rtcp_plist_writer_init(&writer, output, capacity);
+    if (!rtcp_plist_begin_dict(&writer) ||
+        !rtcp_plist_key(&writer, "Label") ||
+        !rtcp_plist_string(&writer, label) ||
+        !rtcp_plist_key(&writer, "PairRecord") ||
+        !rtcp_plist_begin_dict(&writer) ||
+        !rtcp_plist_key(&writer, "DeviceCertificate") ||
+        !rtcp_plist_data(&writer, device_certificate,
+                         device_certificate_length) ||
+        !rtcp_plist_key(&writer, "HostCertificate") ||
+        !rtcp_plist_data(&writer, host_certificate,
+                         host_certificate_length) ||
+        !rtcp_plist_key(&writer, "HostID") ||
+        !rtcp_plist_string(&writer, host_id) ||
+        !rtcp_plist_key(&writer, "RootCertificate") ||
+        !rtcp_plist_data(&writer, root_certificate,
+                         root_certificate_length) ||
+        !rtcp_plist_key(&writer, "SystemBUID") ||
+        !rtcp_plist_string(&writer, system_buid) ||
+        !rtcp_plist_end_dict(&writer) ||
+        !rtcp_plist_key(&writer, "Request") ||
+        !rtcp_plist_string(&writer, "Pair") ||
+        !rtcp_plist_key(&writer, "ProtocolVersion") ||
+        !rtcp_plist_string(&writer, "2") ||
+        !rtcp_plist_key(&writer, "PairingOptions") ||
+        !rtcp_plist_begin_dict(&writer) ||
+        !rtcp_plist_key(&writer, "ExtendedPairingErrors") ||
+        !rtcp_plist_boolean(&writer, true) ||
+        !rtcp_plist_end_dict(&writer) ||
+        !rtcp_plist_end_dict(&writer)) {
+        return 0U;
+    }
+    return finish(&writer);
+}
+
+static int read_exact(const rtcp_stream_t *stream, uint8_t *buffer,
+                      size_t length, uint32_t timeout_ms)
+{
+    size_t received = 0U;
+    while (received < length) {
+        int ret = stream->ops->read(stream->context, buffer + received,
+                                    length - received, timeout_ms);
+        if (ret < 0) {
+            return ret;
         }
+        if (ret == 0) {
+            return RTCP_ESTATE;
+        }
+        received += (size_t)ret;
     }
-    return NULL;
+    return RTCP_OK;
+}
+
+int rtcp_lockdown_exchange(const rtcp_stream_t *stream,
+                           const uint8_t *request, size_t request_length,
+                           uint8_t *reply, size_t reply_capacity,
+                           size_t *reply_length, uint32_t timeout_ms)
+{
+    if (stream == NULL || stream->ops == NULL || stream->ops->read == NULL ||
+        stream->ops->write == NULL || request == NULL || request_length == 0U ||
+        request_length > RTCP_LOCKDOWN_FRAME_MAX || reply == NULL ||
+        reply_capacity == 0U || reply_length == NULL) {
+        return RTCP_EINVAL;
+    }
+
+    uint8_t header[4] = {
+        (uint8_t)(request_length >> 24),
+        (uint8_t)(request_length >> 16),
+        (uint8_t)(request_length >> 8),
+        (uint8_t)request_length,
+    };
+    int ret = stream->ops->write(stream->context, header, sizeof(header));
+    if (ret < 0) {
+        return ret;
+    }
+    ret = stream->ops->write(stream->context, request, request_length);
+    if (ret < 0) {
+        return ret;
+    }
+
+    ret = read_exact(stream, header, sizeof(header), timeout_ms);
+    if (ret != RTCP_OK) {
+        return ret;
+    }
+    size_t length = ((size_t)header[0] << 24) | ((size_t)header[1] << 16) |
+                    ((size_t)header[2] << 8) | (size_t)header[3];
+    if (length == 0U || length > reply_capacity ||
+        length > RTCP_LOCKDOWN_FRAME_MAX) {
+        return RTCP_EINVAL;
+    }
+    ret = read_exact(stream, reply, length, timeout_ms);
+    if (ret != RTCP_OK) {
+        return ret;
+    }
+    *reply_length = length;
+    return RTCP_OK;
 }
 
 int rtcp_lockdown_extract_string(const uint8_t *xml, size_t length,
                                  const char *key, char *output,
                                  size_t capacity)
 {
-    static const char string_open[] = "<string>";
-    static const char string_close[] = "</string>";
-    if (xml == NULL || output == NULL || capacity == 0U ||
-        !is_bare_token(key)) {
-        return RTCP_EINVAL;
-    }
-
-    char needle[64];
-    int needle_len = snprintf(needle, sizeof(needle), "<key>%s</key>", key);
-    if (needle_len < 0 || (size_t)needle_len >= sizeof(needle)) {
-        return RTCP_EINVAL;
-    }
-    const uint8_t *position =
-        find_bytes(xml, length, needle, (size_t)needle_len);
-    if (position == NULL) {
-        return RTCP_ENOENT;
-    }
-
-    size_t remaining = length - (size_t)(position - xml);
-    const uint8_t *open = find_bytes(position, remaining, string_open,
-                                     sizeof(string_open) - 1U);
-    if (open == NULL) {
-        return RTCP_EINVAL;
-    }
-    open += sizeof(string_open) - 1U;
-    remaining = length - (size_t)(open - xml);
-    const uint8_t *close = find_bytes(open, remaining, string_close,
-                                      sizeof(string_close) - 1U);
-    if (close == NULL) {
-        return RTCP_EINVAL;
-    }
-    size_t value_length = (size_t)(close - open);
-    if (value_length >= capacity) {
-        return RTCP_EINVAL;
-    }
-    memcpy(output, open, value_length);
-    output[value_length] = '\0';
-    return RTCP_OK;
+    return rtcp_plist_get_string(xml, length, key, output, capacity);
 }

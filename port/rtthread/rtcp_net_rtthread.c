@@ -379,9 +379,11 @@ uint16_t rtcp_net_rtthread_local_port(int fd)
     struct sockaddr_storage addr;
     socklen_t len = sizeof(addr);
     if (fd < 0 || getsockname(fd, (struct sockaddr *)&addr, &len) != 0) return 0U;
+#if RTCP_NET_HAVE_IPV6
     if (addr.ss_family == AF_INET6) {
         return ntohs(((const struct sockaddr_in6 *)&addr)->sin6_port);
     }
+#endif
     if (addr.ss_family == AF_INET) {
         return ntohs(((const struct sockaddr_in *)&addr)->sin_port);
     }

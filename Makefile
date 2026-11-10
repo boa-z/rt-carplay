@@ -47,6 +47,7 @@ TESTS := test_mfi2c \
          test_airplay_pairing_e2e test_airplay_ed25519 \
          test_discovery test_mdns_responder test_mdns_browser test_carplay_ctrl \
          test_usb_device test_usbmux test_usbmux_host test_lockdown test_plist \
+         test_lockdown_pair \
          test_port_linux test_input_bridge \
          test_media_timestamp
 

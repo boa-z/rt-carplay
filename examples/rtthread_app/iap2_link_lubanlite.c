@@ -28,6 +28,14 @@
 #include "rtcp_lubanlite.h"
 #include "rtcp_rtthread.h"
 
+#if defined(RTCARPLAY_MFI)
+/* Used only by the carplay_mfi self-test to check that the coprocessor's
+ * private key belongs to the certificate it returns. */
+#include "mbedtls/pk.h"
+#include "mbedtls/rsa.h"
+#include "mbedtls/x509_crt.h"
+#endif
+
 #define IAP2_LOG(fmt, ...) rt_kprintf("[iap2] " fmt "\n", ##__VA_ARGS__)
 
 /* iAP2 service class UUID of the *accessory* RFCOMM server (...CAFF).
@@ -566,11 +574,68 @@ static int cmd_carplay_mfi_cert(int argc, char **argv)
     return 0;
 }
 
+/*
+ * Check a coprocessor signature against the certificate it returned.  The
+ * 2.0C signs the 20-byte iAP2 challenge (Apple's platform code calls it the
+ * digest) with RSA PKCS#1 v1.5; the exact DigestInfo wrapping differs
+ * between parts, so try the raw encoding and the SHA-1 DigestInfo encoding.
+ * A match proves that the certificate's public key and the private key
+ * inside the coprocessor belong together, so a phone-side rejection after
+ * this passes points at iOS trust or the exchange itself, not at the
+ * certificate data path.
+ */
+static void cmd_mfi_check_signature(const uint8_t *certificate,
+                                    size_t certificate_len,
+                                    const uint8_t *challenge,
+                                    size_t challenge_len,
+                                    const uint8_t *signature,
+                                    size_t signature_len)
+{
+    mbedtls_x509_crt crt;
+    mbedtls_x509_crt_init(&crt);
+
+    int result = mbedtls_x509_crt_parse(&crt, certificate, certificate_len);
+    if (result != 0) {
+        rt_kprintf("carplay_mfi sign: certificate parse failed -0x%04x\n",
+                   -result);
+        mbedtls_x509_crt_free(&crt);
+        return;
+    }
+    if (mbedtls_pk_get_type(&crt.pk) != MBEDTLS_PK_RSA) {
+        rt_kprintf("carplay_mfi sign: certificate key is not RSA (type %d)\n",
+                   (int)mbedtls_pk_get_type(&crt.pk));
+        mbedtls_x509_crt_free(&crt);
+        return;
+    }
+
+    mbedtls_rsa_context *rsa = mbedtls_pk_rsa(crt.pk);
+    size_t rsa_len = (size_t)mbedtls_rsa_get_len(rsa);
+    rt_kprintf("carplay_mfi sign: certificate RSA %u bits, signature %u "
+               "bytes\n", (unsigned)(rsa_len * 8U), (unsigned)signature_len);
+    if (signature_len != rsa_len) {
+        rt_kprintf("carplay_mfi sign: signature length does not match the "
+                   "certificate key\n");
+        mbedtls_x509_crt_free(&crt);
+        return;
+    }
+
+    int raw = mbedtls_rsa_pkcs1_verify(rsa, NULL, NULL, MBEDTLS_RSA_PUBLIC,
+                                       MBEDTLS_MD_NONE, challenge_len,
+                                       challenge, signature);
+    int sha1 = mbedtls_rsa_pkcs1_verify(rsa, NULL, NULL, MBEDTLS_RSA_PUBLIC,
+                                        MBEDTLS_MD_SHA1, challenge_len,
+                                        challenge, signature);
+    rt_kprintf("carplay_mfi sign: verify raw=%d sha1=%d%s\n", raw, sha1,
+               (raw == 0 || sha1 == 0) ? " (key matches certificate)" : "");
+    mbedtls_x509_crt_free(&crt);
+}
+
 static int cmd_carplay_mfi_sign(void)
 {
     const struct rtcp_mfi *mfi = cmd_mfi_ready();
     if (mfi == NULL) return 0;
 
+    static uint8_t certificate[IAP2_LINK_CERT_CAPACITY];
     static uint8_t signature[RTCP_MFI_SIG_MAX];
     uint8_t challenge[RTCP_MFI_CHALLENGE_LEN];
     for (size_t i = 0; i < sizeof(challenge); ++i) {
@@ -590,6 +655,16 @@ static int cmd_carplay_mfi_sign(void)
             rt_kprintf(" %02x", signature[offset + i]);
         }
         rt_kprintf("\n");
+    }
+
+    size_t certificate_len = sizeof(certificate);
+    if (mfi->read_cert(certificate, sizeof(certificate), &certificate_len) ==
+        RTCP_OK) {
+        cmd_mfi_check_signature(certificate, certificate_len, challenge,
+                                sizeof(challenge), signature, signature_len);
+    } else {
+        rt_kprintf("carplay_mfi sign: certificate read failed; "
+                   "signature not verified\n");
     }
     return 0;
 }

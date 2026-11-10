@@ -88,6 +88,9 @@
 #define DEFAULT_CHANNEL 36U
 #define DEFAULT_SEED_PATH "/data/rt-carplay.seed"
 #define DEFAULT_STORE_PATH "/data/rt-carplay-pairings.bin"
+/* iOS CarPlay runs AirPlay Pair-Setup with this fixed setup code; there is
+ * no PIN entry UI.  DiPlay and LIVI hardcode the same value. */
+#define DEFAULT_PAIR_CODE "3939"
 
 #define POLL_THREAD_STACK_BYTES (32U * 1024U)
 #define POLL_THREAD_PRIORITY 15U
@@ -569,18 +572,12 @@ void carplay_app_config_defaults(carplay_app_config_t *config)
 
 static bool make_pairing_code(app_state_t *app, const char *requested)
 {
-    if (requested != NULL && requested[0] != '\0') {
-        size_t length = strlen(requested);
-        if (length > PAIR_CODE_DIGITS) return false;
-        memcpy(app->pairing_code, requested, length + 1U);
-        return true;
+    if (requested == NULL || requested[0] == '\0') {
+        requested = DEFAULT_PAIR_CODE;
     }
-    uint8_t bytes[2];
-    if (app->os.random == NULL || !app->os.random(bytes, sizeof(bytes))) {
-        return false;
-    }
-    unsigned value = ((unsigned)bytes[0] << 8U | (unsigned)bytes[1]) % 10000U;
-    rt_snprintf(app->pairing_code, sizeof(app->pairing_code), "%04u", value);
+    size_t length = strlen(requested);
+    if (length > PAIR_CODE_DIGITS) return false;
+    memcpy(app->pairing_code, requested, length + 1U);
     return true;
 }
 

@@ -47,7 +47,9 @@
 #define SETTINGS_TOMBSTONE   0xFFFFU
 #define SETTINGS_MAX_ENTRIES 16
 #define SETTINGS_NAME_MAX    64
-#define SETTINGS_VALUE_MAX   160
+/* CONFIG_BT_SETTINGS_CCC_STORE_MAX (48) entries of 4-byte structs need 192
+ * bytes for the "bt/ccc/<addr>" value; link keys need 16. */
+#define SETTINGS_VALUE_MAX   256
 #define SETTINGS_APPEND_MAX  (SETTINGS_MAX_ENTRIES * 4)
 
 struct settings_entry {

@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rtcp/log.h"
+
+#define TAG "airplay_pairing"
 #define PAIRING_CONTENT_TYPE "application/pairing+tlv8"
 #define PAIRING_RESPONSE_MAX_BYTES 512U
 
@@ -136,6 +139,9 @@ airplay_rtsp_pairing_result_t airplay_rtsp_pairing_route(
             session->pair_setup, request->body, request->body_len, body,
             sizeof(body), &body_len);
         if (pair_setup_result != NULL) *pair_setup_result = result;
+        RTCP_LOGI(TAG, "pair_setup result=%d request=%u response=%u",
+                  (int)result, (unsigned)request->body_len,
+                  (unsigned)body_len);
         if (result != AIRPLAY_PAIR_SETUP_OK && body_len == 0U) {
             return AIRPLAY_RTSP_PAIRING_INTERNAL_ERROR;
         }
@@ -144,6 +150,9 @@ airplay_rtsp_pairing_result_t airplay_rtsp_pairing_route(
             session->pair_verify, request->body, request->body_len, body,
             sizeof(body), &body_len);
         if (pair_verify_result != NULL) *pair_verify_result = result;
+        RTCP_LOGI(TAG, "pair_verify result=%d request=%u response=%u",
+                  (int)result, (unsigned)request->body_len,
+                  (unsigned)body_len);
         if (result != AIRPLAY_PAIR_VERIFY_OK && body_len == 0U) {
             return AIRPLAY_RTSP_PAIRING_INTERNAL_ERROR;
         }

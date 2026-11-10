@@ -16,6 +16,9 @@
 #include "mbedtls/hkdf.h"
 #include "mbedtls/md.h"
 #include "mbedtls/platform_util.h"
+#include "rtcp/log.h"
+
+#define TAG "airplay_pair_setup"
 
 #define PS_METHOD 0x00U
 #define PS_IDENTIFIER 0x01U
@@ -282,6 +285,7 @@ static airplay_pair_setup_result_t handle_m3(
     scrub(public_a, sizeof(public_a));
     scrub(proof_m1, sizeof(proof_m1));
     if (srp_result != AIRPLAY_SRP6A_OK) {
+        RTCP_LOGW(TAG, "srp_verify failed result=%d", (int)srp_result);
         scrub(proof_m2, sizeof(proof_m2));
         return srp_result == AIRPLAY_SRP6A_AUTH_FAILED
                    ? AIRPLAY_PAIR_SETUP_AUTH_FAILED

@@ -30,7 +30,7 @@ typedef struct {
     const char *ssid;           /* default "ArtInChip CarPlay" */
     const char *passphrase;     /* default "88888888"; "" = open network */
     uint8_t channel;            /* default 36 (5 GHz, as the vendor image) */
-    const char *pair_code;      /* NULL generates a random 4-digit PIN */
+    const char *pair_code;      /* NULL = "3939" (CarPlay's fixed AirPlay PIN) */
     uint16_t width_pixels;      /* required display width */
     uint16_t height_pixels;     /* required display height */
     uint16_t rotation_degrees;  /* 0, 90, 180 or 270 */

@@ -162,6 +162,9 @@ static airplay_rtsp_session_result_t handle_mfi_auth_setup(
     size_t body_len = 0U;
     airplay_mfi_sap_result_t result = airplay_mfi_sap_respond(
         request->body, request->body_len, body, sizeof(body), &body_len);
+    RTCP_LOGI(TAG, "auth_setup result=%d request=%u response=%u",
+              (int)result, (unsigned)request->body_len,
+              (unsigned)body_len);
     if (result != AIRPLAY_MFI_SAP_OK) {
         mbedtls_platform_zeroize(body, sizeof(body));
         const unsigned status = result == AIRPLAY_MFI_SAP_INVALID_ARGUMENT

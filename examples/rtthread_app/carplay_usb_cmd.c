@@ -20,12 +20,17 @@
  *                         dialog on the phone) and open the carkit service;
  *                         blocks until the phone answers or pairing times out
  *   carplay_usb unpair    close the carkit service and its lockdown session
+ *   carplay_usb iap2      run the iAP2 session over the open carkit stream
+ *                         (identification and MFi; CarPlay needs the NCM link)
+ *   carplay_usb iap2stop  stop the wired iAP2 session
  *   carplay_usb stop      disarm the hook
  */
 #include <rtthread.h>
 
 #include <string.h>
 
+#include "iap2_session.h"
+#include "iap2_stream.h"
 #include "lockdown.h"
 #include "lockdown_session.h"
 #include "rtcp_lubanlite.h"
@@ -507,8 +512,262 @@ static int cmd_pair(void)
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Wired iAP2 over the carkit service stream                           */
+/* ------------------------------------------------------------------ */
+
+#define IAP2_USB_RX_TIMEOUT_MS 200U
+#define IAP2_USB_STACK_BYTES (12U * 1024U)
+#define IAP2_USB_PRIORITY 20U
+#define IAP2_USB_TICK 20U
+
+typedef struct {
+    iap2_session_t *session;
+    iap2_stream_rx_t rx;
+    rt_thread_t thread;
+    volatile bool run;
+    volatile bool running;
+    volatile bool identified;
+    volatile bool authenticated;
+    unsigned events;
+    bool airplay_unavailable_logged;
+} iap2_usb_link_t;
+
+static iap2_usb_link_t s_iap2_usb;
+
+static uint32_t iap2_usb_now_ms(void)
+{
+    return (uint32_t)rt_tick_get_millisecond();
+}
+
+static bool iap2_usb_tx(const uint8_t *bytes, size_t length, void *context)
+{
+    iap2_usb_link_t *link = context;
+
+    if (link->rx.stream.ops == NULL || link->rx.stream.ops->write == NULL) {
+        return false;
+    }
+    return link->rx.stream.ops->write(link->rx.stream.context, bytes, length) ==
+           RTCP_OK;
+}
+
+/*
+ * The wired AirPlay endpoint needs the NCM network, which is not part of this
+ * stage.  Report the missing piece once instead of pretending the invite was
+ * sent; identification and MFi still complete over the carkit stream.
+ */
+static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
+{
+    iap2_usb_link_t *link = context;
+
+    (void)out;
+    if (!link->airplay_unavailable_logged) {
+        link->airplay_unavailable_logged = true;
+        rt_kprintf("[carplay_usb] iap2: CarPlay availability reached but no "
+                   "wired AirPlay endpoint is configured yet (NCM/IP is the "
+                   "next stage); 0x4301 is not sent\n");
+    }
+    return false;
+}
+
+static void iap2_usb_event(iap2_session_event_t event, void *context)
+{
+    iap2_usb_link_t *link = context;
+
+    ++link->events;
+    switch (event) {
+        case IAP2_SESSION_EVENT_IDENTIFICATION_ACCEPTED:
+            link->identified = true;
+            rt_kprintf("[carplay_usb] iap2: identification accepted\n");
+            break;
+        case IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED:
+            rt_kprintf("[carplay_usb] iap2: identification rejected\n");
+            break;
+        case IAP2_SESSION_EVENT_MFI_CERTIFICATE_SENT:
+            rt_kprintf("[carplay_usb] iap2: MFi certificate sent\n");
+            break;
+        case IAP2_SESSION_EVENT_MFI_AUTHENTICATED:
+            link->authenticated = true;
+            rt_kprintf("[carplay_usb] iap2: MFi authenticated\n");
+            break;
+        case IAP2_SESSION_EVENT_MFI_FAILED:
+            rt_kprintf("[carplay_usb] iap2: MFi failed\n");
+            break;
+        case IAP2_SESSION_EVENT_SUBSCRIPTIONS_SENT:
+            rt_kprintf("[carplay_usb] iap2: subscriptions sent\n");
+            break;
+        case IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT:
+            rt_kprintf("[carplay_usb] iap2: CarPlayStartSession sent\n");
+            break;
+        case IAP2_SESSION_EVENT_LINK_READY:
+            rt_kprintf("[carplay_usb] iap2: link ready\n");
+            break;
+        case IAP2_SESSION_EVENT_LINK_DEAD:
+            rt_kprintf("[carplay_usb] iap2: link failed\n");
+            break;
+        default:
+            break;
+    }
+}
+
+static iap2_identity_config_t iap2_usb_identity(void)
+{
+    iap2_identity_config_t identity;
+
+    memset(&identity, 0, sizeof(identity));
+    identity.name = "rt-carplay";
+    identity.model_identifier = "D213";
+    identity.manufacturer = "ArtInChip";
+    identity.serial_number = "rt-carplay-wired";
+    identity.firmware_version = "0.1";
+    identity.hardware_version = "ArtInChip demo128";
+    identity.language = "en";
+    /* Wired identification carries no Wi-Fi transport component. */
+    identity.wifi_ssid = NULL;
+    return identity;
+}
+
+static const struct rtcp_mfi *iap2_usb_mfi(void)
+{
+#if defined(RTCARPLAY_MFI)
+    int ret = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
+                                       RTCARPLAY_MFI_I2C_ADDR);
+    if (ret == RTCP_OK) {
+        return rtcp_mfi_lubanlite();
+    }
+    rt_kprintf("[carplay_usb] iap2: MFi coprocessor not ready rc=%d; the "
+               "phone's authentication request will fail\n", ret);
+#else
+    rt_kprintf("[carplay_usb] iap2: MFi support not built in; only "
+               "identification can complete\n");
+#endif
+    return NULL;
+}
+
+static void iap2_usb_thread(void *parameter)
+{
+    iap2_usb_link_t *link = parameter;
+
+    iap2_session_link_up(link->session, iap2_usb_now_ms());
+    rt_kprintf("[carplay_usb] iap2: link up\n");
+    while (link->run) {
+        int ret = iap2_stream_rx_step(&link->rx, link->session,
+                                      IAP2_USB_RX_TIMEOUT_MS,
+                                      iap2_usb_now_ms());
+        if (ret == RTCP_OK || ret == RTCP_ETIMEDOUT) {
+            continue;
+        }
+        if (ret == 0) {
+            rt_kprintf("[carplay_usb] iap2: carkit stream closed by the "
+                       "phone\n");
+        } else {
+            rt_kprintf("[carplay_usb] iap2: carkit stream error rc=%d\n", ret);
+        }
+        break;
+    }
+    iap2_session_link_down(link->session);
+    iap2_session_destroy(link->session);
+    link->session = NULL;
+    link->running = false;
+    rt_kprintf("[carplay_usb] iap2: stopped (events=%u)\n", link->events);
+}
+
+static int cmd_iap2(void)
+{
+    if (!lockdown_session_active()) {
+        rt_kprintf("[carplay_usb] iap2: no open carkit session; run "
+                   "'carplay_usb pair' first\n");
+        return 0;
+    }
+    if (s_iap2_usb.running) {
+        rt_kprintf("[carplay_usb] iap2: already running\n");
+        return 0;
+    }
+
+    rtcp_stream_t service = rtcp_lockdown_session_service(&s_lockdown_session);
+    if (service.ops == NULL) {
+        rt_kprintf("[carplay_usb] iap2: carkit service stream is not open\n");
+        return 0;
+    }
+
+    rtcp_usb_device_t device;
+    int ret = rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context,
+                                                 &device);
+    if (ret != RTCP_OK) {
+        rt_kprintf("[carplay_usb] iap2: device is no longer attached\n");
+        return 0;
+    }
+    int interface_number = rtcp_usb_carplay_interface_number(&device);
+    if (interface_number < 0) {
+        rt_kprintf("[carplay_usb] iap2: the active configuration has no "
+                   "NCM control or Apple Ethernet interface; replug the "
+                   "phone\n");
+        return 0;
+    }
+
+    memset(&s_iap2_usb, 0, sizeof(s_iap2_usb));
+    iap2_stream_rx_init(&s_iap2_usb.rx, &service);
+
+    iap2_identity_config_t identity = iap2_usb_identity();
+    iap2_session_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.identity = identity;
+    config.mfi = iap2_usb_mfi();
+    config.tx = iap2_usb_tx;
+    config.get_airplay = iap2_usb_get_airplay;
+    config.on_event = iap2_usb_event;
+    config.context = &s_iap2_usb;
+    config.transport = IAP2_SESSION_TRANSPORT_WIRED_USB;
+    config.car_play_interface_number = (uint8_t)interface_number;
+
+    s_iap2_usb.session = iap2_session_create(&config);
+    if (s_iap2_usb.session == NULL) {
+        rt_kprintf("[carplay_usb] iap2: cannot allocate the session\n");
+        return 0;
+    }
+
+    s_iap2_usb.run = true;
+    s_iap2_usb.running = true;
+    s_iap2_usb.thread = rt_thread_create("carplay-iap2u",
+                                         iap2_usb_thread, &s_iap2_usb,
+                                         IAP2_USB_STACK_BYTES,
+                                         IAP2_USB_PRIORITY, IAP2_USB_TICK);
+    if (s_iap2_usb.thread == NULL) {
+        iap2_session_destroy(s_iap2_usb.session);
+        s_iap2_usb.session = NULL;
+        s_iap2_usb.running = false;
+        rt_kprintf("[carplay_usb] iap2: cannot create the link thread\n");
+        return 0;
+    }
+    rt_thread_startup(s_iap2_usb.thread);
+    rt_kprintf("[carplay_usb] iap2: running over the %s carkit stream, "
+               "usb interface=%d\n",
+               s_lockdown_session.service_ssl ? "TLS" : "raw",
+               interface_number);
+    return 0;
+}
+
+static int cmd_iap2_stop(void)
+{
+    if (!s_iap2_usb.running) {
+        rt_kprintf("[carplay_usb] iap2: not running\n");
+        return 0;
+    }
+    s_iap2_usb.run = false;
+    for (unsigned waited = 0U; s_iap2_usb.running && waited < 3000U;
+         waited += 10U) {
+        rt_thread_mdelay(10);
+    }
+    rt_kprintf("[carplay_usb] iap2: %s\n",
+               s_iap2_usb.running ? "stop timed out" : "stopped");
+    return 0;
+}
+
 static int cmd_unpair(void)
 {
+    if (s_iap2_usb.running) {
+        (void)cmd_iap2_stop();
+    }
     rtcp_lockdown_session_close(&s_lockdown_session);
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
     rt_kprintf("[carplay_usb] unpair: session closed\n");
@@ -551,8 +810,14 @@ static int cmd_carplay_usb(int argc, char **argv)
     if (strcmp(what, "unpair") == 0) {
         return cmd_unpair();
     }
+    if (strcmp(what, "iap2") == 0) {
+        return cmd_iap2();
+    }
+    if (strcmp(what, "iap2stop") == 0) {
+        return cmd_iap2_stop();
+    }
     rt_kprintf("usage: carplay_usb "
-               "[start|stop|status|request|mux|pair|unpair]\n");
+               "[start|stop|status|request|mux|pair|unpair|iap2|iap2stop]\n");
     return 0;
 }
 

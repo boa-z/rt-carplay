@@ -117,6 +117,8 @@ carplay_usb status            # device, selected configuration, interfaces
 carplay_usb request           # re-send Apple 0x52, print bNumConfigurations
 carplay_usb mux               # USBMUX -> lockdown 62078, GetValue, print reply
 carplay_usb pair              # wired pairing + StartSession + carkit service
+carplay_usb iap2              # iAP2 over the open carkit stream (ID + MFi)
+carplay_usb iap2stop          # stop the wired iAP2 session
 carplay_usb unpair            # close the carkit service and lockdown session
 carplay_usb stop              # disarm the hook (device stays configured)
 ```
@@ -134,6 +136,17 @@ mbedTLS with `MBEDTLS_SSL_CLI_C`, X.509 create/parse and RSA key generation
 (`rtcp_lubanlite_random`, built for USB-only configurations as well).  The
 pair record is kept in RAM only; it is regenerated on the next boot, so the
 phone asks for trust again.
+
+`carplay_usb iap2` runs the iAP2 link over the carkit service stream while
+`pair` keeps it open.  This is the wired transport: IdentificationInformation
+advertises `USBHostTransportComponent` (group 16) with the CarPlay NCM control
+interface number read from the attached device's active descriptor, omits the
+Bluetooth/WirelessCarPlay components and the Wi-Fi configuration exchange, and
+reports PowerSourceUpdate (0xAE03) after authentication.  It completes
+identification and MFi over USB; on CarPlayAvailability (0x4300) it needs an
+AirPlay endpoint reachable over the NCM link, which this stage does not bring
+up yet, so it logs that and does not send 0x4301.  `iap2stop` tears the link
+down; `unpair` also stops it first.
 
 `carplay_usb start` must run before the phone is plugged: the configuration
 hook only runs inside CherryUSB enumeration, and the phone exposes its CarPlay

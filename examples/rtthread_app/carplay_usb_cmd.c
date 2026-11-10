@@ -21,7 +21,8 @@
  *                         blocks until the phone answers or pairing times out
  *   carplay_usb unpair    close the carkit service and its lockdown session
  *   carplay_usb iap2      run the iAP2 session over the open carkit stream
- *                         (identification and MFi; CarPlay needs the NCM link)
+ *                         (identification and MFi; the AirPlay endpoint comes
+ *                         from 'carplay_start wired')
  *   carplay_usb iap2stop  stop the wired iAP2 session
  *   carplay_usb net       show the NCM netdev state and its IPv6 link-local
  *                         address (the value CarPlayStartSession advertises)
@@ -31,6 +32,7 @@
 
 #include <string.h>
 
+#include "carplay_app.h"
 #include "iap2_session.h"
 #include "iap2_stream.h"
 #include "lockdown.h"
@@ -533,6 +535,7 @@ typedef struct {
     volatile bool authenticated;
     unsigned events;
     bool airplay_unavailable_logged;
+    char ip_address[64];
 } iap2_usb_link_t;
 
 static iap2_usb_link_t s_iap2_usb;
@@ -554,32 +557,46 @@ static bool iap2_usb_tx(const uint8_t *bytes, size_t length, void *context)
 }
 
 /*
- * The wired AirPlay endpoint needs the NCM network and an IPv6-capable RTSP
- * server, which is not part of this stage.  Report the missing piece once
- * instead of pretending the invite was sent; identification and MFi still
- * complete over the carkit stream.
+ * The wired AirPlay endpoint is served by the receiver started with
+ * 'carplay_start wired': its IPv6 listener is up, and the address advertised
+ * here is the NCM netif's link-local.  The receiver owns the address query,
+ * so the iAP2 session never talks to lwIP.  When the receiver is not running
+ * (or DAD has not completed) the invite is withheld once rather than claiming
+ * an unreachable endpoint; identification and MFi still complete.
  */
 static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
 {
     iap2_usb_link_t *link = context;
-    char address[64];
-    bool valid = false;
+    carplay_app_wired_info_t info;
 
-    (void)out;
-    if (!link->airplay_unavailable_logged) {
-        link->airplay_unavailable_logged = true;
-        if (rtcp_lubanlite_wired_ipv6(address, sizeof(address), &valid)) {
-            rt_kprintf("[carplay_usb] iap2: wired IPv6 %s (%s), but the "
-                       "AirPlay endpoint is not available yet (IPv6 RTSP is "
-                       "the next stage); 0x4301 is not sent\n",
-                       address, valid ? "valid" : "tentative");
-        } else {
-            rt_kprintf("[carplay_usb] iap2: CarPlay availability reached but "
-                       "the NCM netif has no IPv6 address yet; 0x4301 is not "
-                       "sent\n");
+    if (carplay_app_wired_info(&info) != RTCP_OK) {
+        if (!link->airplay_unavailable_logged) {
+            link->airplay_unavailable_logged = true;
+            rt_kprintf("[carplay_usb] iap2: no wired AirPlay endpoint yet; "
+                       "run 'carplay_start wired' and check 'carplay_usb "
+                       "net'. 0x4301 is not sent\n");
         }
+        return false;
     }
-    return false;
+
+    int written = rt_snprintf(link->ip_address, sizeof(link->ip_address),
+                              "%s", info.ipv6);
+    if (written <= 0 || (size_t)written >= sizeof(link->ip_address)) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->airplay_port = info.airplay_port;
+    out->ip_address = link->ip_address;
+    out->device_identifier = info.device_id;
+    out->public_key = info.public_key_hex;
+    out->source_version = info.source_version;
+    /* Wired sessions ignore mdns_ready; keep the field meaningful anyway. */
+    out->mdns_ready = true;
+    out->event_connected = info.airplay_connected;
+    rt_kprintf("[carplay_usb] iap2: wired AirPlay endpoint [%s]:%u\n",
+               link->ip_address, (unsigned)info.airplay_port);
+    return true;
 }
 
 static void iap2_usb_event(iap2_session_event_t event, void *context)

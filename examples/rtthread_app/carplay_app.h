@@ -38,6 +38,10 @@ typedef struct {
     const char *store_path;     /* default "/data/rt-carplay-pairings.bin" */
     carplay_app_screen_cb_t on_screen; /* NULL = on-board sink if built in */
     void *screen_context;
+    /* Wired CarPlay: skip the SoftAP/mDNS bring-up and serve AirPlay over
+     * IPv6 on the phone's CDC-NCM link.  The address advertised in
+     * CarPlayStartSession is read from the "u1" netif on demand. */
+    bool wired;
 } carplay_app_config_t;
 
 /* Fills config with the defaults above; width/height are left for the
@@ -47,6 +51,12 @@ void carplay_app_config_defaults(carplay_app_config_t *config);
 /* Brings the receiver up and starts its poll thread.  Returns RTCP_OK or a
  * negative RTCP error.  Call from ordinary thread context (main or MSH). */
 int carplay_app_start(const carplay_app_config_t *config);
+
+/* Start with the built-in display geometry: SoftAP + mDNS (wireless) and the
+ * IPv6 NCM link without them (wired).  The SDK application and the
+ * carplay_start command use these. */
+int carplay_app_autostart(void);
+int carplay_app_autostart_wired(void);
 
 /* Asks the poll thread to tear everything down and waits for it. */
 int carplay_app_stop(void);
@@ -85,6 +95,28 @@ typedef struct {
 } carplay_app_iap2_info_t;
 
 int carplay_app_iap2_info(carplay_app_iap2_info_t *info);
+
+/*
+ * Snapshot of the wired AirPlay endpoint for the iAP2 session.  Unlike the
+ * wireless snapshot, no SoftAP exists: ipv6 is the NCM netif's link-local in
+ * presentation form (e.g. "fe80::..." without a zone), freshly read at call
+ * time which is why it must be called when CarPlayAvailability arrives, after
+ * the phone has enumerated its NCM function and DAD completed.
+ *
+ * Returns RTCP_ESTATE when a wireless receiver is running (or none is),
+ * RTCP_ENOENT when the wired receiver is up but the netif has no usable
+ * address yet.  Strings are borrowed from the running receiver.
+ */
+typedef struct {
+    const char *device_id;
+    const char *public_key_hex;
+    const char *source_version;
+    uint16_t airplay_port;
+    char ipv6[64];
+    bool airplay_connected;
+} carplay_app_wired_info_t;
+
+int carplay_app_wired_info(carplay_app_wired_info_t *info);
 
 /*
  * One owner for the single Bluetooth link: the echo bring-up (carplay_bt)

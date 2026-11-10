@@ -69,8 +69,7 @@ CONFIG_RTCARPLAY_IAP2=y         # carplay_iap2 (requires RTCARPLAY_BT)
 # CONFIG_LPKG_BT_ASSERT is not set   # see port/luban-lite/README.md
 ```
 
-Wired CarPlay over the D213 USB1 host (Stages 1/2; the NCM link is up, the
-AirPlay endpoint is the next stage):
+Wired CarPlay over the D213 USB1 host (Stages 1-3: USB, iAP2, IPv6 AirPlay):
 
 ```
 CONFIG_AIC_USING_USB1=y
@@ -93,7 +92,8 @@ the duplicate include.
 ## Shell commands
 
 ```
-carplay_start                 # bring the receiver up, prints the PIN
+carplay_start                 # wireless: SoftAP + mDNS + AirPlay, prints the PIN
+carplay_start wired           # wired: IPv6 AirPlay on the NCM link, no AP/mDNS
 carplay_status                # running/stopped, display size, PIN, audio counters
 carplay_touch down 640 240    # inject touch in display pixels (panel runs too)
 carplay_touch move 700 260
@@ -146,11 +146,18 @@ phone asks for trust again.
 advertises `USBHostTransportComponent` (group 16) with the CarPlay NCM control
 interface number read from the attached device's active descriptor, omits the
 Bluetooth/WirelessCarPlay components and the Wi-Fi configuration exchange, and
-reports PowerSourceUpdate (0xAE03) after authentication.  It completes
-identification and MFi over USB; on CarPlayAvailability (0x4300) it needs an
-AirPlay endpoint reachable over the NCM link, which this stage does not bring
-up yet, so it logs the address and does not send 0x4301.  `iap2stop` tears the
-link down; `unpair` also stops it first.
+reports PowerSourceUpdate (0xAE03) after authentication.  On CarPlayAvailability
+(0x4300) it takes the AirPlay endpoint from the running wired receiver
+(`carplay_start wired`): the NCM netif's IPv6 link-local and the RTSP port,
+then sends CarPlayStartSession (0x4301) with that address.  If the receiver is
+not running wired, or the address is still tentative, it logs that once and
+withholds 0x4301.  `iap2stop` tears the link down; `unpair` also stops it first.
+
+Wired bring-up order: `carplay_start wired`, `carplay_usb start`, plug the
+phone into USB1, `carplay_usb pair` (trust dialog), `carplay_usb iap2`.  The
+wired receiver binds the IPv6 listener at start; the phone reaches it at the
+link-local address advertised in 0x4301, so mDNS and the `_carplay-ctrl`
+browse are not used and stay off.
 
 `carplay_usb net` reports the wired NCM netdev: whether CherryUSB registered
 it and whether lwIP gave it an IPv6 link-local address (link-local is what the

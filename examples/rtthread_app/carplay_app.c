@@ -153,6 +153,7 @@ typedef struct {
     uint16_t width;
     uint16_t height;
     uint16_t rotation;
+    bool wired;
 
     uint8_t ipv4[4];
 
@@ -711,11 +712,16 @@ static void poll_thread(void *argument)
     APP_LOG("receiver running (PIN %s)", app->pairing_code);
 
     while (!app->stop) {
-        int mdns_result = mdns_responder_poll_ex(
-            app->mdns, &rtcp_net_rtthread, 10, mdns_packet_sink, app);
-        if (mdns_result < 0 && app->mdns_errors < 3U) {
-            ++app->mdns_errors;
-            APP_LOG("mDNS poll failed rc=%d", mdns_result);
+        if (app->mdns != NULL) {
+            int mdns_result = mdns_responder_poll_ex(
+                app->mdns, &rtcp_net_rtthread, 10, mdns_packet_sink, app);
+            if (mdns_result < 0 && app->mdns_errors < 3U) {
+                ++app->mdns_errors;
+                APP_LOG("mDNS poll failed rc=%d", mdns_result);
+            }
+        } else {
+            /* Wired mode has no responder; still pace the loop. */
+            app->os.sleep_ms(10U);
         }
         carplay_ctrl_tick(app, (uint32_t)app->os.now_ms());
         (void)airplay_rtsp_server_poll(app->server, 0);
@@ -935,6 +941,7 @@ int carplay_app_start(const carplay_app_config_t *config)
     app->width = config->width_pixels;
     app->height = config->height_pixels;
     app->rotation = config->rotation_degrees;
+    app->wired = config->wired;
     app->on_screen = config->on_screen;
     app->screen_context = config->screen_context;
 
@@ -968,10 +975,12 @@ int carplay_app_start(const carplay_app_config_t *config)
     int result = build_identity(app, config->pair_code, app->seed_path);
     if (result != RTCP_OK) return result;
 
-    result = start_wifi(app);
-    if (result != RTCP_OK) {
-        shutdown_stack(app);
-        return result;
+    if (!app->wired) {
+        result = start_wifi(app);
+        if (result != RTCP_OK) {
+            shutdown_stack(app);
+            return result;
+        }
     }
 
     airplay_pairing_store_backend_t backend = {
@@ -1013,6 +1022,7 @@ int carplay_app_start(const carplay_app_config_t *config)
     server_config.info_plist = app->info_plist;
     server_config.info_plist_len = app->info_plist_len;
     server_config.port = AIRPLAY_RTSP_DEFAULT_PORT;
+    server_config.family = app->wired ? RTCP_AF_INET6 : RTCP_AF_INET;
     server_config.on_screen_message = on_screen_message;
     server_config.screen_message_context = app;
     server_config.on_event_state = on_event_state;
@@ -1042,26 +1052,33 @@ int carplay_app_start(const carplay_app_config_t *config)
     mdns_config.txt = app->txt;
     mdns_config.txt_len = app->txt_len;
     memcpy(mdns_config.ipv4, app->ipv4, sizeof(app->ipv4));
-    app->mdns = mdns_responder_create(&mdns_config);
-    result = app->mdns == NULL ? RTCP_ENOMEM
-                               : mdns_responder_open(app->mdns,
-                                                     &rtcp_net_rtthread);
-    if (result != RTCP_OK) {
-        APP_LOG("mDNS responder start failed rc=%d", result);
-        shutdown_stack(app);
-        return result;
-    }
+    if (app->wired) {
+        /* Wired CarPlay learns the AirPlay endpoint from CarPlayStartSession,
+         * so there is nothing to advertise and no IEEE 802.11 link to browse
+         * the phone on.  The response arrives over the NCM netif. */
+        APP_LOG("wired mode: mDNS/Control browse disabled");
+    } else {
+        app->mdns = mdns_responder_create(&mdns_config);
+        result = app->mdns == NULL ? RTCP_ENOMEM
+                                   : mdns_responder_open(app->mdns,
+                                                         &rtcp_net_rtthread);
+        if (result != RTCP_OK) {
+            APP_LOG("mDNS responder start failed rc=%d", result);
+            shutdown_stack(app);
+            return result;
+        }
 
-    /* Browser state only; it shares the responder's socket. */
-    app->browser = mdns_browser_create(CARPLAY_CTRL_SERVICE);
-    app->ctrl_enabled = app->browser != NULL;
-    if (app->browser == NULL) {
-        APP_LOG("carplay_ctrl=disabled reason=no_memory");
-    } else if (!carplay_ctrl_parse_device_id(app->device_id,
-                                             &app->ctrl_device_id)) {
-        APP_LOG("carplay_ctrl=disabled reason=device_id_parse id=%s",
-                app->device_id);
-        app->ctrl_enabled = false;
+        /* Browser state only; it shares the responder's socket. */
+        app->browser = mdns_browser_create(CARPLAY_CTRL_SERVICE);
+        app->ctrl_enabled = app->browser != NULL;
+        if (app->browser == NULL) {
+            APP_LOG("carplay_ctrl=disabled reason=no_memory");
+        } else if (!carplay_ctrl_parse_device_id(app->device_id,
+                                                 &app->ctrl_device_id)) {
+            APP_LOG("carplay_ctrl=disabled reason=device_id_parse id=%s",
+                    app->device_id);
+            app->ctrl_enabled = false;
+        }
     }
 
     app->bridge = input_bridge_create(app->width, app->height, app->rotation,
@@ -1116,10 +1133,17 @@ int carplay_app_start(const carplay_app_config_t *config)
     }
 #endif
 
-    APP_LOG("advertising \"%s\" on %u.%u.%u.%u:%u (device %s, PIN %s)",
-            app->name, app->ipv4[0], app->ipv4[1], app->ipv4[2], app->ipv4[3],
-            (unsigned)airplay_rtsp_server_get_port(app->server),
-            app->device_id, app->pairing_code);
+    if (app->wired) {
+        APP_LOG("wired AirPlay on IPv6:%u (device %s, PIN %s)",
+                (unsigned)airplay_rtsp_server_get_port(app->server),
+                app->device_id, app->pairing_code);
+    } else {
+        APP_LOG("advertising \"%s\" on %u.%u.%u.%u:%u (device %s, PIN %s)",
+                app->name, app->ipv4[0], app->ipv4[1], app->ipv4[2],
+                app->ipv4[3],
+                (unsigned)airplay_rtsp_server_get_port(app->server),
+                app->device_id, app->pairing_code);
+    }
     return RTCP_OK;
 }
 
@@ -1184,6 +1208,31 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *info)
     return RTCP_OK;
 }
 
+int carplay_app_wired_info(carplay_app_wired_info_t *info)
+{
+    if (info == NULL) return RTCP_EINVAL;
+    app_state_t *app = &s_app;
+    if (!app->running || app->stop || !app->wired) return RTCP_ESTATE;
+#if !defined(LPKG_RT_CARPLAY_LUBANLITE_USB) || !defined(RT_USING_LWIP)
+    return RTCP_ENOTSUP;
+#else
+    memset(info, 0, sizeof(*info));
+    bool valid = false;
+    if (!rtcp_lubanlite_wired_ipv6(info->ipv6, sizeof(info->ipv6), &valid) ||
+        !valid) {
+        /* Tentative addresses have not passed duplicate-address detection;
+         * advertising one would race the phone's first connection. */
+        return RTCP_ENOENT;
+    }
+    info->device_id = app->device_id;
+    info->public_key_hex = app->public_key_hex;
+    info->source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION;
+    info->airplay_port = app->airplay_port;
+    info->airplay_connected = app->airplay_connected;
+    return RTCP_OK;
+#endif
+}
+
 /* The shell commands run on one MSH thread, so a plain check-and-set is
  * enough; the serving threads only release. */
 static volatile int s_bt_owner;
@@ -1221,14 +1270,25 @@ int carplay_app_touch(uint8_t phase, uint16_t pointer_id,
     return enqueue_touch(&event);
 }
 
-int carplay_app_autostart(void)
+static int app_autostart(bool wired)
 {
     carplay_app_config_t config;
     carplay_app_config_defaults(&config);
     config.width_pixels = CARPLAY_APP_DEFAULT_WIDTH;
     config.height_pixels = CARPLAY_APP_DEFAULT_HEIGHT;
     config.rotation_degrees = CARPLAY_APP_DEFAULT_ROTATION;
+    config.wired = wired;
     return carplay_app_start(&config);
+}
+
+int carplay_app_autostart(void)
+{
+    return app_autostart(false);
+}
+
+int carplay_app_autostart_wired(void)
+{
+    return app_autostart(true);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1237,18 +1297,23 @@ int carplay_app_autostart(void)
 
 static int cmd_carplay_start(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    bool wired = argc > 1 && strcmp(argv[1], "wired") == 0;
+    if (argc > 1 && !wired) {
+        rt_kprintf("usage: carplay_start [wired]\n");
+        return 0;
+    }
     if (carplay_app_is_running()) {
         rt_kprintf("carplay is already running\n");
         return 0;
     }
-    int result = carplay_app_autostart();
+    int result = wired ? carplay_app_autostart_wired()
+                       : carplay_app_autostart();
     if (result != RTCP_OK) {
         rt_kprintf("carplay start failed: %d\n", result);
         return 0;
     }
-    rt_kprintf("carplay started, pairing PIN %s\n",
+    rt_kprintf("carplay started (%s), pairing PIN %s\n",
+               wired ? "wired IPv6" : "wireless",
                carplay_app_pairing_code());
     return 0;
 }

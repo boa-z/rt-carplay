@@ -139,6 +139,54 @@ static uint8_t map_speed(uint8_t cherryusb_speed)
     }
 }
 
+/* CherryUSB's blocking submit uses the URB timeout, and the EHCI driver
+ * prints an error for every expired URB.  The wired link polls the bulk IN
+ * endpoint while it is idle, so use a completion semaphore instead: the URB
+ * is submitted non-blocking, the caller waits on the semaphore with its own
+ * timeout and cancels the URB quietly when it expires. */
+static usb_osal_sem_t s_control_sem;
+static usb_osal_sem_t s_bulk_sem;
+
+static void transfer_complete(void *arg, int nbytes)
+{
+    (void)nbytes;
+    usb_osal_sem_give((usb_osal_sem_t)arg);
+}
+
+static int map_urb_error(int error)
+{
+    if (error == -USB_ERR_TIMEOUT) {
+        return RTCP_ETIMEDOUT;
+    }
+    if (error == -USB_ERR_NOTCONN || error == -USB_ERR_SHUTDOWN) {
+        return RTCP_ESTATE;
+    }
+    return RTCP_EIO;
+}
+
+static int wait_urb(usb_osal_sem_t *semaphore, struct usbh_urb *urb,
+                    uint32_t timeout_ms)
+{
+    if (*semaphore == NULL) {
+        /* The URB already references the semaphore; never reach here. */
+        return RTCP_ESTATE;
+    }
+    usb_osal_sem_reset(*semaphore);
+    int ret = usbh_submit_urb(urb);
+    if (ret < 0) {
+        return map_urb_error(ret);
+    }
+    ret = usb_osal_sem_take(*semaphore, timeout_ms);
+    if (ret < 0) {
+        usbh_kill_urb(urb);
+        return RTCP_ETIMEDOUT;
+    }
+    if (urb->errorcode < 0) {
+        return map_urb_error(urb->errorcode);
+    }
+    return (int)urb->actual_length;
+}
+
 static int control_transfer_timeout(struct usbh_hubport *hport,
                                     uint8_t request_type, uint8_t request,
                                     uint16_t value, uint16_t index, void *data,
@@ -146,7 +194,6 @@ static int control_transfer_timeout(struct usbh_hubport *hport,
 {
     struct usb_setup_packet setup;
     struct usbh_urb urb;
-    int ret;
 
     if (hport == NULL) {
         return RTCP_ESTATE;
@@ -158,17 +205,21 @@ static int control_transfer_timeout(struct usbh_hubport *hport,
     setup.wLength = length;
 
     memset(&urb, 0, sizeof(urb));
-    usbh_control_urb_fill(&urb, hport, &setup, data, length,
-                          timeout_ms != 0U ? timeout_ms
-                                           : CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT,
-                          NULL, NULL);
-    usb_osal_mutex_take(hport->mutex);
-    ret = usbh_submit_urb(&urb);
-    usb_osal_mutex_give(hport->mutex);
-    if (ret < 0) {
-        return RTCP_EIO;
+    if (s_control_sem == NULL) {
+        s_control_sem = usb_osal_sem_create(0U);
+        if (s_control_sem == NULL) {
+            return RTCP_ENOMEM;
+        }
     }
-    return (int)urb.actual_length;
+    usbh_control_urb_fill(&urb, hport, &setup, data, length, 0U,
+                          transfer_complete, s_control_sem);
+    usb_osal_mutex_take(hport->mutex);
+    int ret = wait_urb(&s_control_sem, &urb,
+                       timeout_ms != 0U
+                           ? timeout_ms
+                           : CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
+    usb_osal_mutex_give(hport->mutex);
+    return ret;
 }
 
 static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
@@ -531,18 +582,21 @@ static int submit_bulk(struct usbh_hubport *hport,
                        size_t length, uint32_t timeout_ms)
 {
     struct usbh_urb urb;
-    int ret;
 
-    memset(&urb, 0, sizeof(urb));
-    usbh_bulk_urb_fill(&urb, hport, endpoint, data, (uint32_t)length,
-                       timeout_ms != 0U ? timeout_ms : 1000U, NULL, NULL);
-    usb_osal_mutex_take(hport->mutex);
-    ret = usbh_submit_urb(&urb);
-    usb_osal_mutex_give(hport->mutex);
-    if (ret < 0) {
-        return RTCP_EIO;
+    if (s_bulk_sem == NULL) {
+        s_bulk_sem = usb_osal_sem_create(0U);
+        if (s_bulk_sem == NULL) {
+            return RTCP_ENOMEM;
+        }
     }
-    return (int)urb.actual_length;
+    memset(&urb, 0, sizeof(urb));
+    usbh_bulk_urb_fill(&urb, hport, endpoint, data, (uint32_t)length, 0U,
+                       transfer_complete, s_bulk_sem);
+    usb_osal_mutex_take(hport->mutex);
+    int ret = wait_urb(&s_bulk_sem, &urb,
+                       timeout_ms != 0U ? timeout_ms : 1000U);
+    usb_osal_mutex_give(hport->mutex);
+    return ret;
 }
 
 static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,

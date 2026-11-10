@@ -5,6 +5,7 @@ CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
 CPPFLAGS += -Iinclude -Icore -Icore/mfi \
             -Icore/iap2/include -Icore/airplay/include -Icore/crypto/include \
             -Icore/media/include -Icore/input/include -Icore/discovery/include \
+            -Icore/usb/include \
             -Ithird_party/ed25519 -Iport/linux/include -Itests/support
 LDLIBS   += -lm
 BUILD    := build
@@ -45,7 +46,7 @@ TESTS := test_mfi2c \
          test_airplay_screen_server test_airplay_rtsp_server \
          test_airplay_pairing_e2e test_airplay_ed25519 \
          test_discovery test_mdns_responder test_mdns_browser test_carplay_ctrl \
-         test_usb_device \
+         test_usb_device test_usbmux test_usbmux_host test_lockdown \
          test_port_linux test_input_bridge \
          test_media_timestamp
 

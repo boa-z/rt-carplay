@@ -70,6 +70,18 @@ typedef enum {
     IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED, /* 0xAA03 could not be queued */
 } iap2_session_event_t;
 
+/*
+ * The session below the negotiation layer is a byte stream.  Wireless
+ * sessions run it over Bluetooth RFCOMM; wired sessions run it over the
+ * USBMUX carkit service stream.  The transport only changes the
+ * identification profile, the Wi-Fi exchange and the 0x4301 body; the iAP2
+ * link, MFi and message sequencing are shared.
+ */
+typedef enum {
+    IAP2_SESSION_TRANSPORT_WIRELESS = 0,
+    IAP2_SESSION_TRANSPORT_WIRED_USB,
+} iap2_session_transport_t;
+
 typedef bool (*iap2_session_get_wifi_cb_t)(iap2_session_wifi_t *out, void *context);
 typedef bool (*iap2_session_get_airplay_cb_t)(iap2_session_airplay_t *out, void *context);
 typedef void (*iap2_session_event_cb_t)(iap2_session_event_t event, void *context);
@@ -78,10 +90,19 @@ typedef struct {
     iap2_identity_config_t identity; /* strings are borrowed for the session lifetime */
     const struct rtcp_mfi *mfi;      /* NULL disables the MFi exchange */
     iap2_core_tx_cb_t tx;
-    iap2_session_get_wifi_cb_t get_wifi;
+    iap2_session_get_wifi_cb_t get_wifi; /* wireless only */
     iap2_session_get_airplay_cb_t get_airplay;
     iap2_session_event_cb_t on_event;
     void *context;
+
+    iap2_session_transport_t transport;
+    /* Wired only: CarPlay NCM control interface number in the active USB
+     * configuration (the references use 3). */
+    uint8_t car_play_interface_number;
+    /* Wired only: reported to the phone after authentication.  Zero means
+     * "no charging current claimed", matching the reference bring-up. */
+    uint16_t available_current_ma;
+    bool battery_should_charge;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES 4U

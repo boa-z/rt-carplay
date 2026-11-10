@@ -1,10 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * Accessory-side wireless iAP2 negotiation state machine.
+ * Accessory-side iAP2 negotiation state machine.
  *
  * The message flow follows esp32-carplay-web-relay main/app_main.c
  * (GPL-3.0-or-later); platform services are injected through
- * iap2_session_config_t instead of ESP-IDF globals.
+ * iap2_session_config_t instead of ESP-IDF globals.  The same state machine
+ * serves the Bluetooth RFCOMM (wireless) and USBMUX carkit (wired)
+ * transports; only identification, the Wi-Fi exchange and the 0x4301 body
+ * differ.
  */
 #include "iap2_session.h"
 
@@ -35,6 +38,7 @@
 #define IAP2_MSG_MFI_AUTH_SUCCEEDED 0xaa05U
 #define IAP2_MSG_CARPLAY_AVAILABILITY 0x4300U
 #define IAP2_MSG_CARPLAY_START_SESSION 0x4301U
+#define IAP2_MSG_POWER_SOURCE_UPDATE 0xae03U
 #define IAP2_MSG_TRANSPORT_NOTIFICATION 0x4e0eU
 #define IAP2_MSG_WIFI_CONFIG_REQUEST 0x5702U
 #define IAP2_MSG_WIFI_CONFIGURATION 0x5703U
@@ -51,6 +55,7 @@ struct iap2_session {
     bool link_up;
     bool identification_accepted;
     bool subscriptions_sent;
+    bool wired_power_sent;
     bool start_session_sent;
     bool transport_notification_seen;
     bool mfi_response_pending;
@@ -62,6 +67,11 @@ struct iap2_session {
     uint8_t pre_transport_wifi_configs;
     uint8_t post_transport_wifi_configs;
 };
+
+static bool session_is_wired(const iap2_session_t *session)
+{
+    return session->config.transport == IAP2_SESSION_TRANSPORT_WIRED_USB;
+}
 
 static void emit_event(iap2_session_t *session, iap2_session_event_t event)
 {
@@ -96,6 +106,7 @@ static void reset_wireless_negotiation(iap2_session_t *session)
 {
     session->start_session_sent = false;
     session->subscriptions_sent = false;
+    session->wired_power_sent = false;
     session->transport_notification_seen = false;
     session->pre_transport_wifi_configs = 0U;
     session->post_transport_wifi_configs = 0U;
@@ -133,15 +144,24 @@ static bool message_is_omitted(const iap2_session_t *session, uint16_t message_i
 static bool send_identification_information(iap2_session_t *session, uint64_t now_ms)
 {
     const iap2_identity_config_t *identity = &session->config.identity;
-    if (identity->wifi_ssid == NULL || identity->wifi_ssid[0] == '\0') return false;
 
     uint8_t body[IAP2_SESSION_IDENTIFICATION_CAPACITY];
     size_t body_len = 0U;
-    if (!iap2_identity_build_wireless_omitting(identity,
-                                               session->omitted_message_ids,
-                                               session->omitted_message_count,
-                                               body, sizeof(body), &body_len)) {
-        return false;
+    if (session_is_wired(session)) {
+        if (!iap2_identity_build_wired_omitting(
+                identity, session->config.car_play_interface_number,
+                session->omitted_message_ids, session->omitted_message_count,
+                body, sizeof(body), &body_len)) {
+            return false;
+        }
+    } else {
+        if (identity->wifi_ssid == NULL || identity->wifi_ssid[0] == '\0') return false;
+        if (!iap2_identity_build_wireless_omitting(identity,
+                                                   session->omitted_message_ids,
+                                                   session->omitted_message_count,
+                                                   body, sizeof(body), &body_len)) {
+            return false;
+        }
     }
     return send_csm(session, IAP2_MSG_IDENTIFICATION_INFORMATION, body, body_len,
                     NULL, NULL, now_ms);
@@ -269,7 +289,7 @@ static bool handle_authentication_challenge(iap2_session_t *session,
     return false;
 }
 
-static void send_wireless_subscriptions(iap2_session_t *session, uint64_t now_ms)
+static void send_iap2_subscriptions(iap2_session_t *session, uint64_t now_ms)
 {
     uint8_t body[64];
     size_t body_len = 0U;
@@ -321,14 +341,45 @@ static void send_wireless_subscriptions(iap2_session_t *session, uint64_t now_ms
     }
 }
 
-static void maybe_send_wireless_subscriptions(iap2_session_t *session,
-                                              uint64_t now_ms)
+/*
+ * Wired sessions report their power source between authentication and the
+ * subscriptions, as in the reference bring-up.  The values come from the
+ * board configuration: zero means the accessory does not claim it can charge
+ * the phone.
+ */
+static void send_wired_power_source(iap2_session_t *session, uint64_t now_ms)
+{
+    if (session->wired_power_sent) return;
+
+    uint8_t body[16];
+    size_t body_len = 0U;
+    uint8_t current[2] = {
+        (uint8_t)(session->config.available_current_ma >> 8),
+        (uint8_t)session->config.available_current_ma,
+    };
+    uint8_t charge = session->config.battery_should_charge ? 1U : 0U;
+    if (!iap2_param_append(body, sizeof(body), &body_len, 0, current,
+                           sizeof(current)) ||
+        !iap2_param_append(body, sizeof(body), &body_len, 1, &charge,
+                           sizeof(charge))) {
+        return;
+    }
+    if (send_csm(session, IAP2_MSG_POWER_SOURCE_UPDATE, body, body_len, NULL,
+                 NULL, now_ms)) {
+        session->wired_power_sent = true;
+    }
+}
+
+static void maybe_send_subscriptions(iap2_session_t *session, uint64_t now_ms)
 {
     if (session->subscriptions_sent || !session->identification_accepted ||
         !iap2_mfi_auth_is_authenticated(&session->auth)) {
         return;
     }
-    send_wireless_subscriptions(session, now_ms);
+    if (session_is_wired(session)) {
+        send_wired_power_source(session, now_ms);
+    }
+    send_iap2_subscriptions(session, now_ms);
     session->subscriptions_sent = true;
     emit_event(session, IAP2_SESSION_EVENT_SUBSCRIPTIONS_SENT);
 }
@@ -348,6 +399,8 @@ static bool send_wifi_configuration(iap2_session_t *session,
                                     bool post_transport,
                                     uint64_t now_ms)
 {
+    /* Wired CarPlay has no accessory SoftAP: the network runs over NCM. */
+    if (session_is_wired(session)) return false;
     if (!iap2_mfi_auth_is_authenticated(&session->auth)) return false;
 
     uint8_t *count = post_transport ? &session->post_transport_wifi_configs
@@ -387,18 +440,21 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
     if (!iap2_mfi_auth_is_authenticated(&session->auth)) return false;
     if (session->start_session_sent) return false;
 
+    const bool wired = session_is_wired(session);
+
     iap2_session_airplay_t airplay;
     memset(&airplay, 0, sizeof(airplay));
     if (session->config.get_airplay == NULL ||
         !session->config.get_airplay(&airplay, session->config.context) ||
-        !airplay.mdns_ready || airplay.airplay_port == 0U ||
+        (!wired && !airplay.mdns_ready) || airplay.airplay_port == 0U ||
         airplay.ip_address == NULL || airplay.device_identifier == NULL ||
         airplay.public_key == NULL) {
         return false;
     }
 
     iap2_session_wifi_t wifi;
-    if (!get_wifi(session, &wifi)) return false;
+    memset(&wifi, 0, sizeof(wifi));
+    if (!wired && !get_wifi(session, &wifi)) return false;
 
     const char *ip_addresses[] = {airplay.ip_address};
     iap2_carplay_start_session_config_t config = {
@@ -415,7 +471,10 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
     };
     uint8_t body[IAP2_SESSION_START_BODY_CAPACITY];
     size_t body_len = 0U;
-    if (!iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len)) {
+    bool built = wired
+        ? iap2_carplay_build_start_session_wired(&config, body, sizeof(body), &body_len)
+        : iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len);
+    if (!built) {
         return false;
     }
     if (!send_csm(session, IAP2_MSG_CARPLAY_START_SESSION, body, body_len,
@@ -432,6 +491,8 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
 
 static void maybe_reinvite_carplay(iap2_session_t *session, uint64_t now_ms)
 {
+    /* The wired references send 0x4301 once per CarPlayAvailability. */
+    if (session_is_wired(session)) return;
     if (!session->carplay_invite_active || !session->link_up ||
         session->airplay_event_connected ||
         !iap2_mfi_auth_is_authenticated(&session->auth) ||
@@ -456,7 +517,9 @@ static void handle_transport_notification(iap2_session_t *session,
 {
     if (!iap2_param_validate(body, body_len)) return;
     session->transport_notification_seen = true;
-    (void)send_wifi_configuration(session, true, now_ms);
+    if (!session_is_wired(session)) {
+        (void)send_wifi_configuration(session, true, now_ms);
+    }
 }
 
 static bool core_tx(const uint8_t *bytes, size_t len, void *context)
@@ -550,6 +613,10 @@ void iap2_session_notify_airplay_event(iap2_session_t *session, bool connected,
     if (session == NULL) return;
     session->now_ms = now_ms;
     session->airplay_event_connected = connected;
+    if (session_is_wired(session)) {
+        /* Wired availability is driven by 0x4300, not by invite pacing. */
+        return;
+    }
     if (connected) {
         session->carplay_invite_active = false;
         session->carplay_reinvite_count = 0U;
@@ -576,7 +643,7 @@ void iap2_session_handle_message(iap2_session_t *session,
     case IAP2_MSG_IDENTIFICATION_ACCEPTED:
         session->identification_accepted = true;
         emit_event(session, IAP2_SESSION_EVENT_IDENTIFICATION_ACCEPTED);
-        maybe_send_wireless_subscriptions(session, now_ms);
+        maybe_send_subscriptions(session, now_ms);
         break;
     case IAP2_MSG_IDENTIFICATION_REJECTED:
         handle_identification_rejected(session, body, body_len, now_ms);
@@ -611,7 +678,7 @@ void iap2_session_handle_message(iap2_session_t *session,
             break;
         }
         emit_event(session, IAP2_SESSION_EVENT_MFI_AUTHENTICATED);
-        maybe_send_wireless_subscriptions(session, now_ms);
+        maybe_send_subscriptions(session, now_ms);
         break;
     case IAP2_MSG_WIFI_CONFIG_REQUEST:
         (void)send_wifi_configuration(session, session->transport_notification_seen,

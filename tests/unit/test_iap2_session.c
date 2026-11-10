@@ -54,6 +54,29 @@ static bool event_seen(const harness_t *h, iap2_session_event_t event)
     return false;
 }
 
+static uint16_t read_be16(const uint8_t *p)
+{
+    return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
+static bool find_body_parameter(const uint8_t *body, size_t body_len,
+                                uint16_t id, const uint8_t **payload,
+                                size_t *payload_len)
+{
+    size_t offset = 0U;
+    while (offset + 4U <= body_len) {
+        uint16_t length = read_be16(body + offset);
+        if (length < 4U || length > body_len - offset) return false;
+        if (read_be16(body + offset + 2U) == id) {
+            *payload = body + offset + 4U;
+            *payload_len = length - 4U;
+            return true;
+        }
+        offset += length;
+    }
+    return false;
+}
+
 static uint8_t checksum(const uint8_t *bytes, size_t len)
 {
     uint8_t sum = 0;
@@ -228,6 +251,21 @@ static bool fake_airplay(iap2_session_airplay_t *out, void *context)
     return true;
 }
 
+/* Wired sessions do not require an mDNS state: the phone learns the
+ * endpoint from StartSession and connects over the NCM link directly. */
+static bool fake_wired_airplay(iap2_session_airplay_t *out, void *context)
+{
+    (void)context;
+    out->airplay_port = 7100U;
+    out->ip_address = "fe80::1234";
+    out->device_identifier = "11:22:33:44:55:66";
+    out->public_key = "fedcba9876543210";
+    out->source_version = "rt-carplay/0.1";
+    out->mdns_ready = false;
+    out->event_connected = false;
+    return true;
+}
+
 static const csm_record_t *last_message(const harness_t *h, uint16_t id)
 {
     for (size_t i = h->message_count; i > 0U; --i) {
@@ -374,6 +412,148 @@ int main(void)
 
     iap2_session_link_down(session);
     iap2_session_destroy(session);
+
+    /* ------------------------------------------------------------------ */
+    /* Wired USB transport                                                 */
+    /* ------------------------------------------------------------------ */
+    memset(h, 0, sizeof(*h));
+    iap2_session_config_t wired_config = {
+        .identity = {
+            .name = "rt-carplay wired",
+            .model_identifier = "RTCP-TEST",
+            .manufacturer = "rt-carplay",
+            .serial_number = "001122334455",
+            .firmware_version = "0.1",
+            .hardware_version = "host",
+            .language = "en",
+            .wifi_ssid = NULL,
+            .bluetooth_address = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+        },
+        .mfi = &mfi,
+        .tx = capture_tx,
+        .get_wifi = NULL,
+        .get_airplay = fake_wired_airplay,
+        .on_event = capture_event,
+        .context = h,
+        .transport = IAP2_SESSION_TRANSPORT_WIRED_USB,
+        .car_play_interface_number = 3U,
+        .available_current_ma = 0U,
+        .battery_should_charge = false,
+    };
+    session = iap2_session_create(&wired_config);
+    assert(session != NULL);
+
+    handshake(session);
+    drain_tx(session, 6);
+
+    feed_peer_csm(session, 0x1d00, NULL, 0, 10);
+    drain_tx(session, 11);
+    const csm_record_t *wired_identification = last_message(h, 0x1d01);
+    assert(wired_identification != NULL);
+    const uint8_t *field = NULL;
+    size_t field_len = 0U;
+    assert(find_body_parameter(wired_identification->body,
+                               wired_identification->body_len, 8, &field,
+                               &field_len));
+    assert(field_len == 1U && field[0] == 2U);
+    const uint8_t *usb_group = NULL;
+    size_t usb_group_len = 0U;
+    assert(find_body_parameter(wired_identification->body,
+                               wired_identification->body_len, 16,
+                               &usb_group, &usb_group_len));
+    assert(find_body_parameter(usb_group, usb_group_len, 3, &field,
+                               &field_len));
+    assert(field_len == 1U && field[0] == 3U);
+    assert(!find_body_parameter(wired_identification->body,
+                                wired_identification->body_len, 17, &field,
+                                &field_len));
+    assert(!find_body_parameter(wired_identification->body,
+                                wired_identification->body_len, 24, &field,
+                                &field_len));
+
+    /* Identification and MFi may complete in either order on the wired
+     * link; the power update and subscriptions wait for both. */
+    feed_peer_csm(session, 0x1d02, NULL, 0, 20);
+    drain_tx(session, 21);
+    assert(iap2_session_identification_accepted(session));
+    assert(last_message(h, 0x5000) == NULL);
+
+    feed_peer_csm(session, 0xaa00, NULL, 0, 30);
+    drain_tx(session, 31);
+    uint8_t wired_challenge_body[24];
+    memset(wired_challenge_body, 0x33, sizeof(wired_challenge_body));
+    wired_challenge_body[0] = 0;
+    wired_challenge_body[1] = 24;
+    wired_challenge_body[2] = 0;
+    wired_challenge_body[3] = 0;
+    feed_peer_csm(session, 0xaa02, wired_challenge_body,
+                  sizeof(wired_challenge_body), 40);
+    drain_tx(session, 41);
+    feed_peer_csm(session, 0xaa05, NULL, 0, 50);
+    drain_tx(session, 51);
+    assert(iap2_session_is_authenticated(session));
+
+    /* PowerSourceUpdate (0xAE03) precedes the subscription burst. */
+    size_t power_index = SIZE_MAX;
+    size_t subscription_index = SIZE_MAX;
+    for (size_t i = 0; i < h->message_count; ++i) {
+        if (h->messages[i].id == 0xae03U && power_index == SIZE_MAX) {
+            power_index = i;
+        }
+        if (h->messages[i].id == 0x5000U && subscription_index == SIZE_MAX) {
+            subscription_index = i;
+        }
+    }
+    assert(power_index != SIZE_MAX);
+    assert(subscription_index != SIZE_MAX);
+    assert(power_index < subscription_index);
+    const csm_record_t *power = last_message(h, 0xae03);
+    assert(power != NULL && power->body_len == 11U);
+    assert(read_be16(power->body) == 6U);      /* param 0, u16 */
+    assert(power->body[4] == 0U && power->body[5] == 0U);
+    assert(read_be16(power->body + 6) == 5U);  /* param 1, one byte */
+    assert(power->body[10] == 0U);
+
+    /* Wired sessions never send the accessory Wi-Fi configuration. */
+    feed_peer_csm(session, 0x4e0e, NULL, 0, 60);
+    feed_peer_csm(session, 0x5702, NULL, 0, 61);
+    drain_tx(session, 62);
+    assert(last_message(h, 0x5703) == NULL);
+    assert(!event_seen(h, IAP2_SESSION_EVENT_WIFI_CONFIG_SENT));
+
+    /* CarPlayAvailability -> wired StartSession with group 0 addresses. */
+    feed_peer_csm(session, 0x4300, NULL, 0, 70);
+    drain_tx(session, 71);
+    const csm_record_t *wired_start = last_message(h, 0x4301);
+    assert(wired_start != NULL);
+    const uint8_t *wired_attributes = NULL;
+    size_t wired_attributes_len = 0U;
+    assert(find_body_parameter(wired_start->body, wired_start->body_len, 0,
+                               &wired_attributes, &wired_attributes_len));
+    assert(find_body_parameter(wired_attributes, wired_attributes_len, 0,
+                               &field, &field_len));
+    assert(field_len == sizeof("fe80::1234"));
+    assert(memcmp(field, "fe80::1234", field_len) == 0);
+    assert(!find_body_parameter(wired_start->body, wired_start->body_len, 1,
+                                &field, &field_len));
+    assert(find_body_parameter(wired_start->body, wired_start->body_len, 2,
+                               &field, &field_len));
+    assert(field_len == 4U && field[2] == 0x1bU && field[3] == 0xbcU);
+
+    /* No automatic re-invites on the wired link. */
+    iap2_session_advance(session,
+                         71U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS + 1U);
+    drain_tx(session, 71U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS + 2U);
+    size_t wired_invites = 0U;
+    for (size_t i = 0; i < h->message_count; ++i) {
+        if (h->messages[i].id == 0x4301U) ++wired_invites;
+    }
+    assert(wired_invites == 1U);
+    assert(!event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
+
+    iap2_session_link_down(session);
+    iap2_session_destroy(session);
+
     puts("iap2 session host test passed");
     return 0;
 }

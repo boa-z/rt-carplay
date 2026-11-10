@@ -56,7 +56,6 @@ if (GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI') or
 # Luban-Lite Wi-Fi seam (Realtek RTL8733BS SoftAP + vendor IE).
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI'):
     src += Glob('port/luban-lite/rtcp_wifi_lubanlite.c')
-    src += Glob('port/luban-lite/rtcp_random_lubanlite.c')
 
     # The Realtek API headers live outside the SDK's global include path;
     # the driver SConscript adds them only to its own group.
@@ -67,6 +66,11 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI'):
         for sub in ('api/wifi', 'api', 'include', 'os/os_dep/include',
                     'platform/include', 'platform/rtwlan_bsp'):
             cpppath.append(os.path.join(realtek, sub))
+
+# CE TRNG, used for AirPlay pairing and for the wired lockdown pair record.
+if (GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI') or
+        GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB')):
+    src += Glob('port/luban-lite/rtcp_random_lubanlite.c')
 
 # Luban-Lite Bluetooth seam: Zephyr Classic BR/EDR + RFCOMM for iAP2.
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT'):

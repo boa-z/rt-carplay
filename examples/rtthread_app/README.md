@@ -69,6 +69,20 @@ CONFIG_RTCARPLAY_IAP2=y         # carplay_iap2 (requires RTCARPLAY_BT)
 # CONFIG_LPKG_BT_ASSERT is not set   # see port/luban-lite/README.md
 ```
 
+Wired CarPlay over the D213 USB1 host (Stage 1/2, no NCM yet):
+
+```
+CONFIG_AIC_USING_USB1=y
+CONFIG_AIC_USING_USB1_HOST=y
+CONFIG_LPKG_CHERRYUSB_HOST=y
+CONFIG_RTCARPLAY_USB_HOST=y    # carplay_usb (app mode)
+```
+
+The SDK's CherryUSB must expose `usbh_get_configuration_index()`; without the
+weak hook the stack always enumerates configuration index 0 and the phone's
+CarPlay configuration is never selected.  The OSS SDK branch carries the hook
+in `packages/third-party/cherryusb/core/`.
+
 Package mode (repo under `packages/third-party`, package Kconfig sourced) is
 also supported: the SDK auto-builds the library, and the app SConscript skips
 the duplicate include.
@@ -97,7 +111,19 @@ carplay_video status          # decoder counters, queue depth
 carplay_video start 1024 600  # exercise MPP + DE without a controller
 carplay_video play /data/sample.h264   # decode an Annex-B file
 carplay_video stop            # release the decoder, restore the UI layer
+
+carplay_usb start             # arm the enumeration hook; plug the iPhone after
+carplay_usb status            # device, selected configuration, interfaces
+carplay_usb request           # re-send Apple 0x52, print bNumConfigurations
+carplay_usb mux               # USBMUX -> lockdown 62078, GetValue, print reply
+carplay_usb stop              # disarm the hook (device stays configured)
 ```
+
+`carplay_usb start` must run before the phone is plugged: the configuration
+hook only runs inside CherryUSB enumeration, and the phone exposes its CarPlay
+configuration only after the 0x52 vendor request.  If the current snapshot is
+not a CarPlay configuration, `status` says so and the phone must be replugged
+after the hook is armed.
 
 `carplay_video play` is the bring-up path when no controller is available:
 it starts the sink if needed, feeds complete NAL units with a 64 KB read

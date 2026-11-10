@@ -114,6 +114,27 @@ config LPKG_RT_CARPLAY_LUBANLITE_MFI
     default y if RTCARPLAY_MFI
     depends on AIC_I2C_DRV
 
+config LPKG_RT_CARPLAY_LUBANLITE_USB
+    bool
+    default y if RTCARPLAY_USB_HOST
+    depends on LPKG_CHERRYUSB_HOST
+
+config RTCARPLAY_USB_HOST
+    bool "Wired CarPlay USB host (CherryUSB)"
+    default y
+    depends on LPKG_CHERRYUSB_HOST
+    help
+      Add the carplay_usb shell command and compile the Luban-Lite CherryUSB
+      host seam: hint the iPhone for its CarPlay USB configuration (Apple
+      vendor request 0x52), select that configuration by descriptor, claim
+      the USBMUX bulk interface and expose control/bulk transfers to the
+      protocol core.  The board must enable a host controller, normally
+      CONFIG_AIC_USING_USB1_HOST.
+
+      This stage only proves enumeration, descriptor identification and the
+      bulk pipe.  CDC-NCM (LPKG_CHERRYUSB_HOST_NCM) and lwIP IPv6 are
+      required later for the wired AirPlay IP link.
+
 config RTCARPLAY_BT
     bool "Bluetooth RFCOMM bring-up command"
     default y

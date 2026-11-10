@@ -22,8 +22,8 @@
 #include <string.h>
 
 #include "airplay_info_plist.h"
-#include "airplay_mfi_sap.h"
 #include "carplay_app.h"
+#include "carplay_mfi_provider.h"
 #include "iap2_session.h"
 #include "rtcp/rtcp.h"
 #include "rtcp_lubanlite.h"
@@ -297,47 +297,11 @@ static void link_reset_progress(iap2_link_t *link)
  * After AirPlay pair-verify the phone proves the accessory is MFi licensed
  * with POST /auth-setup: a 33-byte MFiSAP request (X25519 public key) that
  * the accessory answers with its certificate and an AES-CTR-encrypted
- * coprocessor signature.  The response builder in core/airplay works, but
- * it reads a process-wide provider that a port must install -- without it
- * the handler answers "503 Service Unavailable", iOS closes the RTSP
- * connection right after pair-verify and CarPlay stays on "Connecting".
- * Install the provider here, where the coprocessor handle lives.  The
- * random callback feeds the accessory's ephemeral X25519 key.
+ * coprocessor signature.  core/airplay reads a process-wide provider for
+ * this; carplay_mfi_provider.c owns its lifecycle so the wired USB transport
+ * installs the same provider (without it the handler answers "503 Service
+ * Unavailable" and iOS drops the RTSP connection after pair-verify).
  */
-static int link_mfi_random(uint8_t *output, size_t len, void *context)
-{
-    (void)context;
-    return rtcp_lubanlite_random(output, len) ? RTCP_OK : RTCP_EIO;
-}
-
-static void link_airplay_mfi_provider(const struct rtcp_mfi *mfi)
-{
-    if (mfi == NULL) return;
-
-    /* 0x00000200 is the MFi 2.0C (SHA-1 digest, RSA-1024 signature);
-     * 0x00000300 is an Auth 3.0 part (SHA-256).  When the probe has not
-     * succeeded yet (lazy handle) keep the 2.0C default: it is the part on
-     * this board, and the lazy handle re-probes at certificate time. */
-    struct rtcp_mfi_info info;
-    uint8_t protocol_major = 2U;
-    if (mfi->info != NULL && mfi->info(&info) == RTCP_OK &&
-        info.id32 == 0x00000300u) {
-        protocol_major = 3U;
-    }
-
-    airplay_mfi_sap_provider_t provider = {
-        .mfi = mfi,
-        .protocol_major = protocol_major,
-        .random = link_mfi_random,
-        .context = NULL,
-    };
-    if (airplay_mfi_sap_set_provider(&provider)) {
-        IAP2_LOG("AirPlay /auth-setup MFi provider ready (protocol major %u)",
-                 (unsigned)protocol_major);
-    } else {
-        IAP2_LOG("AirPlay /auth-setup MFi provider unavailable");
-    }
-}
 
 static void link_thread(void *parameter)
 {
@@ -349,7 +313,9 @@ static void link_thread(void *parameter)
      * (even with Bluetooth untouched), so link_mfi() keeps a lazy handle
      * that re-probes at certificate time. */
     const struct rtcp_mfi *mfi = link_mfi();
-    link_airplay_mfi_provider(mfi);
+    if (mfi != NULL && carplay_mfi_provider_install(mfi) != RTCP_OK) {
+        IAP2_LOG("AirPlay /auth-setup MFi provider unavailable");
+    }
 
     int result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
     if (result != RTCP_OK) {
@@ -450,6 +416,7 @@ done:
         iap2_session_destroy(link->session);
         link->session = NULL;
     }
+    carplay_mfi_provider_release(mfi);
     link->running = false;
     s_serve = false;
     carplay_bt_release(CARPLAY_BT_OWNER_IAP2);

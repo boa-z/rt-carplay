@@ -99,6 +99,10 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI'):
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB'):
     src += Glob('port/luban-lite/rtcp_usb_lubanlite.c')
 
+    # NCM netdev helpers; the CherryUSB NCM class needs lwIP.
+    if GetDepend('RT_USING_LWIP'):
+        src += Glob('port/luban-lite/rtcp_net_lubanlite.c')
+
     aic_root = os.environ.get('AIC_ROOT', '')
     if aic_root:
         cherryusb = os.path.join(aic_root, 'packages', 'third-party',

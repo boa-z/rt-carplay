@@ -71,6 +71,12 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI'):
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT'):
     src += Glob('port/luban-lite/rtcp_bt_lubanlite.c')
 
+    # The zephyr-bluetooth package ships no settings core; this file backs
+    # CONFIG_BT_SETTINGS with an RT-Thread DFS file so BR/EDR link keys (and
+    # therefore the phone's bond) survive a reboot.
+    if GetDepend('LPKG_BT_SETTINGS'):
+        src += Glob('port/luban-lite/rtcp_bt_settings.c')
+
     aic_root = os.environ.get('AIC_ROOT', '')
     if aic_root:
         zephyr = os.path.join(aic_root, 'packages', 'third-party',

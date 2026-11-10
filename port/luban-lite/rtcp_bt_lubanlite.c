@@ -47,6 +47,9 @@
 #include <zephyr/bluetooth/classic/rfcomm.h>
 #include <zephyr/bluetooth/classic/sdp.h>
 #include <zephyr/net_buf.h>
+#if defined(CONFIG_BT_SETTINGS)
+#include <zephyr/settings/settings.h>
+#endif
 
 #define BT_TAG "bt-luban"
 
@@ -571,6 +574,24 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
         RTCP_LOGE(BT_TAG, "bt_enable failed (%d)", err);
         return RTCP_EIO;
     }
+
+#if defined(CONFIG_BT_SETTINGS)
+    /* The iPhone keeps its half of a bond across our reboots.  Restore the
+     * link keys before the device becomes connectable; otherwise iOS finds
+     * the device but every reconnect fails until it is forgotten and paired
+     * again.  Nothing in this SDK runs settings_subsys_init(), so do it here
+     * (it loads /data/bt_settings.bin). */
+    err = settings_subsys_init();
+    if (err != 0) {
+        RTCP_LOGW(BT_TAG, "settings_subsys_init failed (%d)", err);
+    }
+    err = settings_load();
+    if (err != 0) {
+        RTCP_LOGW(BT_TAG, "settings_load failed (%d)", err);
+    } else {
+        RTCP_LOGI(BT_TAG, "Bluetooth settings loaded");
+    }
+#endif
 
     configure_scan();
 

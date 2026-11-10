@@ -67,10 +67,18 @@ target_compile_options(rt-carplay-sim PRIVATE -Wall -Wextra -Werror)
 if(RTCP_BUILD_TESTS)
     enable_testing()
 
+    add_library(rtcp_test_support STATIC
+        tests/support/airplay_srp6a_test_client.c)
+    target_include_directories(rtcp_test_support PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/crypto/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
+
     set(RTCP_TESTS
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
-        test_iap2_parameter test_iap2_session
+        test_iap2_parameter test_iap2_session test_iap2_stream
         test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8
         test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist
         test_airplay_control_stream test_airplay_screen_stream test_airplay_mfi_sap
@@ -82,7 +90,11 @@ if(RTCP_BUILD_TESTS)
         test_airplay_screen_server test_airplay_rtsp_server
         test_airplay_audio_stream
         test_airplay_pairing_e2e test_airplay_ed25519
-        test_discovery test_mdns_responder test_port_linux test_input_bridge
+        test_discovery test_mdns_responder test_mdns_browser test_carplay_ctrl
+        test_usb_device test_usbmux test_usbmux_host
+        test_lockdown test_plist test_lockdown_pair
+        test_lockdown_tls test_lockdown_session
+        test_port_linux test_input_bridge
         test_media_timestamp
     )
 
@@ -98,18 +110,20 @@ if(RTCP_BUILD_TESTS)
         else()
             set(source ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/${name}.c)
         endif()
-        if(name STREQUAL "test_airplay_pairing_e2e")
-            add_executable(${name} ${source}
-                ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/airplay_srp6a_test_client.c)
-        else()
-            add_executable(${name} ${source})
-        endif()
-        if(name STREQUAL "test_port_linux")
+        add_executable(${name} ${source})
+        if(name STREQUAL "test_mfi2c")
+            target_link_libraries(${name} PRIVATE rtcp_core)
+        elseif(name STREQUAL "test_port_linux")
             target_link_libraries(${name} PRIVATE rtcp_port_linux)
         elseif(name IN_LIST RTCP_PORT_TESTS)
-            target_link_libraries(${name} PRIVATE rtcp_core rtcp_port_linux)
+            target_link_libraries(${name} PRIVATE
+                rtcp_core rtcp_test_support rtcp_port_linux)
         else()
-            target_link_libraries(${name} PRIVATE rtcp_core)
+            target_link_libraries(${name} PRIVATE rtcp_core rtcp_test_support)
+        endif()
+        if(name STREQUAL "test_lockdown_tls" OR
+           name STREQUAL "test_lockdown_session")
+            target_link_libraries(${name} PRIVATE Threads::Threads)
         endif()
         target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
         add_test(NAME ${name} COMMAND ${name})

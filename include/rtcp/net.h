@@ -29,6 +29,10 @@ struct rtcp_net {
     int  (*listen)(uint16_t port);
     int  (*accept)(int lfd, rtcp_addr_t *peer);
     int  (*connect)(const rtcp_addr_t *addr);
+    /* Bounded TCP connect: returns a connected fd, or a negative RTCP error
+     * (RTCP_ETIMEDOUT when the handshake did not finish in time).  Optional;
+     * callers fall back to the blocking connect() when NULL. */
+    int  (*connect_timeout)(const rtcp_addr_t *addr, int timeout_ms);
     int  (*send)(int fd, const void *buf, size_t len);
     int  (*recv)(int fd, void *buf, size_t len);
     /* Local port of a bound TCP or UDP socket; 0 when unknown. */

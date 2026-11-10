@@ -45,6 +45,14 @@ typedef struct {
     uint8_t rx[RTSP_RX_CHUNK_BYTES];
     airplay_rtsp_request_t request;
     airplay_control_cipher_t *cipher;
+    /* Diagnostics: one id per accepted connection so the log can line up
+     * requests, responses and the close that follows them. */
+    unsigned id;
+    uint32_t opened_ms;
+    uint32_t rx_bytes;
+    uint32_t tx_bytes;
+    unsigned tx_frames;
+    unsigned requests;
 } rtsp_connection_t;
 
 struct airplay_rtsp_server {
@@ -60,6 +68,7 @@ struct airplay_rtsp_server {
     uint16_t port;
     rtcp_addr_t peer;
     bool stopping;
+    unsigned next_connection_id;
 
     airplay_rtsp_session_t *session;
     rtsp_connection_t connection;
@@ -404,6 +413,29 @@ static bool socket_send_all(const struct rtcp_net *net, int fd,
     return true;
 }
 
+static uint32_t server_now_ms(const airplay_rtsp_server_t *server)
+{
+    return server->os != NULL && server->os->now_ms != NULL
+               ? (uint32_t)server->os->now_ms()
+               : 0U;
+}
+
+static unsigned response_status(const uint8_t *response, size_t length)
+{
+    static const char prefix[] = "RTSP/1.0 ";
+    if (response == NULL || length < sizeof(prefix) + 3U ||
+        memcmp(response, prefix, sizeof(prefix) - 1U) != 0) {
+        return 0U;
+    }
+    const uint8_t *status = response + sizeof(prefix) - 1U;
+    if (status[0] < '0' || status[0] > '9' || status[1] < '0' ||
+        status[1] > '9' || status[2] < '0' || status[2] > '9') {
+        return 0U;
+    }
+    return (unsigned)(status[0] - '0') * 100U +
+           (unsigned)(status[1] - '0') * 10U + (unsigned)(status[2] - '0');
+}
+
 static void consume_stream(rtsp_connection_t *connection, size_t count)
 {
     if (count < connection->stream_len) {
@@ -425,8 +457,11 @@ static bool append_stream(rtsp_connection_t *connection, const uint8_t *bytes,
 }
 
 static bool send_response(airplay_rtsp_server_t *server,
-                          rtsp_connection_t *connection, size_t response_len)
+                          rtsp_connection_t *connection, size_t response_len,
+                          size_t *wire_len, unsigned *frames)
 {
+    if (wire_len != NULL) *wire_len = response_len;
+    if (frames != NULL) *frames = 0U;
     if (connection->cipher == NULL) {
         return socket_send_all(server->net, server->client_fd,
                                connection->response, response_len);
@@ -437,6 +472,13 @@ static bool send_response(airplay_rtsp_server_t *server,
             connection->cipher, connection->response, response_len,
             connection->io, sizeof(connection->io), &encrypted_len);
     if (result != AIRPLAY_CONTROL_CIPHER_OK) return false;
+    if (wire_len != NULL) *wire_len = encrypted_len;
+    if (frames != NULL) {
+        *frames = (unsigned)((response_len +
+                              AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES -
+                              1U) /
+                             AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES);
+    }
     bool sent = socket_send_all(server->net, server->client_fd, connection->io,
                                 encrypted_len);
     mbedtls_platform_zeroize(connection->io, sizeof(connection->io));
@@ -463,7 +505,8 @@ static bool enable_control_cipher(airplay_rtsp_server_t *server,
     }
     mbedtls_platform_zeroize(&keys, sizeof(keys));
     airplay_rtsp_session_mark_control_cipher_active(server->session);
-    RTCP_LOGI(TAG, "rtsp_cipher=enabled");
+    RTCP_LOGI(TAG, "rtsp_cipher=enabled id=%u ms=%u", connection->id,
+              (unsigned)(server_now_ms(server) - connection->opened_ms));
     return true;
 }
 
@@ -477,8 +520,9 @@ static bool process_stream(airplay_rtsp_server_t *server,
             return connection->stream_len < sizeof(connection->stream);
         }
         if (parse_result != AIRPLAY_RTSP_PARSE_COMPLETE) {
-            RTCP_LOGW(TAG, "rtsp_request=rejected parse=%d buffered=%u",
-                      (int)parse_result, (unsigned)connection->stream_len);
+            RTCP_LOGW(TAG, "rtsp_request=rejected id=%u parse=%d buffered=%u",
+                      connection->id, (int)parse_result,
+                      (unsigned)connection->stream_len);
             return false;
         }
 
@@ -487,18 +531,31 @@ static bool process_stream(airplay_rtsp_server_t *server,
         airplay_rtsp_session_result_t result = airplay_rtsp_session_handle(
             server->session, &connection->request, connection->response,
             sizeof(connection->response), &response_len, &enable_cipher);
+        size_t wire_len = 0U;
+        unsigned frames = 0U;
         if (result != AIRPLAY_RTSP_SESSION_OK || response_len == 0U ||
-            !send_response(server, connection, response_len)) {
-            RTCP_LOGE(TAG, "rtsp_response=failed result=%d method=%s path=%s",
-                      (int)result, connection->request.method,
+            !send_response(server, connection, response_len, &wire_len,
+                           &frames)) {
+            RTCP_LOGE(TAG, "rtsp_response=failed id=%u result=%d method=%s "
+                      "path=%s",
+                      connection->id, (int)result, connection->request.method,
                       connection->request.path);
             return false;
         }
         size_t consumed = connection->request.consumed;
+        unsigned status = response_status(connection->response, response_len);
+        connection->requests++;
+        connection->tx_bytes += (uint32_t)wire_len;
+        connection->tx_frames += frames;
         consume_stream(connection, consumed);
-        RTCP_LOGI(TAG, "rtsp_request=handled method=%s path=%s cseq=%s bytes=%u",
+        RTCP_LOGI(TAG, "rtsp_request=handled id=%u ms=%u method=%s path=%s "
+                  "cseq=%s bytes=%u status=%u response_plain=%u "
+                  "response_wire=%u frames=%u",
+                  connection->id,
+                  (unsigned)(server_now_ms(server) - connection->opened_ms),
                   connection->request.method, connection->request.path,
-                  connection->request.cseq, (unsigned)consumed);
+                  connection->request.cseq, (unsigned)consumed, status,
+                  (unsigned)response_len, (unsigned)wire_len, frames);
         memset(&connection->request, 0, sizeof(connection->request));
 
         if (enable_cipher && !enable_control_cipher(server, connection)) {
@@ -561,7 +618,14 @@ static void server_teardown_connection(airplay_rtsp_server_t *server,
                                        const char *reason)
 {
     if (server->client_fd < 0 && server->session == NULL) return;
-    RTCP_LOGI(TAG, "rtsp_client=disconnected reason=%s", reason);
+    RTCP_LOGI(TAG, "rtsp_client=disconnected id=%u reason=%s lifetime_ms=%u "
+              "requests=%u rx_bytes=%u tx_bytes=%u tx_frames=%u",
+              server->connection.id, reason,
+              (unsigned)(server_now_ms(server) -
+                         server->connection.opened_ms),
+              server->connection.requests, (unsigned)server->connection.rx_bytes,
+              (unsigned)server->connection.tx_bytes,
+              server->connection.tx_frames);
     if (server->session != NULL) {
         /* Session destroy stops the media endpoints it started. */
         airplay_rtsp_session_destroy(server->session);
@@ -605,6 +669,12 @@ static void server_accept(airplay_rtsp_server_t *server)
     server->peer = peer;
     server->connection.stream_len = 0U;
     server->connection.cipher = NULL;
+    server->connection.id = ++server->next_connection_id;
+    server->connection.opened_ms = server_now_ms(server);
+    server->connection.rx_bytes = 0U;
+    server->connection.tx_bytes = 0U;
+    server->connection.tx_frames = 0U;
+    server->connection.requests = 0U;
 
     airplay_rtsp_session_config_t session_config = {0};
     session_config.pairing = server->config.pairing;
@@ -630,7 +700,9 @@ static void server_accept(airplay_rtsp_server_t *server)
         server_teardown_connection(server, "session_create_failed");
         return;
     }
-    RTCP_LOGI(TAG, "rtsp_client=connected peer_port=%u", (unsigned)peer.port);
+    RTCP_LOGI(TAG, "rtsp_client=connected id=%u peer_port=%u ms=%u",
+              server->connection.id, (unsigned)peer.port,
+              (unsigned)server->connection.opened_ms);
 }
 
 static void server_read_client(airplay_rtsp_server_t *server)
@@ -645,6 +717,7 @@ static void server_read_client(airplay_rtsp_server_t *server)
         server_teardown_connection(server, "receive_failed");
         return;
     }
+    server->connection.rx_bytes += (uint32_t)received;
     bool ok = process_received_bytes(server, &server->connection,
                                      server->connection.rx,
                                      (size_t)received);

@@ -12,9 +12,12 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <sys/errno.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 #else
 #include <lwip/sockets.h>
+#include <sys/errno.h>
 #endif
 
 #include "rtcp/rtcp.h"
@@ -25,6 +28,8 @@
 #ifndef RTCP_NET_POLL_MAX
 #define RTCP_NET_POLL_MAX 12
 #endif
+
+static int poll_fds(struct rtcp_pollfd *fds, int n, int timeout_ms);
 
 static int listen_socket(uint16_t port)
 {
@@ -80,6 +85,64 @@ static int connect_socket(const rtcp_addr_t *addr)
         closesocket(fd);
         return RTCP_EIO;
     }
+    return fd;
+}
+
+/* Same socket setup as connect_socket(), but the TCP handshake is bounded by
+ * timeout_ms.  A blocking connect() retries SYNs for tens of seconds, which
+ * would stall the receiver's single poll thread; the CarPlay Control
+ * connect-out runs there. */
+static int connect_timeout_socket(const rtcp_addr_t *addr, int timeout_ms)
+{
+    if (addr == NULL || addr->family != RTCP_AF_INET) return RTCP_EINVAL;
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return RTCP_EIO;
+
+    struct sockaddr_in in;
+    memset(&in, 0, sizeof(in));
+    in.sin_family = AF_INET;
+    memcpy(&in.sin_addr, addr->addr, 4U);
+    in.sin_port = htons(addr->port);
+
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        /* No socket-level fcntl on this port: the blocking connect is still
+         * correct, just not time-bounded here. */
+        if (connect(fd, (struct sockaddr *)&in, sizeof(in)) != 0) {
+            closesocket(fd);
+            return RTCP_EIO;
+        }
+        return fd;
+    }
+
+    int rc = connect(fd, (struct sockaddr *)&in, sizeof(in));
+    if (rc != 0) {
+        if (errno != EINPROGRESS) {
+            closesocket(fd);
+            return RTCP_EIO;
+        }
+        struct rtcp_pollfd descriptor = {
+            .fd = fd,
+            .events = RTCP_POLLOUT,
+            .revents = 0,
+        };
+        rc = poll_fds(&descriptor, 1, timeout_ms);
+        if (rc <= 0) {
+            closesocket(fd);
+            return rc < 0 ? RTCP_EIO : RTCP_ETIMEDOUT;
+        }
+        int error = 0;
+        socklen_t error_len = sizeof(error);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_len) != 0 ||
+            error != 0) {
+            closesocket(fd);
+            return RTCP_EIO;
+        }
+    }
+
+    /* Callers use the blocking send/recv path afterwards. */
+    (void)fcntl(fd, F_SETFL, flags);
     return fd;
 }
 
@@ -226,6 +289,7 @@ const struct rtcp_net rtcp_net_rtthread = {
     .listen = listen_socket,
     .accept = accept_socket,
     .connect = connect_socket,
+    .connect_timeout = connect_timeout_socket,
     .send = send_bytes,
     .recv = recv_bytes,
     .local_port = rtcp_net_rtthread_local_port,

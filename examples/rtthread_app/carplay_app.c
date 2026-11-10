@@ -22,7 +22,9 @@
 #include "airplay_rtsp_server.h"
 #include "airplay_txt.h"
 #include "airplay_vendor_ie.h"
+#include "carplay_ctrl.h"
 #include "input_bridge.h"
+#include "mdns_browser.h"
 #include "mdns_responder.h"
 #include "rtcp/input.h"
 #include "rtcp/rtcp.h"
@@ -96,6 +98,20 @@
 #define POLL_THREAD_PRIORITY 15U
 #define POLL_THREAD_TICK 20U
 
+/* CarPlay Control reverse connection.
+ *
+ * The iPhone advertises _carplay-ctrl._tcp once it commits to CarPlay; the
+ * receiver browses it and sends GET /ctrl-int/1/connect.  The vendor ZALink
+ * stack on this board does exactly this (mdnsd_start_carplay_client_connect),
+ * as do DiPlay, LIVI, catplay and carplayd's rx_connect.  carplayd's session
+ * notes call the connect-out what makes the phone open the RTSP session.
+ *
+ * Kept switchable (carplay_ctrl on|off) so an A/B run can isolate its effect
+ * from the rest of the session establishment. */
+#define CARPLAY_CTRL_SERVICE "_carplay-ctrl._tcp.local"
+#define CARPLAY_CTRL_USER_AGENT "AirPlay/" AIRPLAY_INFO_DEFAULT_SOURCE_VERSION
+#define CARPLAY_CTRL_RETRY_MS 2000U
+
 #define PAIR_CODE_DIGITS 4U
 #define TOUCH_QUEUE_LENGTH 32U
 #define TOUCH_QUEUE_MASK (TOUCH_QUEUE_LENGTH - 1U)
@@ -146,6 +162,7 @@ typedef struct {
     size_t txt_len;
 
     mdns_responder_t *mdns;
+    mdns_browser_t *browser;
     airplay_rtsp_server_t *server;
     input_bridge_t *bridge;
     rt_mutex_t lock;
@@ -153,6 +170,14 @@ typedef struct {
 
     uint16_t airplay_port;
     volatile bool airplay_connected;
+
+    /* CarPlay Control browse/connect state (owned by the poll thread). */
+    volatile bool ctrl_enabled;
+    uint64_t ctrl_device_id;
+    uint32_t ctrl_last_attempt_ms;
+    unsigned ctrl_attempts;
+    unsigned ctrl_responses;
+    int ctrl_last_status;
 
     carplay_app_screen_cb_t on_screen;
     void *screen_context;
@@ -502,6 +527,10 @@ static void shutdown_stack(app_state_t *app)
         mdns_responder_destroy(app->mdns);
         app->mdns = NULL;
     }
+    if (app->browser != NULL) {
+        mdns_browser_destroy(app->browser);
+        app->browser = NULL;
+    }
     if (app->server != NULL) {
         airplay_rtsp_server_stop(app->server);
         app->server = NULL;
@@ -529,6 +558,73 @@ static void shutdown_stack(app_state_t *app)
     memset(app, 0, sizeof(*app));
 }
 
+/* Every packet received on the shared mDNS socket also feeds the browser. */
+static void mdns_packet_sink(const uint8_t *packet, size_t packet_len,
+                             const rtcp_addr_t *from, void *context)
+{
+    app_state_t *app = context;
+    if (app->browser == NULL || !app->ctrl_enabled) return;
+    const uint8_t *ipv4 = NULL;
+    if (from != NULL && from->family == RTCP_AF_INET) ipv4 = from->addr;
+    (void)mdns_browser_handle_packet(app->browser, packet, packet_len, ipv4,
+                                     (uint32_t)app->os.now_ms());
+}
+
+/*
+ * Browses _carplay-ctrl._tcp and performs the reverse connect-out.  Runs in
+ * the poll thread; carplay_ctrl_connect() is bounded by
+ * CARPLAY_CTRL_TIMEOUT_MS, so a silent endpoint cannot stall mDNS/RTSP for
+ * long.  Once the phone has attached to our RTSP port the nudge is no longer
+ * needed and is suppressed for the rest of the session.
+ */
+static void carplay_ctrl_tick(app_state_t *app, uint32_t now_ms)
+{
+    if (app->browser == NULL || !app->ctrl_enabled) return;
+
+    if (mdns_browser_query_due(app->browser, now_ms)) {
+        uint8_t query[512];
+        size_t query_len = mdns_browser_build_query(app->browser, query,
+                                                    sizeof(query));
+        if (query_len != 0U) {
+            (void)mdns_responder_send(app->mdns, &rtcp_net_rtthread, query,
+                                      query_len);
+        }
+        mdns_browser_mark_queried(app->browser, now_ms);
+    }
+
+    if (app->airplay_connected ||
+        airplay_rtsp_server_is_connected(app->server)) {
+        return;
+    }
+    const mdns_browser_endpoint_t *endpoint =
+        mdns_browser_best(app->browser, now_ms);
+    if (endpoint == NULL) return;
+    if (app->ctrl_last_attempt_ms != 0U &&
+        (uint32_t)(now_ms - app->ctrl_last_attempt_ms) <
+            CARPLAY_CTRL_RETRY_MS) {
+        return;
+    }
+    app->ctrl_last_attempt_ms = now_ms;
+    ++app->ctrl_attempts;
+    APP_LOG("carplay_ctrl=connect_out ip=%u.%u.%u.%u port=%u attempt=%u",
+            endpoint->ipv4[0], endpoint->ipv4[1], endpoint->ipv4[2],
+            endpoint->ipv4[3], (unsigned)endpoint->port, app->ctrl_attempts);
+    int status = 0;
+    int result = carplay_ctrl_connect(
+        &rtcp_net_rtthread, endpoint->ipv4, endpoint->port, app->ctrl_device_id,
+        CARPLAY_CTRL_USER_AGENT, CARPLAY_CTRL_TIMEOUT_MS, &status);
+    uint32_t elapsed = (uint32_t)((uint32_t)app->os.now_ms() - now_ms);
+    if (result == RTCP_OK) {
+        ++app->ctrl_responses;
+        app->ctrl_last_status = status;
+        APP_LOG("carplay_ctrl=connected status=%d elapsed_ms=%u responses=%u",
+                status, (unsigned)elapsed, app->ctrl_responses);
+    } else {
+        APP_LOG("carplay_ctrl=connect_failed rc=%d elapsed_ms=%u", result,
+                (unsigned)elapsed);
+    }
+}
+
 static void poll_thread(void *argument)
 {
     app_state_t *app = argument;
@@ -536,11 +632,13 @@ static void poll_thread(void *argument)
     APP_LOG("receiver running (PIN %s)", app->pairing_code);
 
     while (!app->stop) {
-        int mdns_result = mdns_responder_poll(app->mdns, &rtcp_net_rtthread, 10);
+        int mdns_result = mdns_responder_poll_ex(
+            app->mdns, &rtcp_net_rtthread, 10, mdns_packet_sink, app);
         if (mdns_result < 0 && app->mdns_errors < 3U) {
             ++app->mdns_errors;
             APP_LOG("mDNS poll failed rc=%d", mdns_result);
         }
+        carplay_ctrl_tick(app, (uint32_t)app->os.now_ms());
         (void)airplay_rtsp_server_poll(app->server, 0);
         drain_touch(app);
         input_bridge_tick(app->bridge, app->os.now_ms());
@@ -873,6 +971,18 @@ int carplay_app_start(const carplay_app_config_t *config)
         APP_LOG("mDNS responder start failed rc=%d", result);
         shutdown_stack(app);
         return result;
+    }
+
+    /* Browser state only; it shares the responder's socket. */
+    app->browser = mdns_browser_create(CARPLAY_CTRL_SERVICE);
+    app->ctrl_enabled = app->browser != NULL;
+    if (app->browser == NULL) {
+        APP_LOG("carplay_ctrl=disabled reason=no_memory");
+    } else if (!carplay_ctrl_parse_device_id(app->device_id,
+                                             &app->ctrl_device_id)) {
+        APP_LOG("carplay_ctrl=disabled reason=device_id_parse id=%s",
+                app->device_id);
+        app->ctrl_enabled = false;
     }
 
     app->bridge = input_bridge_create(app->width, app->height, app->rotation,
@@ -1294,6 +1404,53 @@ static int cmd_carplay_bt(int argc, char **argv)
 }
 #endif /* RTCARPLAY_BT */
 
+static int cmd_carplay_ctrl(int argc, char **argv)
+{
+    const char *sub = argc >= 2 ? argv[1] : "status";
+    uint32_t now_ms = s_app.os.now_ms != NULL
+                          ? (uint32_t)s_app.os.now_ms()
+                          : 0U;
+    if (strcmp(sub, "on") == 0) {
+        s_app.ctrl_enabled = s_app.browser != NULL;
+        rt_kprintf("carplay_ctrl: %s\n",
+                   s_app.ctrl_enabled ? "enabled"
+                                      : "unavailable (receiver not running)");
+        return 0;
+    }
+    if (strcmp(sub, "off") == 0) {
+        s_app.ctrl_enabled = false;
+        rt_kprintf("carplay_ctrl: disabled\n");
+        return 0;
+    }
+    if (strcmp(sub, "connect") == 0) {
+        /* Force the next poll-thread tick to attempt the connect-out. */
+        s_app.ctrl_last_attempt_ms = now_ms - CARPLAY_CTRL_RETRY_MS;
+        rt_kprintf("carplay_ctrl: connect requested\n");
+        return 0;
+    }
+    if (strcmp(sub, "status") == 0) {
+        const mdns_browser_endpoint_t *endpoint =
+            s_app.browser != NULL
+                ? mdns_browser_best(s_app.browser, now_ms)
+                : NULL;
+        rt_kprintf("carplay_ctrl: %s, %u endpoint(s), id %llu, attempts %u, "
+                   "responses %u, last status %d\n",
+                   s_app.ctrl_enabled ? "enabled" : "disabled",
+                   (unsigned)mdns_browser_endpoint_count(s_app.browser),
+                   (unsigned long long)s_app.ctrl_device_id,
+                   s_app.ctrl_attempts, s_app.ctrl_responses,
+                   s_app.ctrl_last_status);
+        if (endpoint != NULL) {
+            rt_kprintf("  endpoint %u.%u.%u.%u:%u\n", endpoint->ipv4[0],
+                       endpoint->ipv4[1], endpoint->ipv4[2],
+                       endpoint->ipv4[3], (unsigned)endpoint->port);
+        }
+        return 0;
+    }
+    rt_kprintf("usage: carplay_ctrl on|off|connect|status\n");
+    return 0;
+}
+
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_start, carplay_start,
                      Start the rt-carplay receiver);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_stop, carplay_stop,
@@ -1304,6 +1461,8 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_touch, carplay_touch,
                      Inject a touch: carplay_touch down|move|up X Y [pointer]);
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_randtest, carplay_randtest,
                      Verify the CE TRNG: two calls must differ);
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_ctrl, carplay_ctrl,
+                     CarPlay Control browse/connect: on|off|connect|status);
 #if defined(RTCARPLAY_BT)
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_bt, carplay_bt,
                      Bluetooth RFCOMM bring-up: start|stop|status);

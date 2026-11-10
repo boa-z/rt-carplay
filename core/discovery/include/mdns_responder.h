@@ -63,3 +63,25 @@ void mdns_responder_close(mdns_responder_t *responder, const struct rtcp_net *ne
  * timeout, or a negative RTCP error. */
 int mdns_responder_poll(mdns_responder_t *responder, const struct rtcp_net *net,
                         int timeout_ms);
+
+/*
+ * Observer for every packet received on the shared :5353 socket.  The DNS-SD
+ * browser uses it to see the unicast answers to its own queries without
+ * opening a second socket.  Runs before the responder builds its reply and
+ * must not block.
+ */
+typedef void (*mdns_responder_packet_sink_t)(const uint8_t *packet,
+                                             size_t packet_len,
+                                             const rtcp_addr_t *from,
+                                             void *context);
+
+int mdns_responder_poll_ex(mdns_responder_t *responder,
+                           const struct rtcp_net *net, int timeout_ms,
+                           mdns_responder_packet_sink_t sink,
+                           void *sink_context);
+
+/* Sends a raw mDNS packet (e.g. a browser query) to 224.0.0.251:5353 on the
+ * responder's socket.  Returns the number of bytes sent or a negative RTCP
+ * error. */
+int mdns_responder_send(mdns_responder_t *responder, const struct rtcp_net *net,
+                        const void *packet, size_t packet_len);

@@ -486,8 +486,25 @@ void mdns_responder_close(mdns_responder_t *responder, const struct rtcp_net *ne
     responder->fd = -1;
 }
 
-int mdns_responder_poll(mdns_responder_t *responder, const struct rtcp_net *net,
-                        int timeout_ms)
+int mdns_responder_send(mdns_responder_t *responder, const struct rtcp_net *net,
+                        const void *packet, size_t packet_len)
+{
+    if (responder == NULL || net == NULL || net->udp_sendto == NULL ||
+        packet == NULL || packet_len == 0U || responder->fd < 0) {
+        return RTCP_EINVAL;
+    }
+    rtcp_addr_t destination;
+    memset(&destination, 0, sizeof(destination));
+    destination.family = RTCP_AF_INET;
+    static const uint8_t group[4] = {224U, 0U, 0U, 251U};
+    memcpy(destination.addr, group, 4U);
+    destination.port = MDNS_PORT;
+    return net->udp_sendto(responder->fd, &destination, packet, packet_len);
+}
+
+int mdns_responder_poll_ex(mdns_responder_t *responder, const struct rtcp_net *net,
+                           int timeout_ms, mdns_responder_packet_sink_t sink,
+                           void *sink_context)
 {
     if (responder == NULL || net == NULL || net->poll == NULL ||
         net->udp_recvfrom == NULL || net->udp_sendto == NULL ||
@@ -510,6 +527,10 @@ int mdns_responder_poll(mdns_responder_t *responder, const struct rtcp_net *net,
                                      sizeof(responder->rx), &from);
     if (received < 0) return received;
     if (received == 0) return 0;
+
+    if (sink != NULL) {
+        sink(responder->rx, (size_t)received, &from, sink_context);
+    }
 
     bool unicast = false;
     size_t response_len = mdns_responder_build_response(
@@ -534,4 +555,10 @@ int mdns_responder_poll(mdns_responder_t *responder, const struct rtcp_net *net,
     RTCP_LOGD(TAG, "answered %u bytes (%s)", (unsigned)response_len,
               unicast ? "unicast" : "multicast");
     return 1;
+}
+
+int mdns_responder_poll(mdns_responder_t *responder, const struct rtcp_net *net,
+                        int timeout_ms)
+{
+    return mdns_responder_poll_ex(responder, net, timeout_ms, NULL, NULL);
 }

@@ -44,7 +44,8 @@ TESTS := test_mfi2c \
          test_airplay_timing_port test_airplay_event_port \
          test_airplay_screen_server test_airplay_rtsp_server \
          test_airplay_pairing_e2e test_airplay_ed25519 \
-         test_discovery test_mdns_responder test_port_linux test_input_bridge \
+         test_discovery test_mdns_responder test_mdns_browser test_carplay_ctrl \
+         test_port_linux test_input_bridge \
          test_media_timestamp
 
 # These tests drive the poll seams through the POSIX port.

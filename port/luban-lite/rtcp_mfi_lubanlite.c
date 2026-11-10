@@ -78,14 +78,26 @@ static int bus_read(void *context, uint8_t reg, uint8_t *data, size_t len,
          * Keep the vendor timing here. */
         rt_size_t sent = rt_i2c_master_send(bus, s_mfi.address, RT_I2C_WR,
                                             &reg, 1U);
-        if (sent == 1U) {
+        if (sent != 1U) {
             if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
-            rt_size_t got = rt_i2c_master_recv(bus, s_mfi.address, 0U, data,
-                                               (rt_uint32_t)len);
-            if (got == len) return RTCP_OK;
-        } else if (delay_ms > 0) {
-            aicos_msleep((uint32_t)delay_ms);
+            continue;
         }
+        if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
+        rt_size_t got = rt_i2c_master_recv(bus, s_mfi.address, 0U, data,
+                                           (rt_uint32_t)len);
+
+        /* The coprocessor keeps processing for roughly 150 us per byte
+         * after a read; until it is done it drops register writes and the
+         * next read repeats the previous register window.  That is exactly
+         * what produced the misleading id=0x32323232 / version=32.32.32.32:
+         * every read repeated the first bytes of the 31-byte 0x4E probe.
+         * The vendor driver sleeps 150*len/1000 + 1 ms after every
+         * completed read, so match it (5 ms for the 31-byte probe, 137 ms
+         * for the 908-byte certificate). */
+        aicos_msleep((uint32_t)(150U * len / 1000U + 1U));
+
+        if (got == len) return RTCP_OK;
+        if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
     }
     return RTCP_EIO;
 }
@@ -124,9 +136,11 @@ int rtcp_mfi_lubanlite_start(const char *i2c_bus_name, uint8_t address)
         return result;
     }
 
-    /* A part that ACKs can still answer nonsense; the first diagnostic build
-     * printed id=0x32323232 version=32.32.32.32 cert=12850.  Only the values
-     * that identify an Apple coprocessor make it usable. */
+    /* Keep the ID/certificate-length sanity check as a guard against a chip
+     * that is present but not an Apple coprocessor.  (The old
+     * id=0x32323232 / version=32.32.32.32 readings were a bus-timing
+     * artifact, not a bad part; bus_read() now matches the vendor's
+     * per-byte settling delay.) */
     if (s_mfi.info.id32 != 0x00000200u && s_mfi.info.id32 != 0x00000300u &&
         s_mfi.info.cert_len != 908u) {
         RTCP_LOGE("mfi", "%s 0x%02x answered but not like a 2.0C: "
@@ -312,12 +326,13 @@ static const struct rtcp_mfi s_mfi_ops = {
 /* ------------------------------------------------------------------ */
 
 /*
- * The 2.0C reads 0x32 from every register for a while after boot on this
- * board (board-verified 2026-11-09: the same probe succeeds minutes later,
- * and the vendor stack only touches the part once a phone is connected).
- * The session therefore keeps this handle even when the early probe failed;
- * the first certificate read or signature request probes again.  A genuine
- * absence costs one extra probe and then fails cleanly at the same point.
+ * Keep the lazy handle as a safety net: the eager probe still runs before
+ * Bluetooth is enabled, and if the part is not answering at that point the
+ * session must be able to probe again when the phone requests the
+ * certificate.  The earlier "reads 0x32 for a while after boot" theory was
+ * a symptom of the missing per-byte settling delay in bus_read(), now fixed;
+ * a genuine absence costs one extra probe and then fails cleanly at the same
+ * point.
  */
 static char s_lazy_bus[16];
 static uint8_t s_lazy_addr;

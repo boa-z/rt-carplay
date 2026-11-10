@@ -116,8 +116,24 @@ carplay_usb start             # arm the enumeration hook; plug the iPhone after
 carplay_usb status            # device, selected configuration, interfaces
 carplay_usb request           # re-send Apple 0x52, print bNumConfigurations
 carplay_usb mux               # USBMUX -> lockdown 62078, GetValue, print reply
+carplay_usb pair              # wired pairing + StartSession + carkit service
+carplay_usb unpair            # close the carkit service and lockdown session
 carplay_usb stop              # disarm the hook (device stays configured)
 ```
+
+`carplay_usb pair` runs the full wired lockdown sequence: SetValue
+UntrustedHostBUID, GetValue DevicePublicKey/WiFiAddress, local pair-record
+generation (two RSA-2048 keys, so expect several seconds), Pair (the phone
+shows its trust dialog and the command retries every second for up to three
+minutes), StartSession, TLS, then StartService `com.apple.carkit.service` and
+a connection to the reported port.  It prints the generated host/system UUIDs,
+the Wi-Fi address and the service port on success, and leaves the carkit
+service stream open for the next stage; `unpair` closes it.  The module needs
+mbedTLS with `MBEDTLS_SSL_CLI_C`, X.509 create/parse and RSA key generation
+(the SDK's `ports/inc/tls_config.h` already enables them) and the CE TRNG
+(`rtcp_lubanlite_random`, built for USB-only configurations as well).  The
+pair record is kept in RAM only; it is regenerated on the next boot, so the
+phone asks for trust again.
 
 `carplay_usb start` must run before the phone is plugged: the configuration
 hook only runs inside CherryUSB enumeration, and the phone exposes its CarPlay

@@ -170,11 +170,62 @@ bool rtcp_usb_interface_bulk_endpoints(const rtcp_usb_interface_t *interface,
                                        uint8_t *out_endpoint,
                                        uint8_t *in_endpoint);
 
+/*
+ * Functions present in one configuration, derived from its interface
+ * descriptors.  `ncm_*` describe the *standard* CDC-NCM function
+ * (control 02/0d plus a CDC data interface 0a with a bulk pair); that is
+ * what CherryUSB's usbh_cdc_ncm driver can bind to.  Apple Ethernet is the
+ * vendor-specific ff/fd/01 function and needs its own host driver.
+ */
+typedef struct {
+    bool usbmux;
+    bool ncm_control;       /* interface class 02 / subclass 0d */
+    bool ncm_data;          /* interface class 0a with a bulk pair */
+    bool ncm_data_adjacent; /* data interface number == control + 1 */
+    bool ncm_notification;  /* control alt 0 has an interrupt IN endpoint */
+    bool apple_ethernet;    /* class ff / subclass fd / protocol 01 */
+    bool ptp;               /* class 06 / subclass 01 / protocol 01 */
+} rtcp_usb_functions_t;
+
+void rtcp_usb_classify_configuration(const rtcp_usb_device_t *device,
+                                     rtcp_usb_functions_t *functions);
+
+/* Selection preference for the wired CarPlay configuration.  The standard
+ * CDC-NCM pair is preferred because the existing host driver can drive it;
+ * Apple Ethernet is the fallback; OTHER means the configuration carries no
+ * usable wired IP link. */
+typedef enum {
+    RTCP_USB_CONFIG_OTHER = 0,
+    RTCP_USB_CONFIG_APPLE_ETHERNET = 1,
+    RTCP_USB_CONFIG_NCM = 2,
+} rtcp_usb_configuration_kind_t;
+
+rtcp_usb_configuration_kind_t rtcp_usb_configuration_kind(
+    const rtcp_usb_device_t *device);
+
+/* True when the configuration carries USBMUX plus a complete, adjacent
+ * standard CDC-NCM function.  This is the descriptor answer to "can the
+ * existing CherryUSB CDC-NCM driver be reused?". */
+bool rtcp_usb_configuration_has_ncm_link(const rtcp_usb_device_t *device);
+
 /* True when the selected configuration carries the wired CarPlay function
- * set: a vendor-specific USBMUX interface plus either the CDC-NCM control
- * interface or Apple's Ethernet interface.  This is the descriptor-derived
+ * set: a vendor-specific USBMUX interface plus either the standard CDC-NCM
+ * pair or Apple's Ethernet interface.  This is the descriptor-derived
  * replacement for "configuration number 6". */
 bool rtcp_usb_is_carplay_configuration(const rtcp_usb_device_t *device);
+
+/*
+ * Human-readable dump of one raw configuration descriptor.  `emit` is called
+ * once per line (no newline needed).  The walk uses the raw bytes, so it also
+ * prints interfaces, alternate settings and endpoints beyond the
+ * RTCP_USB_MAX_* model limits.  When `device` is not NULL, its parsed
+ * classification is appended.  Returns RTCP_OK or RTCP_EINVAL.
+ */
+typedef void (*rtcp_usb_text_cb_t)(void *user, const char *line);
+int rtcp_usb_describe_configuration(const rtcp_usb_device_t *device,
+                                    const uint8_t *descriptor, size_t length,
+                                    uint8_t index, rtcp_usb_text_cb_t emit,
+                                    void *user);
 
 /* CarPlay NCM control interface number in the selected configuration, taken
  * from the descriptor (CDC-NCM control interface, or Apple Ethernet when the

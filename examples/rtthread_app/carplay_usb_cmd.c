@@ -853,6 +853,8 @@ static int cmd_net(void)
     bool up = rtcp_lubanlite_wired_net_up();
     bool found = rtcp_lubanlite_wired_ipv6(address, sizeof(address), &valid);
     bool apple_ethernet = false;
+    bool ncm_link = false;
+    const char *route = "none";
 
     if (rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context,
                                            &device) == RTCP_OK) {
@@ -860,19 +862,38 @@ static int cmd_net(void)
                              &device, RTCP_USB_CLASS_VENDOR,
                              RTCP_USB_APPLE_SUBCLASS_ETH,
                              RTCP_USB_APPLE_PROTOCOL_ETH) >= 0;
+        ncm_link = rtcp_usb_configuration_has_ncm_link(&device);
+        switch (rtcp_usb_configuration_kind(&device)) {
+            case RTCP_USB_CONFIG_NCM:
+                route = "ncm";
+                break;
+            case RTCP_USB_CONFIG_APPLE_ETHERNET:
+                route = "apple-ethernet";
+                break;
+            default:
+                route = "none";
+                break;
+        }
     }
 
-    rt_kprintf("[carplay_usb] net: ncm=%s apple_ethernet=%s\n",
-               up ? "up" : "down", apple_ethernet ? "present" : "absent");
+    rt_kprintf("[carplay_usb] net: netif=%s route=%s ncm_link=%s "
+               "apple_ethernet=%s\n",
+               up ? "up" : "down", route, ncm_link ? "yes" : "no",
+               apple_ethernet ? "present" : "absent");
     if (found) {
         rt_kprintf("[carplay_usb] net: ipv6=%s (%s)\n", address,
                    valid ? "valid" : "tentative");
     } else {
         rt_kprintf("[carplay_usb] net: ipv6=unavailable\n");
-        if (apple_ethernet && !up) {
-            rt_kprintf("[carplay_usb] net: this iPhone exposes Apple "
-                       "Ethernet (ff/fd/01), not CDC-NCM; the NCM netif "
-                       "cannot come up until that function is driven\n");
+        if (apple_ethernet && !ncm_link && !up) {
+            rt_kprintf("[carplay_usb] net: the selected configuration has "
+                       "Apple Ethernet (ff/fd/01) and no standard CDC-NCM; "
+                       "the existing NCM netif cannot come up until that "
+                       "function is driven\n");
+        } else if (ncm_link && !up) {
+            rt_kprintf("[carplay_usb] net: the selected configuration has "
+                       "CDC-NCM but the NCM netif is down; check "
+                       "LPKG_CHERRYUSB_HOST_NCM and the enumeration log\n");
         }
     }
     return 0;
@@ -923,8 +944,14 @@ static int cmd_carplay_usb(int argc, char **argv)
     if (strcmp(what, "net") == 0) {
         return cmd_net();
     }
+    if (strcmp(what, "desc") == 0) {
+        bool request = argc > 2 && strcmp(argv[2], "request") == 0;
+        rtcp_usb_lubanlite_dump_configurations(request);
+        return 0;
+    }
     rt_kprintf("usage: carplay_usb "
-               "[start|stop|status|request|mux|pair|unpair|iap2|iap2stop|net]\n");
+               "[start|stop|status|request|mux|pair|unpair|iap2|iap2stop|net|"
+               "desc [request]]\n");
     return 0;
 }
 

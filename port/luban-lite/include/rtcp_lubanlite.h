@@ -47,6 +47,17 @@ bool rtcp_lubanlite_wired_net_up(void);
 bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid);
 
 /*
+ * Print every USB configuration descriptor the attached iPhone reports and
+ * the per-configuration classification (USBMUX, standard CDC-NCM pair,
+ * Apple Ethernet ff/fd/01, PTP).  This is the evidence used to decide
+ * whether a configuration exists that lets the existing CherryUSB CDC-NCM
+ * driver carry the wired IP link.  request_carplay sends Apple's vendor
+ * request 0x52 first; the phone may re-enumerate, so the dump is a snapshot.
+ * Runs from 'carplay_usb desc [request]'.
+ */
+void rtcp_usb_lubanlite_dump_configurations(bool request_carplay);
+
+/*
  * Realtek RTL8733BS SoftAP through the Luban-Lite Wi-Fi API.  Vendor IE
  * injection needs CONFIG_REALTEK_FULL_FNC_MODE (the SetCusIE handler lives
  * in the full-function driver library).

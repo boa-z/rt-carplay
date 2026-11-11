@@ -55,7 +55,7 @@
 #define CARPLAY_CONFIG_SCAN_MAX 8U
 #define CARPLAY_CONFIG_ACTIVATE_TIMEOUT_MS 5000U
 #define CARPLAY_CONFIG_ACTIVATE_POLL_MS 100U
-#define CARPLAY_CONFIG_DESC_MAX 512U
+#define CARPLAY_CONFIG_DESC_MAX 1024U
 #define CARPLAY_READ_FAILURE_LIMIT 3U
 
 #define MUX_CLASS RTCP_USB_CLASS_VENDOR
@@ -242,6 +242,9 @@ static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
     uint16_t total = (uint16_t)((uint16_t)buffer[2] |
                                 ((uint16_t)buffer[3] << 8U));
     if (total < 9U || total > capacity) {
+        rt_kprintf("[usb-desc] config %u: wTotalLength=%u exceeds the "
+                   "%u-byte diagnostic buffer\n",
+                   index, total, (unsigned)capacity);
         return false;
     }
     ret = control_transfer_timeout(
@@ -258,17 +261,28 @@ static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
     return true;
 }
 
-/* Scan the configuration descriptors the device currently reports and return
- * the first one that carries the wired CarPlay function set. */
+static void descriptor_emit(void *user, const char *line)
+{
+    (void)user;
+    rt_kprintf("%s\n", line);
+}
+
+/* Scan the configuration descriptors the device currently reports, print a
+ * full dump of each, and return the best wired-CarPlay configuration.  A
+ * configuration carrying the standard CDC-NCM pair is preferred because the
+ * existing CherryUSB usbh_cdc_ncm driver can bind to it; Apple Ethernet
+ * (ff/fd/01) is the fallback and needs its own host driver. */
 static bool find_carplay_configuration(struct usbh_hubport *hport,
                                        uint8_t configuration_count,
-                                       uint8_t *selected_index)
+                                       uint8_t *selected_index, bool dump)
 {
     uint8_t bus = hport->bus->busid;
     if (bus >= CONFIG_USBHOST_MAX_BUS) {
         return false;
     }
     uint8_t *buffer = s_config_desc[bus];
+    uint8_t best_index = 0U;
+    rtcp_usb_configuration_kind_t best_kind = RTCP_USB_CONFIG_OTHER;
 
     for (uint8_t index = 0U;
          index < configuration_count && index < CARPLAY_CONFIG_SCAN_MAX;
@@ -276,17 +290,36 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
         uint16_t total = 0U;
         if (!read_config_descriptor(hport, index, buffer, CARPLAY_CONFIG_DESC_MAX,
                                     &total)) {
+            if (dump) {
+                rt_kprintf("[usb-desc] config %u: read failed\n", index);
+            }
             continue;
         }
         rtcp_usb_device_t probe;
         memset(&probe, 0, sizeof(probe));
-        if (rtcp_usb_parse_configuration(&probe, buffer, total) != RTCP_OK) {
+        int parsed = rtcp_usb_parse_configuration(&probe, buffer, total);
+        if (parsed != RTCP_OK) {
+            if (dump) {
+                rt_kprintf("[usb-desc] config %u: parse failed (%d)\n", index,
+                           parsed);
+            }
             continue;
         }
-        if (rtcp_usb_is_carplay_configuration(&probe)) {
-            *selected_index = index;
-            return true;
+        if (dump) {
+            rtcp_usb_describe_configuration(&probe, buffer, total, index,
+                                            descriptor_emit, NULL);
         }
+        rtcp_usb_configuration_kind_t kind =
+            rtcp_usb_configuration_kind(&probe);
+        if (kind > best_kind) {
+            best_kind = kind;
+            best_index = index;
+        }
+    }
+
+    if (best_kind != RTCP_USB_CONFIG_OTHER) {
+        *selected_index = best_index;
+        return true;
     }
     return false;
 }
@@ -336,7 +369,11 @@ uint8_t usbh_get_configuration_index(struct usbh_hubport *hport)
 
     uint8_t selected = 0U;
     uint8_t count = hport->device_desc.bNumConfigurations;
-    if (find_carplay_configuration(hport, count, &selected)) {
+    rt_kprintf("[usb-desc] Apple device %04x:%04x reports %u "
+               "configuration(s); dumping all before selection\n",
+               hport->device_desc.idVendor, hport->device_desc.idProduct,
+               count);
+    if (find_carplay_configuration(hport, count, &selected, true)) {
         USB_LOG_INFO("CarPlay configuration already present: index %u\r\n",
                      selected);
         s_usb.last_configuration_index = selected;
@@ -363,7 +400,7 @@ uint8_t usbh_get_configuration_index(struct usbh_hubport *hport)
         }
         failures = 0U;
         count = refreshed;
-        if (find_carplay_configuration(hport, count, &selected)) {
+        if (find_carplay_configuration(hport, count, &selected, false)) {
             /* Keep the enumeration record consistent with what the phone now
              * reports; the log and later users see the updated count. */
             hport->device_desc.bNumConfigurations = count;
@@ -377,6 +414,69 @@ uint8_t usbh_get_configuration_index(struct usbh_hubport *hport)
     USB_LOG_WRN("CarPlay configuration did not appear; using config 0\r\n");
     s_usb.last_configuration_index = 0U;
     return 0U;
+}
+
+/* 'carplay_usb desc': dump every configuration descriptor the attached
+ * iPhone reports, including the classification that decides whether the
+ * standard CDC-NCM driver can be reused.  Passing request_carplay sends
+ * Apple's vendor request 0x52 first, which may make more configurations
+ * visible; the phone can re-enumerate, so treat the dump as a snapshot. */
+void rtcp_usb_lubanlite_dump_configurations(bool request_carplay)
+{
+    struct usbh_hubport *hport = s_usb.hport;
+    if (!s_usb.present || hport == NULL) {
+        rt_kprintf("[carplay_usb] desc: no iPhone attached; run "
+                   "'carplay_usb start' and plug it in\n");
+        return;
+    }
+
+    uint8_t count = read_configuration_count(hport);
+    if (count == 0U) {
+        rt_kprintf("[carplay_usb] desc: cannot read the device descriptor\n");
+        return;
+    }
+    rt_kprintf("[carplay_usb] desc: %u configuration(s), selected index %u\n",
+               count, s_usb.last_configuration_index);
+    if (request_carplay) {
+        rt_kprintf("[carplay_usb] desc: sending Apple request 0x52\n");
+        request_carplay_configurations(hport);
+        usb_osal_msleep(300);
+        uint8_t refreshed = read_configuration_count(hport);
+        if (refreshed != 0U && refreshed != count) {
+            count = refreshed;
+            rt_kprintf("[carplay_usb] desc: the device now reports %u "
+                       "configuration(s)\n",
+                       count);
+        }
+    }
+
+    uint8_t bus = hport->bus->busid;
+    if (bus >= CONFIG_USBHOST_MAX_BUS) {
+        return;
+    }
+    uint8_t *buffer = s_config_desc[bus];
+    for (uint8_t index = 0U;
+         index < count && index < CARPLAY_CONFIG_SCAN_MAX; ++index) {
+        uint16_t total = 0U;
+        if (!read_config_descriptor(hport, index, buffer, CARPLAY_CONFIG_DESC_MAX,
+                                    &total)) {
+            rt_kprintf("[usb-desc] config %u: read failed\n", index);
+            continue;
+        }
+        rtcp_usb_device_t probe;
+        memset(&probe, 0, sizeof(probe));
+        int parsed = rtcp_usb_parse_configuration(&probe, buffer, total);
+        if (parsed != RTCP_OK) {
+            rt_kprintf("[usb-desc] config %u: parse failed (%d)\n", index,
+                       parsed);
+            continue;
+        }
+        rtcp_usb_describe_configuration(&probe, buffer, total, index,
+                                        descriptor_emit, NULL);
+    }
+    rt_kprintf("[carplay_usb] desc: route=ncm means the existing CherryUSB "
+               "CDC-NCM driver can be reused; route=apple-ethernet means the "
+               "ff/fd/01 function needs its own host driver\n");
 }
 
 static bool endpoint_descriptor_from_info(const rtcp_usb_endpoint_t *info,

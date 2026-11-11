@@ -99,7 +99,7 @@ CONFIG_RT_USING_MEMHEAP_AS_HEAP=y
 # CONFIG_RT_USING_MEMHEAP_AUTO_BINDING is not set
 CONFIG_RT_USING_DEVICE_OPS=y
 CONFIG_RT_CONSOLE_DEVICE_NAME="uart0"
-# Stack sizes follow the board-verified ZALink profile: main/finsh run
+# Stack sizes follow the board-verified reference profile: main/finsh run
 # carplay_start (mbedTLS, Wi-Fi and file setup) and the SDIO/MMC threads
 # serve the RTL8733BS SDIO bus.
 CONFIG_RT_MAIN_THREAD_STACK_SIZE=16384
@@ -136,7 +136,7 @@ CONFIG_RT_HWCRYPTO_USING_SHA2_384=y
 CONFIG_RT_HWCRYPTO_USING_SHA2_512=y
 CONFIG_RT_USING_WIFI=y
 CONFIG_RT_WLAN_PROT_LWIP_PBUF_FORCE=y
-# Network stack tuned to the board-verified ZALink profile (same D213 +
+# Network stack tuned to the board-verified reference profile (same D213 +
 # RTL8733BS): more RX pbufs and no separate lwIP rx/tx threads for Wi-Fi
 # bursts, RX thread above the TCP thread, larger stacks.
 CONFIG_RT_LWIP_MEM_ALIGNMENT=4

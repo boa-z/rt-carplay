@@ -44,7 +44,7 @@
  * The two DECAFADE UUIDs have distinct roles.  The accessory publishes its
  * own service under ...CAFF and the phone connects to that; ...CAFE is the
  * iPhone-side service an accessory queries when it initiates the connection
- * itself.  The working ZALink stack registers iap2_uuid_srv = ...CAFF and
+ * itself.  The working reference stack registers iap2_uuid_srv = ...CAFF and
  * ios_dev_uuid_srv = ...CAFE in exactly those roles.
  *
  * diag7 registered this server as ...CAFE, so iOS found no accessory iAP2

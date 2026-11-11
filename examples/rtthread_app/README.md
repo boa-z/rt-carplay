@@ -307,7 +307,7 @@ the 2.4 GHz 1-14 range the original relay accepted.
 `RTCARPLAY_MFI` (default on, needs `AIC_I2C_DRV`) adds the 2.0C
 authentication coprocessor from `port/luban-lite/rtcp_mfi_lubanlite.c`.
 The board has the Apple 2.0C on `i2c0` at `0x10` (board-verified in the
-PoC; `0x11` also answers).  The `0x6A` address in ZABlue's
+PoC; `0x11` also answers).  The `0x6A` address in reference Bluetooth's
 `HW_SECRUITY_I2C_ID`/`HW_SECRUITY_I2C_ADDR` properties belongs to the
 vendor RJGT204 device lock, not the MFi coprocessor.  Bus and address are
 Kconfig values (`RTCARPLAY_MFI_I2C_BUS`, `RTCARPLAY_MFI_I2C_ADDR`).  The session is created
@@ -406,7 +406,7 @@ MFi.
   Build-only: the first board run must log `[carplay-touch] gt911: <n>
   point(s), 1024x600 -> <w>x<h>` and the phone UI must follow the panel.
 - **Board-verified reference alignment (2026-11-09)**: the Luban-Lite
-  `poc/carplay/zalink` branch (ZALink 1.5.1, running on this board) was used
+  earlier firmware running on this board was used
   as the reference.  The board target configuration is byte-identical
   (only the prebuilt `pack/bootloader.bin` differs, and the image uses a
   locally built bootloader), and the shipped

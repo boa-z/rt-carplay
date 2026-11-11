@@ -6,7 +6,7 @@
  * rtcp_mfi2c_bus transaction layer and adapts it to struct rtcp_mfi for the
  * iAP2 session.
  *
- * Transaction shape (matching ZABlue's RJGT204 wrapper and the PoC):
+ * Transaction shape (matching reference Bluetooth's RJGT204 wrapper and the PoC):
  *   write: [register byte][data...] in ONE transfer, STOP.
  *   read : write the register byte (STOP), then read the data (STOP).
  * No repeated START is used; the coprocessor does not answer it.

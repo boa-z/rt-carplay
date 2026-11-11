@@ -7,7 +7,7 @@
  * Once the phone commits to CarPlay it advertises `_carplay-ctrl._tcp` on the
  * accessory's network.  The accessory connects to the advertised endpoint and
  * sends `GET /ctrl-int/1/connect` with its AirPlay receiver device id.  This
- * is exactly what the vendor ZALink stack does on this board
+ * is exactly what the vendor reference stack does on this board
  * (`mdnsd_start_carplay_client_connect`, `/ctrl-int/1/%s`, `Host: carplay`,
  * `AirPlay-Receiver-Device-ID: %llu`) and what DiPlay, LIVI, catplay and
  * carplayd's rx_connect do.
@@ -21,7 +21,7 @@
 #include "rtcp/net.h"
 
 #define CARPLAY_CTRL_CONNECT_PATH "/ctrl-int/1/connect"
-/* Vendor ZALink sends "carplay" as the Host header; the phone's control
+/* Vendor reference sends "carplay" as the Host header; the phone's control
  * server does not use it for routing. */
 #define CARPLAY_CTRL_HOST "carplay"
 #define CARPLAY_CTRL_TIMEOUT_MS 1500

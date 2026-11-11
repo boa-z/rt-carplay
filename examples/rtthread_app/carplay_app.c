@@ -101,7 +101,7 @@
 /* CarPlay Control reverse connection.
  *
  * The iPhone advertises _carplay-ctrl._tcp once it commits to CarPlay; the
- * receiver browses it and sends GET /ctrl-int/1/connect.  The vendor ZALink
+ * receiver browses it and sends GET /ctrl-int/1/connect.  The vendor reference
  * stack on this board does exactly this (mdnsd_start_carplay_client_connect),
  * as do DiPlay, LIVI, catplay and carplayd's rx_connect.  carplayd's session
  * notes call the connect-out what makes the phone open the RTSP session.
@@ -1440,7 +1440,7 @@ static int cmd_carplay_randtest(int argc, char **argv)
  * browses SDP for the iAP2 UUID (or an iAP2 probe) exercises the path.
  *
  * The UUID is the accessory-side iAP2 service class (...CAFF), the same
- * value the vendor ZABlue library registers with its RFCOMM server
+ * value the vendor reference Bluetooth library registers with its RFCOMM server
  * (iap2_uuid_srv).  ...CAFE is the iPhone-side service and must not be
  * used here: advertising it made iOS see no accessory iAP2 service and
  * drop the link (diag7).

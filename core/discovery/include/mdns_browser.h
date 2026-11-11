@@ -11,7 +11,7 @@
  * docs/07_SESSION_LIFECYCLE.md: "rx_connect resolves _carplay-ctrl ->
  * connect-out -> receiver pair-verify -> RECORD"; DiPlay's CarPlayBonjour,
  * LIVI's bonjour.rs and catplay's cp_ctrl_client all do the same, and the
- * vendor ZALink stack on this board implements it in mdns_posix.c).
+ * vendor reference stack on this board implements it in mdns_posix.c).
  *
  * The packet builder and parser are transport-free so they can be unit
  * tested without sockets.  The browser shares the mDNS responder's :5353

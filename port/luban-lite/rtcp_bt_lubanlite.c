@@ -78,8 +78,8 @@
 
 #define BT_SERVICE_NAME_MAX 63U
 
-/* Class of Device: exactly the value the working ZALink stack reports in
- * its CarPlay mode.  bt_gap_init() in libzablue.a loads 0x240000 and adds
+/* Class of Device: exactly the value the working reference stack reports in
+ * its CarPlay mode. The reference bt_gap_init() loads 0x240000 and adds
  * 1032 (0x408) for BT_MODE=0: Audio + Rendering services, Audio/Video major
  * class, Hands-free minor class.  (Mode 1, the phone-like mode, is
  * 0x7A020C.)  Matching the reference byte-for-byte removes one more
@@ -108,8 +108,7 @@
 
 /*
  * The wireless CarPlay receiver must announce the iAP2 service class in its
- * EIR.  The working ZALink stack does exactly that: libzablue.a
- * (bt_gap.c:bt_eir_data_init) writes a 0x07 element whose first UUID128 is
+ * EIR. The reference bt_eir_data_init() writes a 0x07 element whose first UUID128 is
  * 00000000-deca-fade-deca-deafdecacafe before it becomes discoverable.
  *
  * The board log of 2026-11-09 (diag6) shows that the iAP2 UUID alone is not
@@ -122,7 +121,7 @@
  *
  * Note that this announced UUID (...cafe) is the iPhone-side iAP2 service:
  * the reference stack's own RFCOMM server, the one a phone connects to, is
- * registered under ...caff (iap2_uuid_srv in libzablue.a).  EIR and SDP use
+ * registered under ...caff (iap2_uuid_srv). EIR and SDP use
  * different UUIDs for their different roles; see IAP2_LINK_UUID in
  * iap2_link_lubanlite.c.
  *
@@ -202,7 +201,7 @@ static void write_eir(const char *name)
  * interval 0x1000 (2.56 s) and window 0x0012 (11.25 ms), a 0.44% duty cycle
  * (BT_BR_INQUIRY_SCAN_PARAM_DEFAULT).  An iPhone inquiry then hits the
  * accessory only once in a while, which matches the report that the device
- * is hard to discover.  The working ZALink stack configures page scan as
+ * is hard to discover.  The working reference stack configures page scan as
  * interval 0x50 (50 ms) / window 0x40 (40 ms), interlaced; use the same
  * 80% duty for both scans so discovery and connection setup are reliable.
  */
@@ -293,7 +292,7 @@ static char s_service_name[BT_SERVICE_NAME_MAX + 1U];
 
 /* PnP Information (Device ID) record.  The diag4 board log shows the iPhone
  * walking generic SDP (search uuid16 0x1200) and dropping the link when that
- * search matched nothing.  The working ZALink stack does not publish a PnP
+ * search matched nothing.  The working reference stack does not publish a PnP
  * record and still connects -- its EIR names the iAP2 service class (see
  * write_eir), which is the actual fix.  This record is kept as a defensive
  * answer for the generic enumeration path, in the same shape as Zephyr's DID

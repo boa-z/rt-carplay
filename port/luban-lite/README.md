@@ -12,10 +12,9 @@ RT-Thread port:
 | `include/rtcp_lubanlite.h` | `rtcp_wifi_lubanlite`, `rtcp_bt_lubanlite`, `rtcp_mfi_lubanlite`, interface setter and `rtcp_lubanlite_random` |
 
 The first hardware target is an ArtInChip D213 with an RTL8733BS (SDIO Wi-Fi +
-HCI H5 Bluetooth).  The board bring-up reference is the `poc/carplay/zalink`
-branch of the Luban-Lite tree: the ZALink 1.5.1 integration for this exact
-board, verified running on the hardware.  Every board configuration file
-under `target/d21x/demo128-nand-carplay/` is byte-identical to that branch
+HCI H5 Bluetooth). Board settings follow earlier hardware bring-up on this
+board. Every configuration file under `target/d21x/demo128-nand-carplay/`
+was aligned with that reference
 (only the checked-in prebuilt `pack/bootloader.bin` differs, and the image
 uses a locally built bootloader), and the application defconfig follows its
 verified network/stack profile
@@ -191,8 +190,8 @@ same path.
 **[unknown until board-verified]**
 
 - The H5 handshake, firmware download and baud switch on this RTL8733BS
-  module.  The vendor ZABlue library uses its own H5 implementation; this
-  Zephyr path has never run on the board.  The verified ZALink branch
+  module.  The reference Bluetooth implementation uses its own H5 transport; this
+  Zephyr path has never run on the board.  The verified reference branch
   downloads a 65,660-byte Realtek firmware file (`rtl8733bs_8723fs_fw`,
   `Realtech` magic) while the Zephyr host compiles the 57,020-byte
   `RealtechC` patch array from `fw_rtl8733bs_d7b8_0da7.h`; both are Realtek
@@ -227,7 +226,7 @@ answers on `i2c0` at `0x10` (`0x11` also answers), verified on the board in
 the CarPlay PoC: probe register `0x4E` returns ID `0x00000200`, the
 certificate reads back and a 20-byte challenge produces a 128-byte
 signature.  The `0x6A` device on the same bus is the vendor RJGT204 device
-lock that ZABlue's `HW_SECRUITY_I2C_ID`/`HW_SECRUITY_I2C_ADDR` properties
+lock that the reference `HW_SECRUITY_I2C_ID`/`HW_SECRUITY_I2C_ADDR` properties
 point at -- it is **not** the MFi coprocessor (the vendor comment that
 probing `0x68` fails belongs to the RJGT204 path).  The board enables
 `i2c0` at 100 kHz (PD.6/PD.7 pinmux).
@@ -337,7 +336,7 @@ independent.
    (or the Zephyr `bt` shell) must find the iAP2 UUID in SDP, connect and
    see echoed bytes. This is the first validation of the
    `rtcp_bt_lubanlite` seam; the earlier "stub" status no longer applies.
-   The board settings are the ones the verified ZALink branch uses:
+   The board settings are the ones the verified reference branch uses:
    `uart7` at 1500000 baud with flow control, BT power on PD.3, and the
    Realtek firmware note above.
 5. **CE TRNG** — with `CONFIG_AIC_CE_DRV=y`, run `carplay_randtest` (it calls

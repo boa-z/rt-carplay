@@ -43,6 +43,9 @@ struct airplay_audio_stream {
     uint32_t auth_failures;
     uint32_t short_packets;
     bool first_packet_logged;
+    bool nonce_seen;
+    uint64_t highest_nonce;
+    uint64_t nonce_window;
 };
 
 typedef struct {
@@ -82,11 +85,8 @@ bool airplay_audio_format_from_bits(uint64_t bits, airplay_audio_format_t *forma
             return true;
         }
     }
-    /* playport treats an unrecognized non-encoded value as 44.1 kHz stereo
-     * LPCM.  Composite masks (several bits set) land here too. */
-    format->sample_rate = 44100U;
-    format->channels = 2U;
-    return true;
+    /* SETUP selects one format, unlike the /info capability mask. */
+    return false;
 }
 
 bool airplay_audio_stream_type_is_supported(uint64_t stream_type)
@@ -133,6 +133,9 @@ int airplay_audio_stream_start(const struct rtcp_os *os,
 
     airplay_audio_stream_t *stream = calloc(1U, sizeof(*stream));
     if (stream == NULL) return RTCP_ENOMEM;
+    /* Set before any validation path can close partially built sockets. */
+    stream->data_fd = -1;
+    stream->control_fd = -1;
     stream->os = os;
     stream->net = net;
     stream->stream_type = config->stream_type;
@@ -257,6 +260,7 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
         }
         return RTCP_EINVAL;
     }
+    if (wire[0] != 0x80U) return RTCP_EINVAL; /* fixed RTP v2, no extensions/CSRC/padding */
     if (len > stream->max_datagram_bytes) {
         return RTCP_EINVAL;
     }
@@ -283,6 +287,27 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
         return RTCP_EIO;
     }
 
+    /* Commit the replay window only after successful authentication. */
+    uint64_t counter = 0;
+    for (unsigned i = 0; i < 8; ++i) counter |= (uint64_t)nonce[4 + i] << (8 * i);
+    if (!stream->nonce_seen) {
+        stream->nonce_seen = true;
+        stream->highest_nonce = counter;
+        stream->nonce_window = 1;
+    } else if (counter > stream->highest_nonce) {
+        uint64_t delta = counter - stream->highest_nonce;
+        stream->nonce_window = delta >= 64 ? 1 : (stream->nonce_window << delta) | 1;
+        stream->highest_nonce = counter;
+    } else {
+        uint64_t delta = stream->highest_nonce - counter;
+        if (delta >= 64 || (stream->nonce_window & (UINT64_C(1) << delta))) return RTCP_EINVAL;
+        stream->nonce_window |= UINT64_C(1) << delta;
+    }
+    if (cipher_len % (2U * stream->format.channels) != 0U) return RTCP_EINVAL;
+    /* RTP L16 is big endian. The sink contract is little endian. */
+    for (size_t i = 0; i < cipher_len; i += 2) {
+        uint8_t byte = payload[i]; payload[i] = payload[i + 1]; payload[i + 1] = byte;
+    }
     ++stream->decrypted;
     const uint32_t timestamp = read_be32(wire + 4U);
     if (!stream->first_packet_logged) {

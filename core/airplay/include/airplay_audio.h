@@ -9,8 +9,8 @@
  *
  * The last eight header bytes (timestamp + SSRC) are the AEAD associated data;
  * the nonce is four zero bytes followed by the eight wire bytes interpreted
- * little-endian (the same order the sender used).  Payloads are int16 LPCM,
- * little-endian, interleaved.  Nothing in this module decodes Opus or AAC:
+ * little-endian (the same order the sender used).  Wire LPCM is big-endian L16; callbacks receive
+ * little-endian, interleaved int16 samples.  Nothing in this module decodes Opus or AAC:
  * /info only advertises LPCM, so a conforming sender never negotiates them.
  */
 #pragma once

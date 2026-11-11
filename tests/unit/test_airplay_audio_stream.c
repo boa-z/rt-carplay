@@ -111,10 +111,9 @@ static void test_format_mapping(void)
     assert(format.sample_rate == 48000U && format.channels == 2U);
     assert(airplay_audio_format_from_bits(0x4000U, &format));
     assert(format.sample_rate == 48000U && format.channels == 1U);
-    /* A composite capability mask falls back to 44.1 kHz stereo, matching
-     * playport's AudioStreamCodec.fromFormatBits. */
-    assert(airplay_audio_format_from_bits(0x3fcU | 0xc00U, &format));
-    assert(format.sample_rate == 44100U && format.channels == 2U);
+    /* Capability masks and unknown bits are not negotiated sample layouts. */
+    assert(!airplay_audio_format_from_bits(0x3fcU | 0xc00U, &format));
+    assert(!airplay_audio_format_from_bits(0x100000000ULL, &format));
     /* Encoded formats and zero are refused. */
     assert(!airplay_audio_format_from_bits(0x400000U, &format));
     assert(!airplay_audio_format_from_bits(0x800000U, &format));
@@ -193,12 +192,22 @@ static void test_decrypts_and_rejects(void)
     assert(capture.calls == 1U);
     assert(capture.stream_type == AIRPLAY_AUDIO_STREAM_MAIN);
     assert(capture.len == sizeof(pcm));
-    assert(memcmp(capture.data, pcm, sizeof(pcm)) == 0);
+    for (size_t i = 0; i < sizeof(pcm); i += 2) {
+        assert(capture.data[i] == pcm[i + 1]);
+        assert(capture.data[i + 1] == pcm[i]);
+    }
     assert(capture.timestamp == 1234U);
     assert(capture.format.sample_rate == 44100U && capture.format.channels == 2U);
     assert(airplay_audio_stream_datagrams(stream) == 1U);
     assert(airplay_audio_stream_auth_failures(stream) == 0U);
 
+    /* A valid duplicate must not play twice; failed authentication above the
+     * high-water mark must not advance the replay window. */
+    assert(airplay_audio_stream_process_datagram(stream, wire, wire_len, 10) == RTCP_EINVAL);
+    assert(capture.calls == 1U);
+    wire[0] = 0x90; /* RTP extensions are not supported by this wire profile. */
+    assert(airplay_audio_stream_process_datagram(stream, wire, wire_len, 10) == RTCP_EINVAL);
+    wire[0] = 0x80;
     /* Tampering must fail authentication and deliver nothing. */
     wire[12U] ^= 0x01U;
     assert(rtcp_net_linux.udp_sendto(client, &data_addr, wire, wire_len) ==
@@ -218,7 +227,7 @@ static void test_decrypts_and_rejects(void)
                          airplay_audio_stream_get_data_fd(stream)));
     airplay_audio_stream_poll(stream, true, false);
     assert(capture.calls == 1U);
-    assert(airplay_audio_stream_datagrams(stream) == 3U);
+    assert(airplay_audio_stream_datagrams(stream) == 5U);
 
     /* The control port is bound and drained without touching the decoder. */
     rtcp_addr_t control_addr =
@@ -230,7 +239,7 @@ static void test_decrypts_and_rejects(void)
                          airplay_audio_stream_get_control_fd(stream)));
     airplay_audio_stream_poll(stream, false, true);
     assert(capture.calls == 1U);
-    assert(airplay_audio_stream_datagrams(stream) == 3U);
+    assert(airplay_audio_stream_datagrams(stream) == 5U);
 
     airplay_audio_stream_stop(stream, &rtcp_net_linux);
     rtcp_net_linux.close(client);

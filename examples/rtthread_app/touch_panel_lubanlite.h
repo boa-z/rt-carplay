@@ -35,3 +35,6 @@ bool carplay_touch_panel_is_running(void);
 
 /* Points the panel reports, 0 when the reader is not running. */
 uint16_t carplay_touch_panel_points(void);
+
+/* Input reads and valid DOWN/MOVE/UP events since the last start. */
+void carplay_touch_panel_stats(unsigned *reads, unsigned *events);

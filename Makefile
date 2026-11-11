@@ -156,3 +156,10 @@ check-lubanlite-video:
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_video
 	$(BUILD)/test_lubanlite_video
 	$(BUILD)/test_lubanlite_video queue
+
+.PHONY: check-lubanlite-touch
+check-lubanlite-touch:
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_touch \
+	  tests/unit/test_lubanlite_touch.c -o $(BUILD)/test_lubanlite_touch
+	$(BUILD)/test_lubanlite_touch

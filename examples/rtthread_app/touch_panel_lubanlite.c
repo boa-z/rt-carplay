@@ -43,6 +43,8 @@ typedef struct {
     uint16_t range_y;
     uint16_t width;
     uint16_t height;
+    unsigned reads;
+    unsigned events;
     carplay_touch_panel_cb_t callback;
     void *context;
     volatile bool stop;
@@ -85,6 +87,7 @@ static void panel_thread(void *argument)
         }
         if (panel->stop) break;
 
+        ++panel->reads;
         rt_size_t count = rt_device_read(panel->dev, 0, panel->points,
                                          panel->point_count);
         for (rt_size_t i = 0U; i < count && i < panel->point_count; ++i) {
@@ -100,6 +103,7 @@ static void panel_thread(void *argument)
                                     panel->width);
             uint16_t y = scale_axis(point->y_coordinate, panel->range_y,
                                     panel->height);
+            ++panel->events;
             panel->callback(phase, point->track_id, x, y, panel->context);
         }
         (void)rt_device_control(panel->dev, RT_TOUCH_CTRL_ENABLE_INT, RT_NULL);
@@ -129,12 +133,17 @@ int carplay_touch_panel_start(uint16_t width, uint16_t height,
         rt_kprintf("[" TAG "] touch device %s not found\n", PANEL_DEVICE_NAME);
         return RTCP_ENOENT;
     }
-    if (rt_device_open(panel->dev, RT_DEVICE_FLAG_INT_RX) != RT_EOK) {
-        rt_kprintf("[" TAG "] cannot open %s\n", PANEL_DEVICE_NAME);
+    rt_err_t open_result = rt_device_open(panel->dev, RT_DEVICE_FLAG_INT_RX);
+    if (open_result != RT_EOK) {
+        rt_kprintf("[" TAG "] cannot open %s rc=%d (check device ownership)\n",
+                   PANEL_DEVICE_NAME, (int)open_result);
         panel->dev = NULL;
         return RTCP_EIO;
     }
 
+    /* Opening initializes the IRQ. Keep it disabled until the buffer,
+     * callback and reader are ready, then explicitly enable it. */
+    (void)rt_device_control(panel->dev, RT_TOUCH_CTRL_DISABLE_INT, RT_NULL);
     struct rt_touch_info info;
     memset(&info, 0, sizeof(info));
     if (rt_device_control(panel->dev, RT_TOUCH_CTRL_GET_INFO, &info) != RT_EOK ||
@@ -177,7 +186,21 @@ int carplay_touch_panel_start(uint16_t width, uint16_t height,
         memset(panel, 0, sizeof(*panel));
         return RTCP_ENOMEM;
     }
-    (void)rt_thread_startup(panel->thread);
+    /* Set before scheduling so an immediate stop cannot free resources
+     * before the newly created reader has entered its function. */
+    panel->thread_running = true;
+    if (rt_thread_startup(panel->thread) != RT_EOK) {
+        panel->thread_running = false;
+        panel->running = false;
+        (void)rt_thread_delete(panel->thread);
+        (void)rt_device_set_rx_indicate(panel->dev, NULL);
+        (void)rt_device_close(panel->dev);
+        rt_free(panel->points);
+        (void)rt_sem_delete(panel->wake);
+        memset(panel, 0, sizeof(*panel));
+        return RTCP_EIO;
+    }
+    (void)rt_device_control(panel->dev, RT_TOUCH_CTRL_ENABLE_INT, RT_NULL);
 
     rt_kprintf("[" TAG "] %s: %u point(s), %ux%u -> %ux%u\n",
                PANEL_DEVICE_NAME, (unsigned)panel->point_count,
@@ -235,4 +258,10 @@ bool carplay_touch_panel_is_running(void)
 uint16_t carplay_touch_panel_points(void)
 {
     return s_panel.running ? s_panel.point_count : 0U;
+}
+
+void carplay_touch_panel_stats(unsigned *reads, unsigned *events)
+{
+    if (reads != NULL) *reads = s_panel.reads;
+    if (events != NULL) *events = s_panel.events;
 }

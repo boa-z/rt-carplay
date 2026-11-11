@@ -445,3 +445,11 @@ MFi.
   the Bluetooth H5/RFCOMM path, the MFi exchange with a real phone, the iAP2
   session and audio playback all need the hardware run.  Treat the first
   boot as a bring-up session and watch the console log.
+
+When using `RTCARPLAY_TOUCH_PANEL`, the Luban-Lite LVGL display port must skip
+its own `tpc_run()` call. The RT-Thread touch device is exclusive: opening it
+from LVGL and again from this receiver returns busy. The SDK integration
+reserves touch for the receiver in this configuration; it does not dynamically
+return input to LVGL at receiver stop. `carplay_status` shows panel reads/events,
+queued inputs and event-channel HID writes. A successful HID write alone does
+not establish that the phone acted on the touch.

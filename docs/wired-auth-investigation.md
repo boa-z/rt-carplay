@@ -226,3 +226,50 @@ make check-lubanlite-video SDK_ROOT=/path/to/luban-lite
 # In the SDK checkout:
 packages/artinchip/mpp/tests/run-h264-missing-sps.sh
 ```
+
+## V16 visible video and V17 touch ownership repair
+
+The user flashed v16 and confirms a visible CarPlay picture. Authentication,
+event setup, RECORD and the type-110 screen session remain successful. The
+reported failure is now touch: startup still says `cannot open gt911`, followed
+by `touch panel unavailable rc=-1`. Visible video is established; audio and
+inbound /command or /feedback handling are still separate open items.
+
+The configured SDK has LVGL v9, GT911 and RTCARPLAY_TOUCH_PANEL enabled.
+LVGL's lv_port_disp_init() calls tpc_run(), which opens the same GT911 before
+carplay_start. rt_hw_touch_register() registers it with STANDALONE and
+rt_device_open() returns -RT_EBUSY for the second opener. The touch class's own
+open routine returns success; the ownership check is the concrete conflicting
+path. Renaming the device or adding another I2C reader would not resolve this.
+
+With RTCARPLAY_TOUCH_PANEL enabled, both SDK LVGL display ports (v8/v9) now skip
+their independent touch reader. The receiver is the sole owner for this
+application configuration, including across stop/start. The device is released
+on receiver stop; LVGL does not take ownership back dynamically. Other SDK
+configurations still call tpc_run as before. The built v9 object has no
+undefined tpc_run reference, confirming the selected firmware takes this path.
+
+The receiver reports the device-open error code, disables the IRQ while
+installing buffers/callback/thread and explicitly enables it once ready.
+Reader lifetime is marked before scheduling, so immediate stop waits until
+that reader exits; startup failures clean up the unstarted thread and device.
+The existing DOWN/MOVE/UP -> input_bridge -> HID event-channel path is retained.
+The input bridge descriptor/report and event command mechanism were rechecked
+against DiPlay's AirPlayHid.kt and AirPlaySession.kt.
+
+carplay_status now reports panel reads/events, queued touch events, full-queue
+rejections and HID send successes/failures. HID_sent counts local successful
+channel writes, not confirmation of phone-side touch processing. Counts are
+bring-up telemetry, not an atomic cross-thread snapshot; queue_full excludes
+lock contention rejections. No log is printed for every input event.
+
+The actual panel module passes a host ASan/UBSan regression covering busy-open,
+IRQ readiness, DOWN/MOVE/UP mapping with track ids and coordinate scaling,
+immediate stop before reader entry, ordinary teardown and startup failure.
+Existing input_bridge, event-port, control-port tests and the platform boundary
+check pass. The complete D213 build passes. V17 panel IRQ delivery and
+phone-side touch response require the next board run.
+
+```sh
+make check-lubanlite-touch
+```

@@ -88,7 +88,8 @@ config RTCARPLAY_TOUCH_PANEL
       (CONFIG_AIC_TOUCH_PANEL_NAME, "gt911" on demo128-nand-carplay), read
       its points on the panel interrupt and feed them to the CarPlay HID
       touch report.  Coordinates are scaled from the panel range to the
-      display size.
+      display size. The SDK LVGL display port must reserve the exclusive
+      touch device for this reader instead of opening it a second time.
 
       The HID report carries two contacts, so a third simultaneous finger
       is not forwarded.  Without this option only the carplay_touch shell

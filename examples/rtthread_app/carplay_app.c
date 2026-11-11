@@ -192,6 +192,10 @@ typedef struct {
     carplay_app_screen_cb_t on_screen;
     void *screen_context;
 
+    unsigned touch_queued;
+    unsigned touch_queue_full;
+    unsigned hid_reports_sent;
+    unsigned hid_reports_failed;
     touch_event_t touch[TOUCH_QUEUE_LENGTH];
     unsigned touch_head;
     unsigned touch_tail;
@@ -439,9 +443,12 @@ static bool send_hid_report(uint32_t hid_uid, const uint8_t *report,
                             size_t report_len, void *context)
 {
     app_state_t *app = context;
-    if (app->server == NULL) return false;
-    return airplay_rtsp_server_send_hid_report(app->server, hid_uid, report,
-                                               report_len);
+    bool sent = app->server != NULL &&
+        airplay_rtsp_server_send_hid_report(app->server, hid_uid, report,
+                                           report_len);
+    if (sent) ++app->hid_reports_sent;
+    else ++app->hid_reports_failed;
+    return sent;
 }
 
 #if defined(RTCARPLAY_TOUCH_PANEL)
@@ -466,9 +473,11 @@ static int enqueue_touch(const touch_event_t *event)
     if (rt_mutex_take(app->lock, RT_WAITING_NO) != RT_EOK) return RTCP_ESTATE;
     unsigned next = (app->touch_head + 1U) & TOUCH_QUEUE_MASK;
     if (next == app->touch_tail) {
+        ++app->touch_queue_full;
         (void)rt_mutex_release(app->lock);
         return RTCP_ENOMEM;
     }
+    ++app->touch_queued;
     app->touch[app->touch_head] = *event;
     app->touch_head = next;
     (void)rt_mutex_release(app->lock);
@@ -1367,10 +1376,15 @@ static int cmd_carplay_status(int argc, char **argv)
 #endif
 #if defined(RTCARPLAY_TOUCH_PANEL)
     uint16_t points = carplay_touch_panel_points();
-    if (points != 0U) {
-        rt_kprintf("carplay touch panel: %u point(s)\n", (unsigned)points);
-    }
+    unsigned reads = 0U, events = 0U;
+    carplay_touch_panel_stats(&reads, &events);
+    rt_kprintf("carplay touch panel: %s, %u point(s), reads=%u events=%u\n",
+               carplay_touch_panel_is_running() ? "running" : "stopped",
+               (unsigned)points, reads, events);
 #endif
+    rt_kprintf("carplay touch: queued=%u queue_full=%u HID_sent=%u HID_failed=%u\n",
+               s_app.touch_queued, s_app.touch_queue_full,
+               s_app.hid_reports_sent, s_app.hid_reports_failed);
     return 0;
 }
 

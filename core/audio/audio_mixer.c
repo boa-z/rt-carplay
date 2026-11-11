@@ -100,7 +100,7 @@ size_t rtcp_audio_mixer_render(rtcp_audio_mixer_t *m, int16_t *out, size_t frame
         if (l->stats.trim_ppm > desired) --l->stats.trim_ppm;
     }
     bool prompt = m->lanes[1].count != 0;
-    bool safety = m->lanes[3].count != 0;
+    bool safety = m->lanes[RTCP_AUDIO_LOCAL_LANE].count != 0;
     for (size_t f = 0; f < frames; ++f) {
         int64_t mixed[2] = {0,0};
         for (unsigned i = 0; i < RTCP_AUDIO_LANES; ++i) {
@@ -111,9 +111,9 @@ size_t rtcp_audio_mixer_render(rtcp_audio_mixer_t *m, int16_t *out, size_t frame
             }
             if (!l->count) { ++l->stats.underrun_frames; l->phase = 0; continue; }
             unsigned gain = (unsigned)l->gain;
-            if (i != 3) {
+            if (i != RTCP_AUDIO_LOCAL_LANE) {
                 gain = m->mute ? 0 : (unsigned)((uint64_t)gain*m->master/32768);
-                if (safety || (i == 2 && ((prompt && m->auto_duck) || m->duck))) gain /= 4;
+                if (safety || ((i == 2 || i == 7) && ((prompt && m->auto_duck) || m->duck))) gain /= 4;
             }
             size_t next = l->count > 1 ? (l->head+1)%m->capacity : l->head;
             for (unsigned c = 0; c < 2; ++c) {

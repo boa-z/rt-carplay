@@ -431,10 +431,9 @@ static void on_audio_modes(const airplay_audio_modes_t *modes,void *context)
 static bool on_audio_duck(bool ducked,float db,uint32_t duration,void *context)
 { (void)context; return carplay_audio_sink_duck(ducked,db,duration); }
 
-static void on_audio_stop(uint16_t type, void *context)
+static void on_audio_stop(unsigned slot,uint16_t type,void *context)
 {
-    (void)context;
-    carplay_audio_sink_stream_stop(type);
+    (void)context;(void)type;carplay_audio_sink_slot_stop(slot);
 }
 
 static void on_volume(float volume_db, void *context)
@@ -1119,7 +1118,7 @@ int carplay_app_start(const carplay_app_config_t *config)
 #if defined(RTCARPLAY_AUDIO)
     if (app->audio_started) {
         server_config.on_audio_pcm = on_audio_pcm;
-        server_config.on_audio_stop = on_audio_stop;
+        server_config.on_audio_stop_ex = on_audio_stop;
         server_config.on_audio_modes = on_audio_modes;
         server_config.on_audio_duck = on_audio_duck;
 #if defined(RTCARPLAY_MICROPHONE)

@@ -132,7 +132,8 @@ done:
 bool carplay_audio_input_start(const airplay_audio_input_config_t *config)
 {
     if(!config || !config->net || !config->net->udp_open || !config->net->udp_sendto || !config->net->close) return false;
-    if (atomic_load(&input.alive)) { carplay_audio_input_request_stop(); return false; }
+    /* Busy replacement is rejected without interrupting an existing call. */
+    if (atomic_load(&input.alive)) return false;
     if(atomic_load(&input.alive) || !carplay_audio_input_available())return false;
     /* Validate packet size/codec before accepting a SETUP; the worker owns its
      * own encoder and device after startup. */

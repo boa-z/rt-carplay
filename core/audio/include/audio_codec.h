@@ -10,6 +10,8 @@ typedef struct {
     uint8_t channels;
     rtcp_audio_codec_kind_t codec;
     uint32_t clock_rate;
+    uint8_t stream_slot;
+    bool stream_slot_valid;
 } rtcp_audio_format_t;
 typedef struct rtcp_audio_decoder rtcp_audio_decoder_t;
 /* Exactly one negotiated bit. Availability reflects compiled decoders. */

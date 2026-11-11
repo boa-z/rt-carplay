@@ -1024,11 +1024,11 @@ static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
  *               "audioFormat": bits}]} */
 static size_t build_bplist_audio_setup(uint8_t *output, size_t capacity,
                                        uint64_t connection_id,
-                                       uint64_t format_bits)
+                                       uint64_t format_bits, bool media)
 {
     assert(capacity >= 192U);
     memcpy(output, "bplist00", 8U);
-    size_t offsets[10];
+    size_t offsets[12];
     size_t at = 8U;
 
     offsets[0] = at;
@@ -1046,13 +1046,15 @@ static size_t build_bplist_audio_setup(uint8_t *output, size_t capacity,
     output[at++] = 0x03U;
 
     offsets[3] = at;
-    output[at++] = 0xd3U; /* dictionary, three entries */
+    output[at++] = media ? 0xd4U : 0xd3U; /* optional audioType */
     output[at++] = 0x04U;
     output[at++] = 0x05U;
     output[at++] = 0x06U;
+    if(media) output[at++] = 10U;
     output[at++] = 0x07U;
     output[at++] = 0x08U;
     output[at++] = 0x09U;
+    if(media) output[at++] = 11U;
 
     offsets[4] = at;
     output[at++] = 0x54U;
@@ -1096,7 +1098,11 @@ static size_t build_bplist_audio_setup(uint8_t *output, size_t capacity,
         output[at++] = (uint8_t)format_bits;
     }
 
-    return bplist_finish(output, at, offsets, 10U, 2U);
+    if(media) {
+        offsets[10]=at;output[at++]=0x59;memcpy(output+at,"audioType",9);at+=9;
+        offsets[11]=at;output[at++]=0x55;memcpy(output+at,"media",5);at+=5;
+    }
+    return bplist_finish(output, at, offsets, media ? 12U : 10U, 2U);
 }
 
 static uint16_t response_port(const response_t *response, const char *key)
@@ -1369,15 +1375,15 @@ static void write_be32(uint8_t *output, uint32_t value)
  * loop, proving the audio endpoint is bound, keyed and wired to the sink. */
 static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
                              const uint8_t shared_secret[KEY_BYTES],
-                             uint32_t *cseq)
+                             uint32_t *cseq, bool media)
 {
-    static const uint64_t connection_id = UINT64_C(0x0102030405060708);
+    uint64_t connection_id = UINT64_C(0x0102030405060708) + (media ? 1U : 0U);
     static const uint64_t format_bits = 0x800U; /* 44.1 kHz stereo LPCM */
     uint8_t request[512];
     uint8_t body[256];
     response_t response;
     size_t body_len = build_bplist_audio_setup(body, sizeof(body), connection_id,
-                                               format_bits);
+                                               format_bits, media);
     size_t request_len = build_request(request, sizeof(request), "SETUP",
                                        "/stream", PLIST_TYPE, (*cseq)++, body,
                                        body_len);
@@ -1409,7 +1415,7 @@ static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
     write_be32(header + 4U, 4800U);
     write_be32(header + 8U, 0x11223344U);
     uint8_t nonce[12] = {0};
-    nonce[4] = 1U; /* little-endian 64-bit counter, value 1 */
+    nonce[4] = (uint8_t)(audio_packets+1U); /* fresh nonce on duplicate SETUP */
 
     mbedtls_chachapoly_context cipher;
     mbedtls_chachapoly_init(&cipher);
@@ -1441,6 +1447,7 @@ static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
     }
     assert(audio_packet_format.sample_rate == 44100U);
     assert(audio_packet_format.channels == 2U);
+    assert(audio_packet_format.stream_slot_valid && audio_packet_format.stream_slot==(media ? 7U : 0U));
     assert(audio_packet_timestamp == 4800U);
 
     rtcp_net_linux.close(fd);
@@ -1497,7 +1504,10 @@ int main(void)
     run_event_channel(server, shared_secret, event_port);
     /* Audio runs before the screen stream: closing the screen socket ends the
      * session, so the RTSP connection must still be up for the audio SETUP. */
-    run_audio_stream(server, &client, shared_secret, &cseq);
+    run_audio_stream(server, &client, shared_secret, &cseq, false);
+    run_audio_stream(server, &client, shared_secret, &cseq, true);
+    /* Reusing the existing default endpoint still works alongside media. */
+    run_audio_stream(server, &client, shared_secret, &cseq, false);
     run_screen_stream(server, &client, shared_secret, &cseq);
     mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
     run_tampered_frame(server, &client);
@@ -1514,7 +1524,7 @@ int main(void)
     uint16_t event_port2 = run_initial_setup(server, &client2, &cseq);
     run_event_channel(server, shared_secret2, event_port2);
     run_set_parameter_volume(server, &client2, &cseq);
-    run_audio_stream(server, &client2, shared_secret2, &cseq);
+    run_audio_stream(server, &client2, shared_secret2, &cseq, false);
     run_screen_stream(server, &client2, shared_secret2, &cseq);
     mbedtls_platform_zeroize(shared_secret2, sizeof(shared_secret2));
 
@@ -1529,7 +1539,7 @@ int main(void)
 
     assert(screen_messages == 4U);
     assert(screen_frames == 4U);
-    assert(audio_packets == 2U);
+    assert(audio_packets == 4U);
     assert(volume_events == 1U);
     assert(event_transitions == 4U);
     puts("airplay pairing end-to-end host test passed");

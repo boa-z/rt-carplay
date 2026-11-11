@@ -17,10 +17,10 @@
 
 #define AIRPLAY_PLIST_CONTENT_TYPE "application/x-apple-binary-plist"
 #define AIRPLAY_OCTET_CONTENT_TYPE "application/octet-stream"
-#define AIRPLAY_RTSP_SESSION_SETUP_BODY_BYTES 256U
-#define AIRPLAY_RTSP_SESSION_MAX_DATA_STREAM_KEY_IDS 16U
+#define AIRPLAY_RTSP_SESSION_SETUP_BODY_BYTES 2048U
+#define AIRPLAY_RTSP_SESSION_MAX_DATA_STREAM_KEY_IDS 64U
 #define AIRPLAY_RTSP_SESSION_MAX_SETUP_STREAMS 8U
-#define AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS 3U
+#define AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS AIRPLAY_AUDIO_MAX_STREAMS
 #define AIRPLAY_RTSP_STATUS_OK 200U
 #define AIRPLAY_RTSP_STATUS_BAD_REQUEST 400U
 #define AIRPLAY_RTSP_STATUS_METHOD_NOT_ALLOWED 405U
@@ -219,63 +219,22 @@ static bool remember_data_stream_connection_id(airplay_rtsp_session_t *session,
     return true;
 }
 
-static int audio_slot_index(uint16_t stream_type)
+static void stop_audio_endpoint(airplay_rtsp_session_t *s,uint16_t type,const airplay_audio_options_t *options)
 {
-    switch (stream_type) {
-    case AIRPLAY_AUDIO_STREAM_MAIN: return 0;
-    case AIRPLAY_AUDIO_STREAM_ALT: return 1;
-    case AIRPLAY_AUDIO_STREAM_HIGH: return 2;
-    default: return -1;
-    }
+    if(s->config.stop_audio_ex)s->config.stop_audio_ex(type,options,s->config.media_context);
+    else if(s->config.stop_audio)s->config.stop_audio(type,s->config.media_context);
 }
-
-static session_audio_stream_t *audio_slot_for_type(
-    airplay_rtsp_session_t *session, uint16_t stream_type)
+static void session_stop_audio_slot(airplay_rtsp_session_t *s,unsigned index)
 {
-    int index = audio_slot_index(stream_type);
-    if (index < 0) return NULL;
-    session_audio_stream_t *slot = &session->audio[index];
-    return slot->started ? slot : NULL;
+    if(index>=AIRPLAY_AUDIO_MAX_STREAMS || !s->audio[index].started)return;
+    session_audio_stream_t *slot=&s->audio[index];
+    stop_audio_endpoint(s,slot->stream_type,&slot->options);
+    memset(slot,0,sizeof(*slot));
 }
+static void session_stop_all_audio(airplay_rtsp_session_t *s)
+{ for(unsigned i=0;i<AIRPLAY_AUDIO_MAX_STREAMS;++i)session_stop_audio_slot(s,i); }
 
-static session_audio_stream_t *audio_slot_alloc(airplay_rtsp_session_t *session,
-                                                uint16_t stream_type)
-{
-    int index = audio_slot_index(stream_type);
-    return index < 0 ? NULL : &session->audio[index];
-}
-
-static void session_stop_audio(airplay_rtsp_session_t *session,
-                               uint16_t stream_type)
-{
-    session_audio_stream_t *slot = audio_slot_for_type(session, stream_type);
-    if (slot == NULL) return;
-    if (session->config.stop_audio != NULL) {
-        session->config.stop_audio(stream_type, session->config.media_context);
-    }
-    RTCP_LOGI(TAG, "audio_stop type=%u connection_id=%llu",
-              (unsigned)stream_type, (unsigned long long)slot->connection_id);
-    memset(slot, 0, sizeof(*slot));
-}
-
-static void session_stop_all_audio(airplay_rtsp_session_t *session)
-{
-    for (size_t index = 0U; index < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS;
-         ++index) {
-        session_audio_stream_t *slot = &session->audio[index];
-        if (!slot->started) continue;
-        if (session->config.stop_audio != NULL) {
-            session->config.stop_audio(slot->stream_type,
-                                       session->config.media_context);
-        }
-        RTCP_LOGI(TAG, "audio_stop type=%u connection_id=%llu",
-                  (unsigned)slot->stream_type,
-                  (unsigned long long)slot->connection_id);
-        memset(slot, 0, sizeof(*slot));
-    }
-}
-
-static bool teardown_stream_selection(const airplay_rtsp_request_t *request,
+static bool teardown_stream_selection(const airplay_rtsp_session_t *session, const airplay_rtsp_request_t *request,
                                       bool *has_stream_selection,
                                       bool *screen_selected,
                                       uint8_t *audio_type_mask, bool *iap_selected)
@@ -335,8 +294,24 @@ static bool teardown_stream_selection(const airplay_rtsp_request_t *request,
             } else if (got != AIRPLAY_BPLIST_NOT_FOUND) return false;
             if (id == 1U) *iap_selected = true;
         }
-        int slot = audio_slot_index((uint16_t)stream_type);
-        if (slot >= 0) *audio_type_mask |= (uint8_t)(1U << slot);
+        if(airplay_audio_stream_type_is_supported(stream_type)) {
+            uint64_t connection=0;bool has_connection=false;
+            airplay_bplist_object_t selected;
+            airplay_bplist_result_t got=airplay_bplist_dict_get(&doc,entry,"streamConnectionID",&selected);
+            if(got==AIRPLAY_BPLIST_OK) {
+                if(airplay_bplist_get_uint(&doc,selected,&connection)!=AIRPLAY_BPLIST_OK)return false;
+                has_connection=true;
+            } else if(got!=AIRPLAY_BPLIST_NOT_FOUND)return false;
+            char role[24]={0};size_t text=0;
+            got=airplay_bplist_dict_get(&doc,entry,"audioType",&selected);
+            if(got==AIRPLAY_BPLIST_OK && (airplay_bplist_get_string(&doc,selected,role,sizeof(role),&text)!=AIRPLAY_BPLIST_OK || !text || strlen(role)!=text))return false;
+            for(unsigned slot=0;slot<AIRPLAY_AUDIO_MAX_STREAMS;++slot) {
+                const session_audio_stream_t *audio=&session->audio[slot];
+                if(audio->started && audio->stream_type==stream_type &&
+                   (!has_connection || audio->connection_id==connection) &&
+                   (!text || !strcmp(role,audio->options.audio_type))) *audio_type_mask|=(uint8_t)(1U<<slot);
+            }
+        }
     }
     return true;
 }
@@ -352,7 +327,7 @@ static airplay_rtsp_session_result_t handle_teardown(
     bool has_stream_selection = false;
     bool screen_selected = false;
     uint8_t audio_type_mask = 0U;
-    if (!teardown_stream_selection(request, &has_stream_selection,
+    if (!teardown_stream_selection(session, request, &has_stream_selection,
                                    &screen_selected, &audio_type_mask, &iap_selected)) {
         return status_response(request, AIRPLAY_RTSP_STATUS_BAD_REQUEST,
                                "Bad Request", response, response_capacity,
@@ -375,7 +350,7 @@ static airplay_rtsp_session_result_t handle_teardown(
         for (size_t index = 0U; index < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS;
              ++index) {
             if ((audio_type_mask & (uint8_t)(1U << index)) == 0U) continue;
-            session_stop_audio(session, (uint16_t)(AIRPLAY_AUDIO_STREAM_MAIN + index));
+            session_stop_audio_slot(session, (unsigned)index);
         }
         return status_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
                                response, response_capacity, response_len);
@@ -634,7 +609,11 @@ static airplay_rtsp_session_result_t handle_setup(
             continue;
         }
         uint16_t audio_type = (uint16_t)candidate_type;
-        int slot = audio_slot_index(audio_type);
+        char role[24]="default";size_t role_len=0;
+        if(airplay_bplist_dict_get(&doc,entry,"audioType",&type_object)==AIRPLAY_BPLIST_OK &&
+           (airplay_bplist_get_string(&doc,type_object,role,sizeof(role),&role_len)!=AIRPLAY_BPLIST_OK || !role_len || strlen(role)!=role_len))
+            return status_response(request,400,"Bad Request",response,response_capacity,response_len);
+        int slot = airplay_audio_slot_for(audio_type,role);
         if (slot < 0 || (audio_type_mask & (uint8_t)(1U << slot)) != 0U) {
             return status_response(request, AIRPLAY_RTSP_STATUS_BAD_REQUEST,
                                    "Bad Request", response, response_capacity,
@@ -735,8 +714,17 @@ static airplay_rtsp_session_result_t handle_setup(
     uint16_t audio_control_port[AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS] = {0};
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS; ++slot) {
         if ((audio_type_mask & (uint8_t)(1U << slot)) == 0U) continue;
-        uint16_t stream_type = (uint16_t)(AIRPLAY_AUDIO_STREAM_MAIN + slot);
-        session_audio_stream_t *existing = audio_slot_for_type(session, stream_type);
+        uint16_t stream_type = airplay_audio_slot_type((unsigned)slot);
+        /* Legacy callbacks identify streams only by type. Keep them safe by
+         * allowing one role per type unless both extended callbacks exist. */
+        if (!session->config.start_audio_ex || !session->config.stop_audio_ex) {
+            for (unsigned other=0; other<AIRPLAY_AUDIO_MAX_STREAMS; ++other) {
+                if (other==slot || airplay_audio_slot_type(other)!=stream_type) continue;
+                if (session->audio[other].started || (audio_type_mask & (1U<<other)))
+                    return status_response(request,503,"Service Unavailable",response,response_capacity,response_len);
+            }
+        }
+        session_audio_stream_t *existing = session->audio[slot].started ? &session->audio[slot] : NULL;
         if (existing != NULL &&
             existing->connection_id == audio_connection_ids[slot]) {
             if (memcmp(&existing->options, &audio_options[slot], sizeof(existing->options)) != 0)
@@ -746,7 +734,7 @@ static airplay_rtsp_session_result_t handle_setup(
             audio_control_port[slot] = existing->control_port;
             continue;
         }
-        if (session->config.start_audio == NULL ||
+        if ((session->config.start_audio == NULL && session->config.start_audio_ex == NULL) ||
             data_stream_connection_id_was_used(session,
                                                audio_connection_ids[slot]) ||
             session->data_stream_connection_id_count >=
@@ -755,7 +743,7 @@ static airplay_rtsp_session_result_t handle_setup(
                            "start=%u reused=%u",
                       (unsigned)stream_type,
                       (unsigned long long)audio_connection_ids[slot],
-                      session->config.start_audio != NULL ? 1U : 0U,
+                      (session->config.start_audio != NULL || session->config.start_audio_ex != NULL) ? 1U : 0U,
                       data_stream_connection_id_was_used(
                           session, audio_connection_ids[slot])
                           ? 1U
@@ -826,16 +814,13 @@ static airplay_rtsp_session_result_t handle_setup(
     bool audio_failed = false;
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS; ++slot) {
         if (!audio_start_now[slot]) continue;
-        uint16_t stream_type = (uint16_t)(AIRPLAY_AUDIO_STREAM_MAIN + slot);
-        session_stop_audio(session, stream_type);
+        uint16_t stream_type = airplay_audio_slot_type((unsigned)slot);
+        session_stop_audio_slot(session, (unsigned)slot);
         uint16_t data_port = 0U;
         uint16_t control_port = 0U;
-        bool started = session->config.start_audio != NULL &&
-            session->config.start_audio(session->pairing, stream_type,
-                                        audio_connection_ids[slot],
-                                        audio_format_bits[slot], &data_port,
-                                        &control_port,
-                                        session->config.media_context);
+        bool started = session->config.start_audio_ex ?
+            session->config.start_audio_ex(session->pairing,stream_type,&audio_options[slot],&data_port,&control_port,session->config.media_context) :
+            session->config.start_audio && session->config.start_audio(session->pairing,stream_type,audio_connection_ids[slot],audio_format_bits[slot],&data_port,&control_port,session->config.media_context);
         if (!started || data_port == 0U || control_port == 0U) {
             RTCP_LOGE(TAG, "audio_start=failed type=%u connection_id=%llu "
                            "data_port=%u control_port=%u format=0x%llx",
@@ -843,24 +828,18 @@ static airplay_rtsp_session_result_t handle_setup(
                      (unsigned long long)audio_connection_ids[slot],
                      (unsigned)data_port, (unsigned)control_port,
                      (unsigned long long)audio_format_bits[slot]);
-            if (started && session->config.stop_audio != NULL) {
-                session->config.stop_audio(stream_type,
-                                           session->config.media_context);
-            }
+            if(started)stop_audio_endpoint(session,stream_type,&audio_options[slot]);
             audio_failed = true;
             break;
         }
         if (session->config.configure_audio &&
             !session->config.configure_audio(session->pairing, stream_type, &audio_options[slot], session->config.media_context)) {
-            if (session->config.stop_audio) session->config.stop_audio(stream_type, session->config.media_context);
+            stop_audio_endpoint(session,stream_type,&audio_options[slot]);
             audio_failed = true; break;
         }
-        session_audio_stream_t *target = audio_slot_alloc(session, stream_type);
+        session_audio_stream_t *target = &session->audio[slot];
         if (target == NULL) {
-            if (session->config.stop_audio != NULL) {
-                session->config.stop_audio(stream_type,
-                                           session->config.media_context);
-            }
+            stop_audio_endpoint(session,stream_type,&audio_options[slot]);
             audio_failed = true;
             break;
         }
@@ -885,8 +864,7 @@ static airplay_rtsp_session_result_t handle_setup(
         for (size_t slot = 0U; slot < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS;
              ++slot) {
             if ((started_audio_mask & (uint8_t)(1U << slot)) != 0U) {
-                session_stop_audio(session,
-                                   (uint16_t)(AIRPLAY_AUDIO_STREAM_MAIN + slot));
+                session_stop_audio_slot(session,(unsigned)slot);
             }
         }
         if (started_screen_now) {
@@ -912,7 +890,7 @@ static airplay_rtsp_session_result_t handle_setup(
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS; ++slot) {
         if (!audio_accept[slot]) continue;
         entries[entry_count].stream_type =
-            (uint64_t)(AIRPLAY_AUDIO_STREAM_MAIN + slot);
+            (uint64_t)airplay_audio_slot_type((unsigned)slot);
         entries[entry_count].data_port = audio_data_port[slot];
         entries[entry_count].control_port = audio_control_port[slot];
         entries[entry_count].has_connection_id = true;
@@ -929,8 +907,7 @@ static airplay_rtsp_session_result_t handle_setup(
         for (size_t slot = 0U; slot < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS;
              ++slot) {
             if ((started_audio_mask & (uint8_t)(1U << slot)) != 0U) {
-                session_stop_audio(session,
-                                   (uint16_t)(AIRPLAY_AUDIO_STREAM_MAIN + slot));
+                session_stop_audio_slot(session,(unsigned)slot);
             }
         }
         if (started_screen_now && session->config.stop_screen != NULL) {
@@ -1204,13 +1181,13 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
                airplay_bplist_get_type(&doc,root,&type,NULL)!=AIRPLAY_BPLIST_OK || type!=AIRPLAY_BPLIST_DICTIONARY)
                 return status_response(request,400,"Bad Request",response,response_capacity,response_len);
         }
-        airplay_audio_feedback_t entries[3];size_t count=0;
-        for(unsigned i=0;i<3;++i) {
+        airplay_audio_feedback_t entries[AIRPLAY_AUDIO_MAX_STREAMS];size_t count=0;
+        for(unsigned i=0;i<AIRPLAY_AUDIO_MAX_STREAMS;++i) {
             session_audio_stream_t *slot=&session->audio[i];rtcp_audio_format_t format;
             if(slot->started && rtcp_audio_format_parse(slot->options.format_bits,&format))
                 entries[count++]=(airplay_audio_feedback_t){slot->stream_type,format.clock_rate,slot->connection_id};
         }
-        uint8_t body[512];size_t len=0;
+        uint8_t body[2048];size_t len=0;
         if(airplay_bplist_build_audio_feedback(entries,count,body,sizeof(body),&len)!=AIRPLAY_BPLIST_OK)
             return status_response(request,500,"Internal Server Error",response,response_capacity,response_len);
         return build_response(request,200,"OK",AIRPLAY_PLIST_CONTENT_TYPE,body,len,response,response_capacity,response_len);

@@ -3,9 +3,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define RTCP_AUDIO_LANES 4U
+#define RTCP_AUDIO_LANES 9U
+#define RTCP_AUDIO_LOCAL_LANE 8U
 #define RTCP_AUDIO_MIX_RATE 48000U
-/* Lanes 0/1/2 = main/alternate/media; lane 3 is a protected local alert.
+/* Lanes 0..7 match AirPlay semantic slots; lane 8 is a protected local alert.
  * Single audio-worker ownership. Output is interleaved stereo S16. */
 typedef struct rtcp_audio_mixer rtcp_audio_mixer_t;
 typedef struct {

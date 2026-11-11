@@ -34,6 +34,15 @@ int main(void) {
   rtcp_audio_format_t format={.sample_rate=48000,.channels=1,.clock_rate=48000};
   uint8_t pcm[960];for(size_t j=0;j<sizeof(pcm);j+=2) {pcm[j]=0xe8;pcm[j+1]=3;}
   for(unsigned i=0;i<8;++i) { int rc=carplay_audio_sink_packet(102,&format,pcm,sizeof(pcm),480*i,sink_now_us());assert(rc==0 || rc==RTCP_ETIMEDOUT); }
+  if(!cycle) {
+   int rc=RTCP_ETIMEDOUT;
+   for(unsigned retry=0;retry<20 && rc==RTCP_ETIMEDOUT;++retry) {
+    rc=carplay_audio_sink_local_pcm(pcm,sizeof(pcm),48000,1,true);
+    if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
+   }
+   assert(rc==RTCP_OK);
+   assert(carplay_audio_sink_local_pcm(pcm,sizeof(pcm),48000,1,false)==RTCP_ESTATE);
+  }
   rt_thread_mdelay(350);
   carplay_audio_sink_stream_stop(102);
   carplay_audio_sink_stop();host_rtthread_join();assert(!carplay_audio_sink_is_running());

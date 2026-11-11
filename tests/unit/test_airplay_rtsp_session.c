@@ -830,8 +830,8 @@ static void test_audio_stream_lifecycle(void)
     /* Selecting audio by type stops the main stream but not the alt stream,
      * the screen, or the transport endpoints. */
     request = parse_request("TEARDOWN /stream RTSP/1.0\r\nCSeq: 9\r\n\r\n");
-    request.body = k_audio_setup_plist;
-    request.body_len = sizeof(k_audio_setup_plist);
+    request.body = k_audio_type_teardown;
+    request.body_len = sizeof(k_audio_type_teardown);
     assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
                                        &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
     assert(ports.audio_stops == 2U);
@@ -1124,8 +1124,19 @@ static bool audio_duck_test(bool ducked,float db,uint32_t duration,void *context
 static bool configure_audio_test(const airplay_rtsp_pairing_t *p,uint16_t type,const airplay_audio_options_t *o,void *context)
 {
     (void)p;(void)context;++configured_seen;
-    assert(type==100 && o->input && o->input_port==50000 && o->frames_per_packet==960);
+    assert(type==100);
+    if (o->connection_id==9001) { assert(!o->input && !strcmp(o->audio_type,"media")); return true; }
+    assert(o->input && o->input_port==50000 && o->frames_per_packet==960);
     assert(o->connection_id==9000 && !strcmp(o->audio_type,"speechRecognition"));return true;
+}
+static bool start_audio_extended_test(const airplay_rtsp_pairing_t *p,uint16_t type,
+    const airplay_audio_options_t *o,uint16_t *data,uint16_t *ctrl,void *context)
+{
+    return test_start_audio(p,type,o->connection_id,o->format_bits,data,ctrl,context);
+}
+static void stop_audio_extended_test(uint16_t type,const airplay_audio_options_t *o,void *context)
+{
+    (void)o;test_stop_audio(type,context);
 }
 static void test_iap_runtime_and_commands(void)
 {
@@ -1155,6 +1166,7 @@ static void test_iap_runtime_and_commands(void)
     config.on_audio_modes=audio_modes_test;config.on_audio_duck=audio_duck_test;
     config.start_audio=test_start_audio;config.stop_audio=test_stop_audio;
     config.configure_audio=configure_audio_test;
+    config.start_audio_ex=start_audio_extended_test;config.stop_audio_ex=stop_audio_extended_test;
     airplay_rtsp_session_t *session=NULL;
     assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_OK);
     EXPECT_IAP("POST","/command",disable,"503 Service Unavailable");
@@ -1172,6 +1184,12 @@ static void test_iap_runtime_and_commands(void)
     EXPECT_IAP("SETUP","/stream",voice_setup,"200 OK");assert(configured_seen==1);
     EXPECT_IAP("SETUP","/stream",voice_setup,"200 OK");assert(configured_seen==1);
     EXPECT_IAP("SETUP","/stream",voice_changed_format,"400 Bad Request");
+    EXPECT_IAP("SETUP","/stream",media_setup,"200 OK");assert(configured_seen==2);
+    assert(ports.audio_starts==2);
+    EXPECT_IAP("TEARDOWN","/stream",voice_stale_stop,"200 OK");assert(ports.audio_stops==0);
+    EXPECT_IAP("TEARDOWN","/stream",voice_stop,"200 OK");assert(ports.audio_stops==1);
+    /* The sibling media stream survives and duplicate setup does not restart it. */
+    EXPECT_IAP("SETUP","/stream",media_setup,"200 OK");assert(configured_seen==2);
     expect_body_status(session,"POST","/feedback",NULL,0,"200 OK");
 
     EXPECT_IAP("POST","/command",disable,"200 OK");

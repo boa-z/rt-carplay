@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 /* Creates the per-stream queues, mixer, wake semaphore and writer thread.  The audio
- * device is not touched until the first PCM packet arrives.  Returns 0 on
+ * device playback starts with the first decoded packet.  Returns 0 on
  * success, a negative RTCP error otherwise. */
 int carplay_audio_sink_start(void);
 
@@ -27,18 +27,16 @@ int carplay_audio_sink_pcm(uint32_t sample_rate, uint8_t channels,
                            const uint8_t *data, size_t len);
 
 /* Counters since start; any output pointer may be NULL.  dropped_bytes counts
- * PCM discarded because the ring was full. */
+ * encoded or PCM bytes discarded by bounded queues. */
 void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
                               unsigned *write_errors, unsigned *replays);
 
 /* Queues the sender's SET_PARAMETER volume (dB; 0 = full scale, the AirPlay
  * range is [-144, 0]).  The writer thread applies it through the software master gain;
- * a value that arrives before playback starts is kept until then.  The scale
- * is mapped linearly over [-45, 0] dB to the codec's 0..100 range. */
+ * a value that arrives before playback starts is kept until then. */
 void carplay_audio_sink_set_volume_db(float volume_db);
 
-/* Last requested volume in codec percent, or -1 when the sender never set
- * one (the codec keeps its default). */
+/* Last requested volume in normalized percent, or -1 when unset. */
 int carplay_audio_sink_volume_percent(void);
 
 #include "audio_codec.h"
@@ -50,3 +48,5 @@ void carplay_audio_sink_modes(const airplay_audio_modes_t *);
 bool carplay_audio_sink_duck(bool ducked, float volume_db, uint32_t duration_ms);
 /* Local HMI/critical audio never shares a remote stream queue. */
 int carplay_audio_sink_local_pcm(const uint8_t *, size_t, uint32_t rate, uint8_t channels, bool critical);
+
+void carplay_audio_sink_slot_stop(unsigned slot);

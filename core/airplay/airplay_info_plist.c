@@ -449,9 +449,8 @@ static uint32_t emit_audio_format(ip_writer_t *w, int64_t type,
 static uint32_t emit_audio_formats(ip_writer_t *w,
                                    const airplay_info_plist_config_t *config)
 {
-    /* LPCM only: the sink feeds int16 samples to the board codec, so no Opus
-     * or AAC-LC bit is advertised.  Types are the CarPlay stream types the
-     * RTSP layer accepts (100 main, 101 alt). */
+    /* Advertise only compiled decoders; microphone formats additionally
+     * require the platform capture capability. 102/media is raw AAC-LC. */
     const bool is48 = config->audio_sample_rate == 48000U;
     const uint64_t pcm = 0x3fcULL | (is48 ? 0xc000ULL : 0xc00ULL);
     const uint64_t pcm_mono = 0x154ULL | (is48 ? 0x4000ULL : 0x400ULL);

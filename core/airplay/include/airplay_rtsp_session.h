@@ -60,7 +60,10 @@ typedef struct {
     airplay_rtsp_start_screen_cb_t start_screen;
     airplay_rtsp_start_event_cb_t start_event;
     airplay_rtsp_start_timing_cb_t start_timing;
-    airplay_rtsp_start_audio_cb_t start_audio;
+    airplay_rtsp_start_audio_cb_t start_audio; /* legacy one stream per type */
+    bool (*start_audio_ex)(const airplay_rtsp_pairing_t *, uint16_t,
+                           const airplay_audio_options_t *, uint16_t *, uint16_t *, void *);
+    void (*stop_audio_ex)(uint16_t, const airplay_audio_options_t *, void *);
     /* Optional second phase for stream role/input; failure rolls back the listener. */
     bool (*configure_audio)(const airplay_rtsp_pairing_t *, uint16_t,
                             const airplay_audio_options_t *, void *);

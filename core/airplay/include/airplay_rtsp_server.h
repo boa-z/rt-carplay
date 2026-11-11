@@ -15,7 +15,7 @@
 
 #define AIRPLAY_RTSP_DEFAULT_PORT 7000U
 #define AIRPLAY_RTSP_SERVER_SCREEN_MAX_BODY_BYTES (512U * 1024U)
-#define AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS 3U
+#define AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS AIRPLAY_AUDIO_MAX_STREAMS
 
 /*
  * Single-controller AirPlay RTSP server.  It owns the listening socket, the
@@ -60,6 +60,7 @@ typedef struct {
     void *audio_pcm_context;
     /* Flush only this stream from the sink on selective TEARDOWN/replacement. */
     void (*on_audio_stop)(uint16_t stream_type, void *context);
+    void (*on_audio_stop_ex)(unsigned slot, uint16_t stream_type, void *context);
     bool (*on_audio_input_start)(const airplay_audio_input_config_t *, void *context);
     void (*on_audio_input_stop)(void *context);
     void (*on_audio_modes)(const airplay_audio_modes_t *, void *context);

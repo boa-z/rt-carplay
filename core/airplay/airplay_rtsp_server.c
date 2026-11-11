@@ -81,6 +81,8 @@ struct airplay_rtsp_server {
     airplay_timing_port_t *timing_port;
     airplay_screen_server_t *screen_server;
     airplay_audio_stream_t *audio[AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
+    bool input_active;
+    unsigned input_slot;
     bool event_connected;
     bool event_key_used;
     bool event_failed;
@@ -91,7 +93,7 @@ struct airplay_rtsp_server {
 static void server_stop_event(void *context);
 static void server_stop_timing(void *context);
 static void server_stop_screen(void *context);
-static void server_stop_audio(uint16_t stream_type, void *context);
+static void server_stop_audio_slot(airplay_rtsp_server_t *server, unsigned slot);
 
 /* ------------------------------------------------------------------ */
 /* Media endpoints                                                     */
@@ -301,16 +303,6 @@ static void server_stop_screen(void *context)
 }
 
 /* stream types 100/101/102 map to slots 0/1/2 */
-static int server_audio_slot(uint16_t stream_type)
-{
-    switch (stream_type) {
-    case AIRPLAY_AUDIO_STREAM_MAIN: return 0;
-    case AIRPLAY_AUDIO_STREAM_ALT: return 1;
-    case AIRPLAY_AUDIO_STREAM_HIGH: return 2;
-    default: return -1;
-    }
-}
-
 static int server_audio_pcm(uint16_t stream_type, const uint8_t *data,
                             size_t len, const airplay_audio_format_t *format,
                             uint32_t rtp_timestamp, uint64_t arrival_us,
@@ -323,17 +315,15 @@ static int server_audio_pcm(uint16_t stream_type, const uint8_t *data,
                                        server->config.audio_pcm_context);
 }
 
-static bool server_start_audio(const airplay_rtsp_pairing_t *pairing,
-                               uint16_t stream_type,
-                               uint64_t stream_connection_id,
-                               uint64_t audio_format_bits,
-                               uint16_t *data_port,
-                               uint16_t *control_port,
-                               void *context)
+static bool server_start_audio(const airplay_rtsp_pairing_t *pairing, uint16_t stream_type,
+                               const airplay_audio_options_t *options,
+                               uint16_t *data_port, uint16_t *control_port, void *context)
 {
+    uint64_t stream_connection_id=options->connection_id;
+    uint64_t audio_format_bits=options->format_bits;
     airplay_rtsp_server_t *server = context;
     if (server == NULL || data_port == NULL || control_port == NULL) return false;
-    int slot = server_audio_slot(stream_type);
+    int slot = airplay_audio_slot_for(stream_type,options->audio_type);
     if (slot < 0) return false;
     if (server->audio[slot] != NULL) {
         *data_port = airplay_audio_stream_get_data_port(server->audio[slot]);
@@ -362,6 +352,7 @@ static bool server_start_audio(const airplay_rtsp_pairing_t *pairing,
     config.stream_type = stream_type;
     config.audio_format_bits = audio_format_bits;
     config.family = server->family;
+    config.stream_slot=(uint8_t)slot;config.stream_slot_valid=true;
     config.on_pcm = server_audio_pcm;
     config.context = server;
     int result = airplay_audio_stream_start(server->os, server->net, &config,
@@ -377,7 +368,7 @@ static bool server_start_audio(const airplay_rtsp_pairing_t *pairing,
     *data_port = airplay_audio_stream_get_data_port(server->audio[slot]);
     *control_port = airplay_audio_stream_get_control_port(server->audio[slot]);
     if (*data_port == 0U || *control_port == 0U) {
-        server_stop_audio(stream_type, server);
+        server_stop_audio_slot(server,(unsigned)slot);
         return false;
     }
     RTCP_LOGI(TAG, "audio_setup=ready type=%u data_port=%u control_port=%u "
@@ -393,7 +384,10 @@ static bool server_configure_audio(const airplay_rtsp_pairing_t *pairing, uint16
 {
     airplay_rtsp_server_t *s = context;
     if (!options->input) return true;
-    if (!s->config.on_audio_input_start || type != 100) return false;
+    /* A rejected competing SETUP must leave the live microphone untouched. */
+    if (!s->config.on_audio_input_start || type != 100 || s->input_active) return false;
+    int slot = airplay_audio_slot_for(type, options->audio_type);
+    if (slot < 0) return false;
     airplay_audio_input_config_t input = {0};
     if (!rtcp_audio_format_parse(options->format_bits, &input.sender.format) ||
         input.sender.format.channels != 1 || input.sender.format.codec == RTCP_AUDIO_AAC_LC) return false;
@@ -404,22 +398,28 @@ static bool server_configure_audio(const airplay_rtsp_pairing_t *pairing, uint16
     if (airplay_rtsp_pairing_derive_input_key(pairing, options->connection_id, input.sender.input_key) != AIRPLAY_PAIR_VERIFY_OK) return false;
     bool ok = s->config.on_audio_input_start(&input, s->config.audio_pcm_context);
     mbedtls_platform_zeroize(&input, sizeof(input));
+    if (ok) { s->input_active = true; s->input_slot = (unsigned)slot; }
     return ok;
 }
 
-static void server_stop_audio(uint16_t stream_type, void *context)
+static void server_stop_audio_slot(airplay_rtsp_server_t *server,unsigned slot)
 {
-    airplay_rtsp_server_t *server = context;
-    if (server == NULL) return;
-    int slot = server_audio_slot(stream_type);
-    if (slot < 0 || server->audio[slot] == NULL) return;
-    airplay_audio_stream_t *stream = server->audio[slot];
-    server->audio[slot] = NULL;
-    if (stream_type == 100 && server->config.on_audio_input_stop)
-        server->config.on_audio_input_stop(server->config.audio_pcm_context);
-    airplay_audio_stream_stop(stream, server->net);
-    if (server->config.on_audio_stop)
-        server->config.on_audio_stop(stream_type, server->config.audio_pcm_context);
+    if(!server || slot>=AIRPLAY_AUDIO_MAX_STREAMS || !server->audio[slot])return;
+    airplay_audio_stream_t *stream=server->audio[slot];server->audio[slot]=NULL;
+    uint16_t type=airplay_audio_stream_get_stream_type(stream);
+    if (server->input_active && server->input_slot == slot) {
+        server->input_active = false;
+        if (server->config.on_audio_input_stop)
+            server->config.on_audio_input_stop(server->config.audio_pcm_context);
+    }
+    airplay_audio_stream_stop(stream,server->net);
+    if(server->config.on_audio_stop_ex)server->config.on_audio_stop_ex(slot,type,server->config.audio_pcm_context);
+    else if(server->config.on_audio_stop)server->config.on_audio_stop(type,server->config.audio_pcm_context);
+}
+static void server_stop_audio(uint16_t type,const airplay_audio_options_t *options,void *context)
+{
+    int slot=airplay_audio_slot_for(type,options->audio_type);
+    if(slot>=0)server_stop_audio_slot(context,(unsigned)slot);
 }
 
 static bool server_disable_bluetooth(const char *device,void *context)
@@ -777,12 +777,12 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.start_screen = server_start_screen;
     session_config.start_event = server_start_event;
     session_config.start_timing = server_start_timing;
-    session_config.start_audio = server_start_audio;
+    session_config.start_audio_ex = server_start_audio;
     session_config.configure_audio = server_configure_audio;
     session_config.stop_screen = server_stop_screen;
     session_config.stop_event = server_stop_event;
     session_config.stop_timing = server_stop_timing;
-    session_config.stop_audio = server_stop_audio;
+    session_config.stop_audio_ex = server_stop_audio;
     session_config.media_context = server;
     session_config.on_volume = server_volume;
     session_config.volume_context = server;
@@ -1107,7 +1107,7 @@ void airplay_rtsp_server_stop(airplay_rtsp_server_t *server)
     server_teardown_connection(server, "server_stop");
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
         if (server->audio[slot] != NULL) {
-            server_stop_audio((uint16_t)(AIRPLAY_AUDIO_STREAM_MAIN + slot), server);
+            server_stop_audio_slot(server,(unsigned)slot);
         }
     }
     if (server->listener_fd >= 0) {

@@ -10,8 +10,8 @@
  * The last eight header bytes (timestamp + SSRC) are the AEAD associated data;
  * the nonce is four zero bytes followed by the eight wire bytes interpreted
  * little-endian (the same order the sender used).  Wire LPCM is big-endian L16; callbacks receive
- * little-endian, interleaved int16 samples.  Nothing in this module decodes Opus or AAC:
- * /info only advertises LPCM, so a conforming sender never negotiates them.
+ * little-endian, interleaved int16 samples. Compressed AAC/Opus access units
+ * are delivered unchanged to the independently owned audio decoder worker.
  */
 #pragma once
 
@@ -35,6 +35,10 @@
 #define AIRPLAY_AUDIO_STREAM_MAIN 100U
 #define AIRPLAY_AUDIO_STREAM_ALT 101U
 #define AIRPLAY_AUDIO_STREAM_HIGH 102U
+#define AIRPLAY_AUDIO_MAX_STREAMS 8U
+/* Stable slots distinguish same-type streams by negotiated audioType. */
+int airplay_audio_slot_for(uint16_t stream_type, const char *audio_type);
+uint16_t airplay_audio_slot_type(unsigned slot);
 
 typedef struct airplay_audio_stream airplay_audio_stream_t;
 
@@ -72,6 +76,8 @@ typedef struct {
     uint8_t output_key[AIRPLAY_AUDIO_KEY_BYTES];
     uint16_t stream_type; /* AIRPLAY_AUDIO_STREAM_*; echoed to the callback. */
     uint64_t audio_format_bits; /* SETUP audioFormat field. */
+    uint8_t stream_slot;
+    bool stream_slot_valid;
     /* UDP socket family: 0/RTCP_AF_INET (default) or RTCP_AF_INET6. */
     uint8_t family;
     size_t max_datagram_bytes;  /* 0 selects the default. */

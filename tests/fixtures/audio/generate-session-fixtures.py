@@ -7,6 +7,10 @@ base = {"type": 100, "streamConnectionID": 9000, "audioFormat": 0x20000000,
         "audioType": "speechRecognition", "dataPort": 50000, "input": True,
         "framesPerPacket": 960}
 fixtures = {
+    "audio_type_teardown": {"streams": [{"type":100}]},
+    "media_setup": {"streams": [{"type":100,"streamConnectionID":9001,"audioFormat":0x800,"audioType":"media"}]},
+    "voice_stop": {"streams": [{"type":100,"streamConnectionID":9000,"audioType":"speechRecognition"}]},
+    "voice_stale_stop": {"streams": [{"type":100,"streamConnectionID":8999,"audioType":"speechRecognition"}]},
     "voice_setup": {"streams": [base]},
     "voice_bad_port": {"streams": [dict(base, dataPort=65536)]},
     "voice_changed_format": {"streams": [dict(base, audioFormat=0x40000000)]},

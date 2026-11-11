@@ -47,9 +47,9 @@ static void mixing(void)
     rtcp_audio_mixer_flush(m,1);
     assert(rtcp_audio_mixer_render(m,out,480)==480 && out[0]==12000);
     rtcp_audio_mixer_master(m,0,true);
-    assert(rtcp_audio_mixer_push(m,3,b,960,48000,1)==0);
+    assert(rtcp_audio_mixer_push(m,RTCP_AUDIO_LOCAL_LANE,b,960,48000,1)==0);
     assert(rtcp_audio_mixer_render(m,out,480)==480 && out[0]==4000);
-    rtcp_audio_mixer_flush(m,3); rtcp_audio_mixer_master(m,32768,false);
+    rtcp_audio_mixer_flush(m,RTCP_AUDIO_LOCAL_LANE); rtcp_audio_mixer_master(m,32768,false);
     rtcp_audio_mixer_gain(m,0,0,4);
     assert(rtcp_audio_mixer_push(m,0,a,960,24000,1)==0);
     assert(rtcp_audio_mixer_render(m,out,4)==4);
@@ -62,6 +62,29 @@ static void mixing(void)
     assert(rtcp_audio_mixer_push(m,1,b,960,48000,1)==0);
     assert(rtcp_audio_mixer_render(m,out,480)==480 && out[0]==32767);
     rtcp_audio_mixer_destroy(m);
+}
+/* Simulate a source that gains/loses 100 ppm against the output clock.
+ * The bounded servo must retain occupancy without drops over 120 seconds. */
+static void drift(void)
+{
+    for (int direction=-1; direction<=1; direction+=2) {
+        rtcp_audio_mixer_t *m=rtcp_audio_mixer_create(4096); assert(m);
+        int16_t in[2048]={0}, out[960];
+        assert(rtcp_audio_mixer_push(m,0,in,960,48000,1)==0);
+        rtcp_audio_mixer_clock(m,0,1440);
+        unsigned fractional=0;
+        for (unsigned tick=0; tick<12000; ++tick) {
+            unsigned n=480; fractional+=480;
+            if (fractional>=10000) { n=(unsigned)((int)n+direction);fractional-=10000; }
+            assert(rtcp_audio_mixer_push(m,0,in,n,48000,1)==0);
+            assert(rtcp_audio_mixer_render(m,out,480)==480);
+        }
+        rtcp_audio_lane_stats_t st;rtcp_audio_mixer_stats(m,0,&st);
+        assert(!st.dropped_frames && !st.underrun_frames);
+        assert(st.queued_frames>600 && st.queued_frames<1400);
+        assert(st.trim_ppm*direction>0 && abs(st.trim_ppm)<=300);
+        rtcp_audio_mixer_destroy(m);
+    }
 }
 #ifdef RTCP_AUDIO_CODECS
 static void aac(const char *path,uint64_t bits)
@@ -168,7 +191,7 @@ static void uplink(void)
 }
 int main(void)
 {
-    jitter(); mixing(); uplink(); voice(); focus();
+    jitter(); mixing(); drift(); uplink(); voice(); focus();
 #ifdef RTCP_AUDIO_CODECS
     aac("tests/fixtures/audio/sine-48k.aac",0x800000);
     aac("tests/fixtures/audio/sine-44k.aac",0x400000); opus();

@@ -12,7 +12,7 @@
 
 #define BPLIST_HEADER_BYTES 8U
 #define BPLIST_TRAILER_BYTES 32U
-#define BPLIST_WRITER_MAX_OBJECTS 48U
+#define BPLIST_WRITER_MAX_OBJECTS 128U
 
 typedef struct {
     uint8_t marker;
@@ -759,8 +759,8 @@ airplay_bplist_result_t airplay_bplist_build_iap_command(
 airplay_bplist_result_t airplay_bplist_build_audio_feedback(const airplay_audio_feedback_t *entries,size_t n,
                                                            uint8_t *out,size_t capacity,size_t *written)
 {
-    if(n>3 || (!entries && n))return AIRPLAY_BPLIST_INVALID_ARGUMENT;
-    bplist_write_object_t o[24]={0};
+    if(n>8 || (!entries && n))return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_write_object_t o[59]={0};
     o[0]=(bplist_write_object_t){.kind=BPLIST_WRITE_DICTIONARY,.references={1,2},.reference_count=2};
     o[1]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="streams"};
     o[2].kind=BPLIST_WRITE_ARRAY;o[2].reference_count=(uint8_t)n;

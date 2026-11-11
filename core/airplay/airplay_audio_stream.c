@@ -53,6 +53,24 @@ bool airplay_audio_format_from_bits(uint64_t bits, airplay_audio_format_t *forma
     return rtcp_audio_format_parse(bits, format);
 }
 
+uint16_t airplay_audio_slot_type(unsigned slot)
+{
+    static const uint16_t types[AIRPLAY_AUDIO_MAX_STREAMS]={100,101,102,100,100,100,100,100};
+    return slot<AIRPLAY_AUDIO_MAX_STREAMS?types[slot]:0;
+}
+int airplay_audio_slot_for(uint16_t type,const char *role)
+{
+    if(type==101)return 1;
+    if(type==102)return 2;
+    if(type!=100)return -1;
+    if(!role || !strcmp(role,"default"))return 0;
+    if(!strcmp(role,"telephony"))return 3;
+    if(!strcmp(role,"speechRecognition"))return 4;
+    if(!strcmp(role,"alert"))return 5;
+    if(!strcmp(role,"compatibility"))return 6;
+    if(!strcmp(role,"media"))return 7;
+    return -1;
+}
 bool airplay_audio_stream_type_is_supported(uint64_t stream_type)
 {
     return stream_type == AIRPLAY_AUDIO_STREAM_MAIN ||
@@ -108,6 +126,12 @@ int airplay_audio_stream_start(const struct rtcp_os *os,
                                         &stream->format)) {
         audio_stream_free(stream, net);
         return RTCP_ENOTSUP;
+    }
+    if(config->stream_slot_valid) {
+        if(config->stream_slot>=AIRPLAY_AUDIO_MAX_STREAMS || airplay_audio_slot_type(config->stream_slot)!=config->stream_type) {
+            audio_stream_free(stream,net);return RTCP_EINVAL;
+        }
+        stream->format.stream_slot=config->stream_slot;stream->format.stream_slot_valid=true;
     }
     stream->max_datagram_bytes = config->max_datagram_bytes != 0U
                                      ? config->max_datagram_bytes

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "airplay_control_port.h"
+#include "airplay_bplist.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -238,8 +239,38 @@ static void test_large_iap_command(void)
     airplay_control_port_destroy(port);
 }
 
+static void test_siri_command(void)
+{
+    uint8_t key[32]={0};capture_t capture={0};airplay_control_port_t *port=NULL;
+    assert(airplay_control_port_create(&rtcp_os_linux,key,key,0,0,capture_iap_write,&capture,&port)==RTCP_OK);
+    assert(airplay_control_port_request_siri(port));assert(capture.calls==2);
+    airplay_control_cipher_t *peer=make_peer(key,key);
+    size_t off=0;
+    for(unsigned action=2;action<=3;++action) {
+        uint8_t plain[1024];size_t consumed=0,n=0;
+        size_t wire_len=(size_t)capture.bytes[off]+((size_t)capture.bytes[off+1]<<8)+18;
+        assert(wire_len<=capture.len-off);
+        assert(airplay_control_cipher_decrypt(peer,capture.bytes+off,wire_len,&consumed,
+            plain,sizeof(plain)-1,&n)==AIRPLAY_CONTROL_CIPHER_OK);
+        assert(consumed && n);off+=consumed;plain[n]=0;
+        assert(strstr((char *)plain,action==2 ? "CSeq: 1\r\n" : "CSeq: 2\r\n"));
+        char *body=strstr((char *)plain,"\r\n\r\n");assert(body);body+=4;
+        airplay_bplist_doc_t doc;airplay_bplist_object_t root,params,value;
+        assert(airplay_bplist_open((uint8_t *)body,n-(size_t)(body-(char *)plain),&doc)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc,&root)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc,root,"type",&value)==AIRPLAY_BPLIST_OK);
+        char type[32];size_t type_len;assert(airplay_bplist_get_string(&doc,value,type,sizeof(type),&type_len)==AIRPLAY_BPLIST_OK);
+        assert(!strcmp(type,"requestSiri"));
+        assert(airplay_bplist_dict_get(&doc,root,"params",&params)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc,params,"siriAction",&value)==AIRPLAY_BPLIST_OK);
+        uint64_t a;assert(airplay_bplist_get_uint(&doc,value,&a)==AIRPLAY_BPLIST_OK && a==action);
+    }
+    assert(off==capture.len);airplay_control_cipher_destroy(peer);airplay_control_port_destroy(port);
+}
+
 int main(void)
 {
+    test_siri_command();
     test_large_iap_command();
     test_event_ack();
     test_authentication_failure();

@@ -13,6 +13,15 @@ static struct usb_bulk_state pipe;
 static unsigned peer_toggle[32], delivered[32];
 static int simulate_pid, disconnect_in_submit;
 static unsigned last_pid;
+static int diagnostic_completes;
+void usbh_ehci_transfer_snapshot(struct usbh_urb *u, int reason)
+{
+    assert(reason == -USB_ERR_TIMEOUT && u == pending);
+    if (diagnostic_completes) {
+        u->errorcode = 0; u->actual_length = 0;
+        u->complete(u->arg, 0);
+    }
+}
 
 static int critical;
 size_t usb_osal_enter_critical_section(void) { assert(!critical); critical = 1; return 0; }
@@ -166,5 +175,19 @@ int main(void)
     reset_bulk_states();
     assert(!s_usb.mux_out_state.data_toggle && !s_usb.mux_in_state.data_toggle);
     assert(s_usb.mux_out_state.generation == previous + 1);
+    /* Completion during a diagnostic dump must not force failed cancel
+     * quarantine for an already completed URB. */
+    simulate_pid = 0; timeout = 1; diagnostic_completes = 1;
+    int previous_kills = kills;
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, &pipe) == RTCP_ETIMEDOUT);
+    assert(kills == previous_kills); clean();
+    diagnostic_completes = 0; timeout = 0;
+    /* Public USBMUX IN operation follows usbmuxd's 16 KiB USB_MRU. */
+    s_usb.present = true; s_usb.hport = &h; s_usb.mux_in = 0x85;
+    s_usb.mux_in_desc = ep; s_usb.mux_in_desc.bEndpointAddress = 0x85;
+    static uint8_t large[32768]; memset(large, 0x37, sizeof(large));
+    simulate_pid = 0;
+    assert(lubanlite_bulk_transfer(NULL, 0x85, large, sizeof(large), 100) == 16384);
+    assert(large[16383] == 0xa5 && large[16384] == 0x37); clean();
     puts("Luban-Lite DMA alignment, copy bounds and cancellation tests passed");
 }

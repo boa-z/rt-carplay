@@ -175,6 +175,10 @@ static void transfer_complete(void *arg, int nbytes)
     usb_osal_sem_give((usb_osal_sem_t)arg);
 }
 
+/* Optional SDK read-only HCD diagnostics; no dependency when absent. */
+extern void usbh_ehci_transfer_snapshot(struct usbh_urb *, int)
+    __attribute__((weak));
+
 static int map_urb_error(int error)
 {
     if (error == -USB_ERR_TIMEOUT) return RTCP_ETIMEDOUT;
@@ -231,13 +235,27 @@ static int dma_transfer(struct usbh_hubport *hport,
     int ret = current ? usbh_submit_urb(&t->urb) : -USB_ERR_NOTCONN;
     bool reclaim = true;
     if (ret < 0) {
+        USB_LOG_WRN("USB submit error ep=%02x raw=%d length=%u\r\n",
+                     t->urb.ep->bEndpointAddress, ret, (unsigned)length);
         ret = map_urb_error(ret);
     } else if (usb_osal_sem_take(t->done, timeout_ms) < 0) {
         /* On cancellation failure retain URB, callback argument and DMA
          * storage: a late HCD access must not touch freed memory. */
-        reclaim = usbh_kill_urb(&t->urb) == 0;
+        USB_LOG_WRN("USB wait timeout ep=%02x length=%u actual=%u pid=%u urb=%d\r\n",
+                     t->urb.ep->bEndpointAddress, (unsigned)length,
+                     (unsigned)t->urb.actual_length, t->urb.data_toggle,
+                     t->urb.errorcode);
+        if (usbh_ehci_transfer_snapshot)
+            usbh_ehci_transfer_snapshot(&t->urb, -USB_ERR_TIMEOUT);
+        /* UART snapshot output can outlast an in-flight transfer. If its
+         * callback has now completed, there is nothing left to cancel. */
+        reclaim = usb_osal_sem_take(t->done, 1U) == 0;
+        if (!reclaim) reclaim = usbh_kill_urb(&t->urb) == 0;
         ret = RTCP_ETIMEDOUT;
     } else if (t->urb.errorcode < 0) {
+        USB_LOG_WRN("USB completion error ep=%02x urb=%d actual=%u pid=%u\r\n",
+                     t->urb.ep->bEndpointAddress, t->urb.errorcode,
+                     (unsigned)t->urb.actual_length, t->urb.data_toggle);
         ret = map_urb_error(t->urb.errorcode);
     } else {
         flags = usb_osal_enter_critical_section();
@@ -753,6 +771,9 @@ static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,
     }
 
     if (endpoint == s_usb.mux_in) {
+        /* usbmuxd USB_MRU=16384: use packet-aligned bounded USB reads and
+         * let the mux reassembler join frames across transfers. */
+        if (length > 16384U) length = 16384U;
         return submit_bulk(s_usb.hport, &s_usb.mux_in_desc, data, length,
                            timeout_ms, &s_usb.mux_in_state);
     }

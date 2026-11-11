@@ -278,3 +278,45 @@ remain enabled. Next, use v12 on a fresh attachment and run `carplay_usb pair`
 directly, accepting any phone trust prompt; capture all request/reply markers,
 the final operation/stage/error, and IPHETH status. Driver and HCD behavior are
 unchanged by this diagnostic build.
+
+## V12 board results: Pair accepted; intermittent partial replies remain
+
+The first supplied run completes SetValue, DevicePublicKey, WiFiAddress and
+pair-record generation, then receives a complete 316-byte Pair plist and
+advances to StartSession. By the session implementation's checks, the Pair
+reply had no parsed Error and the local `paired` flag is true. StartSession
+then reads a length of 354 but fails before completing the body with RTCP_EIO.
+Concurrent EP0 logs include raw -12 (USB_ERR_IO) and -4 (USB_ERR_NOTCONN).
+There is no completed StartSession plist, TLS attempt or service-start result.
+Those errors must not be called a certificate/TLS failure.
+
+A second attachment completes the first two plist requests but reads only the
+335-byte length for WiFiAddress before timing out on its body. With varied
+failure position and already received prefixes, these runs justify transport
+investigation; they do not establish one specific HCD, cache, device or pairing
+cause. The later IPHETH snapshot still has no completed first RX. Acceptance of
+a Pair reply alone has not produced demonstrated network traffic.
+
+V13 prints raw submit/completion errors, endpoint, actual length and DATA toggle.
+On a wait timeout, an optional weak SDK hook captures the existing read-only
+EHCI register/QH/qTD snapshot before cancellation, while the pending USBMUX QH
+is still available. Ordinary snapshots taken after cancellation cannot show
+that QH. A callback completing during the dump is checked before trying to kill
+an already completed URB; the caller still returns timeout and does not assume
+a partially consumed stream can be resumed. Tests cover that completion/dump
+race and retained failed-cancel storage.
+
+USBMUX IN requests are capped at 16384 bytes, matching usbmuxd `USB_MRU` in
+`src/usb.h` and its `libusb_fill_bulk_transfer` in `src/usb.c`. The existing
+mux reassembler handles continuation; this changes USB transfer chunk size,
+not framing or plist format. The application-port test checks the 16 KiB return
+and a canary after it. This source-backed limit reduces the number of qTDs
+per ordinary USBMUX read but is not a demonstrated hardware fix. IPHETH's
+64 KiB NCM RX is unchanged. No new HCD scheduling or cache patch is added.
+
+Use v13 on a fresh attachment, run `carplay_usb pair` directly, and capture
+through the final operation/stage/error and any `USB completion error`,
+`USB wait timeout`, `EHCI before cancel` and qTD output. The failure summary now
+explicitly shows `paired=0/1`. Then record `ipheth_status`, `carplay_usb net`
+and `usb_ehci_status 1`. Do not erase trust records or assume TLS began when
+StartSession's body was not fully read.

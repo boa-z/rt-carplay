@@ -487,9 +487,10 @@ static int cmd_pair(void)
         rt_kprintf("[carplay_usb] pair: failed ret=%d stage=%s error='%s'\n",
                    ret, rtcp_lockdown_stage_name(s_lockdown_session.stage),
                    s_lockdown_session.remote_error);
-        rt_kprintf("[carplay_usb] pair: operation=%s exchanges=%u\n",
+        rt_kprintf("[carplay_usb] pair: operation=%s exchanges=%u paired=%u\n",
                    s_lockdown_session.operation ? s_lockdown_session.operation : "none",
-                   (unsigned)s_lockdown_session.exchange_count);
+                   (unsigned)s_lockdown_session.exchange_count,
+                   s_lockdown_session.paired ? 1U : 0U);
         rt_kprintf("[carplay_usb] pair: last exchange ret=%d request=%u reply=%u\n",
                    s_lockdown_session.last_exchange_result,
                    (unsigned)s_lockdown_session.last_request_length,

@@ -6,6 +6,7 @@
 
 #include "lockdown.h"
 #include "rtcp/plist.h"
+#include "rtcp/log.h"
 
 #define LOCKDOWN_PORT 62078U
 #define CARKIT_SERVICE "com.apple.carkit.service"
@@ -42,13 +43,26 @@ static uint8_t *device_key_buffer(rtcp_lockdown_session_t *session)
 }
 
 static int exchange(rtcp_lockdown_session_t *session,
-                    const rtcp_stream_t *stream, const uint8_t *request,
-                    size_t request_length, size_t *reply_length)
+                    const rtcp_stream_t *stream, const char *operation,
+                    const uint8_t *request, size_t request_length,
+                    size_t *reply_length)
 {
-    return rtcp_lockdown_exchange(stream, request, request_length,
-                                  reply_buffer(session),
-                                  RTCP_LOCKDOWN_FRAME_MAX, reply_length,
-                                  step_timeout(session));
+    session->operation = operation;
+    ++session->exchange_count;
+    session->last_request_length = request_length;
+    session->last_reply_length = 0U;
+    *reply_length = 0U;
+    RTCP_LOGI("lockdown", "request=%s bytes=%u timeout=%u", operation,
+              (unsigned)request_length, (unsigned)step_timeout(session));
+    int ret = rtcp_lockdown_exchange(stream, request, request_length,
+                                     reply_buffer(session),
+                                     RTCP_LOCKDOWN_FRAME_MAX, reply_length,
+                                     step_timeout(session));
+    session->last_reply_length = *reply_length;
+    session->last_exchange_result = ret;
+    RTCP_LOGI("lockdown", "reply=%s ret=%d bytes=%u", operation, ret,
+              (unsigned)*reply_length);
+    return ret;
 }
 
 /* RTCP_OK when the reply carries no "Error", RTCP_EIO with the phone's error
@@ -92,7 +106,8 @@ static int pair_attempt(rtcp_lockdown_session_t *session,
     if (request_length == 0U) {
         return RTCP_EINVAL;
     }
-    ret = exchange(session, stream, request, request_length, &reply_length);
+    ret = exchange(session, stream, "SetValue/UntrustedHostBUID", request,
+                   request_length, &reply_length);
     if (ret != RTCP_OK) {
         return ret;
     }
@@ -112,7 +127,7 @@ static int pair_attempt(rtcp_lockdown_session_t *session,
         if (request_length == 0U) {
             return RTCP_EINVAL;
         }
-        ret = exchange(session, stream, request, request_length,
+        ret = exchange(session, stream, "GetValue/DevicePublicKey", request, request_length,
                        &reply_length);
         if (ret != RTCP_OK) {
             return ret;
@@ -133,7 +148,7 @@ static int pair_attempt(rtcp_lockdown_session_t *session,
         if (request_length == 0U) {
             return RTCP_EINVAL;
         }
-        ret = exchange(session, stream, request, request_length,
+        ret = exchange(session, stream, "GetValue/WiFiAddress", request, request_length,
                        &reply_length);
         if (ret != RTCP_OK) {
             return ret;
@@ -149,10 +164,13 @@ static int pair_attempt(rtcp_lockdown_session_t *session,
         }
         memcpy(wifi_address, value, strlen(value) + 1U);
 
+        session->operation = "GeneratePairRecord";
+        RTCP_LOGI("lockdown", "generating pair record");
         ret = rtcp_pair_record_generate(record, device_key, device_key_length,
                                         wifi_address, config->host_id,
                                         config->system_buid, config->rng,
                                         config->rng_context);
+        RTCP_LOGI("lockdown", "pair record generation ret=%d", ret);
         if (ret != RTCP_OK) {
             return ret;
         }
@@ -167,7 +185,7 @@ static int pair_attempt(rtcp_lockdown_session_t *session,
     if (request_length == 0U) {
         return RTCP_EINVAL;
     }
-    ret = exchange(session, stream, request, request_length, &reply_length);
+    ret = exchange(session, stream, "Pair", request, request_length, &reply_length);
     if (ret != RTCP_OK) {
         return ret;
     }
@@ -197,6 +215,7 @@ static int pair(rtcp_lockdown_session_t *session)
         int ret;
 
         memset(&raw, 0, sizeof(raw));
+        session->operation = "OpenLockdown";
         ret = config->open_connection(config->connection_user, LOCKDOWN_PORT,
                                       &raw);
         if (ret != RTCP_OK) {
@@ -229,6 +248,7 @@ static int start_service(rtcp_lockdown_session_t *session)
     int ret;
 
     session->stage = RTCP_LOCKDOWN_STAGE_START_SESSION;
+    session->operation = "OpenSessionConnection";
     ret = config->open_connection(config->connection_user, LOCKDOWN_PORT,
                                   &session->control_raw);
     if (ret != RTCP_OK) {
@@ -241,8 +261,8 @@ static int start_service(rtcp_lockdown_session_t *session)
     if (request_length == 0U) {
         return RTCP_EINVAL;
     }
-    ret = exchange(session, &session->control_raw, request, request_length,
-                   &reply_length);
+    ret = exchange(session, &session->control_raw, "StartSession", request,
+                   request_length, &reply_length);
     if (ret != RTCP_OK) {
         return ret;
     }
@@ -257,6 +277,7 @@ static int start_service(rtcp_lockdown_session_t *session)
     }
 
     session->stage = RTCP_LOCKDOWN_STAGE_SESSION_TLS;
+    session->operation = "SessionTLS";
     ret = rtcp_lockdown_tls_open(&session->control_tls, &session->control_raw,
                                  config->record, config->rng,
                                  config->rng_context, step_timeout(session));
@@ -271,8 +292,8 @@ static int start_service(rtcp_lockdown_session_t *session)
     if (request_length == 0U) {
         return RTCP_EINVAL;
     }
-    ret = exchange(session, &session->control, request, request_length,
-                   &reply_length);
+    ret = exchange(session, &session->control, "StartService", request,
+                   request_length, &reply_length);
     if (ret != RTCP_OK) {
         return ret;
     }

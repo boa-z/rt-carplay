@@ -243,3 +243,38 @@ or network readiness. Next, use the same image on a fresh attachment for
 output plus `ipheth_status`, `ifconfig` and `carplay_usb net`. A later carkit
 service error must be distinguished from Pair/StartSession failure. Peer IPv6
 communication and reconnect-under-load remain unvalidated.
+
+## V11 pairing result and request-level diagnostics
+
+The supplied fresh-attachment Pair run establishes Lockdown, receives a
+400-byte TCP frame after SetValue UntrustedHostBUID, and later reaches total
+RX=1486 bytes/six mux frames before returning -4 at the broad `pair` stage.
+Earlier first-frame logging stops before those later replies, so the counts
+alone cannot identify the failed subrequest. There is no successful Pair,
+StartSession, or first IPHETH RX demonstrated by these logs.
+
+V12 records and logs operation names and request/reply lengths for
+SetValue/UntrustedHostBUID, GetValue/DevicePublicKey, GetValue/WiFiAddress, Pair,
+StartSession and StartService. Pair-record generation has begin/end markers;
+connection opening is separately named. Metadata remains available after
+failure cleanup, with transport exchange status distinct from a remote plist
+Error. An incomplete framed read logs received/wanted byte counts without
+printing the underlying plist, key or certificate contents.
+
+The shell command's per-read timeout is changed from 5000 to 30000 ms, matching
+libimobiledevice `property_list_service_receive_plist` in the audited
+`src/property_list_service.c` revision. The core's configurable default is not
+changed. This removes a shorter-than-reference wait but does not establish
+that the observed timeout was caused by a slow Pair reply or user interaction.
+No automatic retry is added after a transport timeout: partially consumed
+length-prefixed messages are not safely retried as new requests on the same
+stream. Existing explicit PairingDialogResponsePending handling is retained.
+
+A timeout-injection test confirms that a first-request timeout retains the
+operation and correct zero reply length, releases resources and closes the
+connection once. The denied-Pair test distinguishes a successfully received
+remote error reply from a transport timeout. Full pairing/session/TLS tests
+remain enabled. Next, use v12 on a fresh attachment and run `carplay_usb pair`
+directly, accepting any phone trust prompt; capture all request/reply markers,
+the final operation/stage/error, and IPHETH status. Driver and HCD behavior are
+unchanged by this diagnostic build.

@@ -471,9 +471,11 @@ static int cmd_pair(void)
     config.rng = lockdown_rng;
     config.label = "rt-carplay";
     config.record = &s_pair_record;
-    config.step_timeout_ms = 5000U;
+    /* libimobiledevice's normal plist receive uses 30000 ms. In particular,
+     * a Pair reply may wait while the user interacts with the phone. */
+    config.step_timeout_ms = 30000U;
     config.pair_retry_ms = 1000U;
-    config.pair_attempts = 180U; /* three minutes for the trust dialog */
+    config.pair_attempts = 180U; /* retry delays plus per-request I/O time */
     memset(&s_lockdown_connections, 0, sizeof(s_lockdown_connections));
     memset(&s_pair_record, 0, sizeof(s_pair_record));
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
@@ -485,6 +487,13 @@ static int cmd_pair(void)
         rt_kprintf("[carplay_usb] pair: failed ret=%d stage=%s error='%s'\n",
                    ret, rtcp_lockdown_stage_name(s_lockdown_session.stage),
                    s_lockdown_session.remote_error);
+        rt_kprintf("[carplay_usb] pair: operation=%s exchanges=%u\n",
+                   s_lockdown_session.operation ? s_lockdown_session.operation : "none",
+                   (unsigned)s_lockdown_session.exchange_count);
+        rt_kprintf("[carplay_usb] pair: last exchange ret=%d request=%u reply=%u\n",
+                   s_lockdown_session.last_exchange_result,
+                   (unsigned)s_lockdown_session.last_request_length,
+                   (unsigned)s_lockdown_session.last_reply_length);
         rt_kprintf("[carplay_usb] pair: rxbytes=%u frames=%u pending=%u\n",
                    (unsigned)s_mux.rx_bytes, (unsigned)s_mux.rx_frames,
                    (unsigned)s_mux.reassembly_length);

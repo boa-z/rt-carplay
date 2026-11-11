@@ -91,6 +91,11 @@ typedef struct {
     bool paired;
 
     rtcp_lockdown_stage_t stage;
+    const char *operation; /* static diagnostic name, preserved after failure */
+    uint32_t exchange_count;
+    size_t last_request_length;
+    size_t last_reply_length;
+    int last_exchange_result;
     char remote_error[RTCP_LOCKDOWN_SESSION_ERROR_MAX];
 
     uint8_t *scratch; /* reply frame plus device-key scratch */

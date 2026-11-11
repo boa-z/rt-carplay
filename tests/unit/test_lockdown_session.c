@@ -787,10 +787,53 @@ static void test_denied_pairing(void)
     assert(rtcp_lockdown_session_open(&session, &config) == RTCP_EIO);
     assert(s_phone.pair_requests == 1U);
     assert(strcmp(session.remote_error, "UserDeniedPairing") == 0);
+    assert(session.operation && !strcmp(session.operation, "Pair"));
+    assert(session.exchange_count >= 4 && session.last_request_length > 0);
+    assert(session.last_reply_length > 0 && session.last_exchange_result == RTCP_OK);
     assert(session.stage == RTCP_LOCKDOWN_STAGE_PAIR);
     assert(!session.paired);
     assert(session.scratch == NULL);
     assert_connections_closed();
+}
+
+static unsigned timeout_closes;
+static int diagnostic_read(void *context, void *buffer, size_t length, uint32_t ms)
+{
+    (void)context; (void)buffer; (void)length;
+    assert(ms == 25U);
+    return RTCP_ETIMEDOUT;
+}
+static int diagnostic_write(void *context, const void *data, size_t length)
+{
+    (void)context; assert(data && length); return RTCP_OK;
+}
+static int diagnostic_open(void *user, uint16_t port, rtcp_stream_t *stream)
+{
+    (void)user; assert(port == LOCKDOWN_PORT);
+    static const rtcp_stream_ops_t ops = {diagnostic_read, diagnostic_write};
+    stream->ops = &ops; stream->context = NULL; return RTCP_OK;
+}
+static void diagnostic_close(void *user, const rtcp_stream_t *stream)
+{
+    (void)user; assert(stream->ops); ++timeout_closes;
+}
+static void test_timeout_diagnostic_survives_cleanup(void)
+{
+    static rtcp_pair_record_t record;
+    static rtcp_lockdown_session_t session;
+    rtcp_lockdown_session_config_t config;
+    memset(&record, 0, sizeof(record));
+    make_config(&config, &record);
+    config.open_connection = diagnostic_open;
+    config.close_connection = diagnostic_close;
+    config.step_timeout_ms = 25U;
+    timeout_closes = 0;
+    assert(rtcp_lockdown_session_open(&session, &config) == RTCP_ETIMEDOUT);
+    assert(session.stage == RTCP_LOCKDOWN_STAGE_PAIR);
+    assert(!strcmp(session.operation, "SetValue/UntrustedHostBUID"));
+    assert(session.exchange_count == 1 && session.last_request_length > 0);
+    assert(session.last_reply_length == 0 && session.last_exchange_result == RTCP_ETIMEDOUT);
+    assert(!session.paired && !session.scratch && timeout_closes == 1);
 }
 
 int main(void)
@@ -810,6 +853,7 @@ int main(void)
 
     test_full_session();
     test_denied_pairing();
+    test_timeout_diagnostic_survives_cleanup();
 
     pthread_mutex_destroy(&s_phone.lock);
     puts("lockdown session host test passed");

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "rtcp/plist.h"
+#include "rtcp/log.h"
 #include "rtcp/rtcp.h"
 
 static bool is_bare_token(const char *value)
@@ -184,6 +185,8 @@ static int read_exact(const rtcp_stream_t *stream, uint8_t *buffer,
         int ret = stream->ops->read(stream->context, buffer + received,
                                     length - received, timeout_ms);
         if (ret < 0) {
+            RTCP_LOGW("lockdown", "read ret=%d received=%u wanted=%u", ret,
+                      (unsigned)received, (unsigned)length);
             return ret;
         }
         if (ret == 0) {

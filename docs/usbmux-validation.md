@@ -219,3 +219,27 @@ wrap. Separate tests bound/sanitize/truncate CONTROL text and clear stale
 text on an empty CONTROL. Plain and logging-enabled ASan/UBSan builds exercise
 these paths. Real device error text and successful GetValue still require the
 v11 board run. The independent Ethernet driver remains unchanged.
+
+## V11 board result: successful GetValue
+
+The next user-supplied UART run confirms VERSION 2.0, a SYN|ACK from 62078,
+seq=0/ack=1, and successful Lockdown connection establishment. The host sends
+its four-byte length prefix at seq=1, then the 317-byte XML request at seq=5.
+The phone returns a 365-byte mux TCP frame with seq=1/ack=322, containing a
+four-byte length prefix and 325-byte plist. `GetValue exchange ret=0`,
+`complete=1`, and parsed `ProductVersion=27.3` confirm successful framed
+request/reply exchange. No CONTROL type-3 error appears in this supplied run.
+The old malformed-request failure has not been proven equivalent to a specific
+CONTROL message because its text was never captured.
+
+The console truncates the long XML print, but the exchange's validated reply
+length and parsed Value independently establish success; an incomplete-looking
+console dump is not a failed reply. No new firmware is needed to proceed.
+
+IPHETH still reports RX=TX=0, submitted=1/completions=0, ready=no/carrier=down.
+GetValue success does not establish host trust, successful Pair, StartSession
+or network readiness. Next, use the same image on a fresh attachment for
+`carplay_usb pair`, accept any trust prompt, and capture the complete stage/error
+output plus `ipheth_status`, `ifconfig` and `carplay_usb net`. A later carkit
+service error must be distinguished from Pair/StartSession failure. Peer IPv6
+communication and reconnect-under-load remain unvalidated.

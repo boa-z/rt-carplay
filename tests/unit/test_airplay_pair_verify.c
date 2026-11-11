@@ -459,6 +459,11 @@ static void test_complete_exchange(bool tamper_controller_signature)
                AIRPLAY_PAIR_VERIFY_OK);
         assert(memcmp(screen_key, expected_screen_key,
                       sizeof(expected_screen_key)) == 0);
+        uint8_t input_key[32], expected_input[32];
+        derive_key(shared, stream_salt, "DataStream-Input-Encryption-Key", expected_input);
+        assert(airplay_pair_verify_derive_input_key(session, stream_connection_id, input_key) == AIRPLAY_PAIR_VERIFY_OK);
+        assert(memcmp(input_key, expected_input, 32) == 0);
+        assert(memcmp(input_key, screen_key, 32) != 0);
         airplay_pair_verify_destroy(session);
     }
     mbedtls_ecp_group_free(&client_group);

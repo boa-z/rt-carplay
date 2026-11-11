@@ -207,3 +207,10 @@ void airplay_rtsp_pairing_destroy(airplay_rtsp_pairing_t *session)
     memset(session, 0, sizeof(*session));
     rtsp_pairing_free(session);
 }
+
+airplay_pair_verify_result_t airplay_rtsp_pairing_derive_input_key(
+    const airplay_rtsp_pairing_t *s, uint64_t id, uint8_t key[AIRPLAY_PAIR_VERIFY_KEY_BYTES])
+{
+    if (!s) return AIRPLAY_PAIR_VERIFY_INVALID_ARGUMENT;
+    return airplay_pair_verify_derive_input_key(s->pair_verify, id, key);
+}

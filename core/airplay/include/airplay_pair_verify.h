@@ -102,3 +102,8 @@ airplay_pair_verify_result_t airplay_pair_verify_derive_screen_output_key(
     uint8_t output_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES]);
 
 void airplay_pair_verify_destroy(airplay_pair_verify_t *session);
+
+/* Independent microphone uplink key, never reuse the output encryption key. */
+airplay_pair_verify_result_t airplay_pair_verify_derive_input_key(
+    const airplay_pair_verify_t *, uint64_t stream_connection_id,
+    uint8_t input_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES]);

@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "audio_codec.h"
+#include "airplay_audio_sender.h"
+#include "mbedtls/chachapoly.h"
 #include "audio_jitter.h"
 #include "audio_mixer.h"
 #include "rtcp/rtcp.h"
@@ -92,9 +94,46 @@ static void opus(void)
     rtcp_audio_decoder_destroy(d); opus_encoder_destroy(e);
 }
 #endif
+static void uplink(void)
+{
+    airplay_audio_sender_config_t c = {.format={.sample_rate=48000,.channels=1,.clock_rate=48000}, .payload_type=100};
+    memset(c.input_key,0x42,32);
+    airplay_audio_sender_t *s;
+    assert(airplay_audio_sender_create(&c,&s)==0);
+    assert(airplay_audio_sender_frames(s)==480); /* IPv6 MTU-safe L16 */
+    int16_t pcm[960]; for(unsigned i=0;i<960;++i)pcm[i]=(int16_t)(i*13);
+    uint8_t wire[1452], decoded[1452];
+    int bytes=airplay_audio_sender_encode(s,pcm,480,false,wire,sizeof(wire));
+    assert(bytes==996 && wire[1]==100 && wire[2]==0 && wire[3]==0);
+    mbedtls_chachapoly_context cipher;mbedtls_chachapoly_init(&cipher);
+    assert(mbedtls_chachapoly_setkey(&cipher,c.input_key)==0);
+    uint8_t nonce[12]={0};memcpy(nonce+4,wire+bytes-8,8);
+    assert(mbedtls_chachapoly_auth_decrypt(&cipher,bytes-36,nonce,wire+4,8,wire+bytes-24,wire+12,decoded)==0);
+    assert(decoded[2]==0 && decoded[3]==13); /* big endian wire L16 */
+    bytes=airplay_audio_sender_encode(s,pcm,480,true,wire,sizeof(wire));
+    memcpy(nonce+4,wire+bytes-8,8);
+    assert(nonce[4]==1 && wire[3]==1 && wire[6]==1 && wire[7]==224); /* clock 480 */
+    assert(mbedtls_chachapoly_auth_decrypt(&cipher,bytes-36,nonce,wire+4,8,wire+bytes-24,wire+12,decoded)==0);
+    for(int i=0;i<bytes-36;++i)assert(decoded[i]==0);
+    airplay_audio_sender_destroy(s);
+#ifdef RTCP_AUDIO_CODECS
+    assert(rtcp_audio_format_parse(0x20000000,&c.format));
+    assert(airplay_audio_sender_create(&c,&s)==0);
+    assert(airplay_audio_sender_frames(s)==960);
+    bytes=airplay_audio_sender_encode(s,pcm,960,false,wire,sizeof(wire));assert(bytes>36 && bytes<=1452);
+    memcpy(nonce+4,wire+bytes-8,8);
+    assert(mbedtls_chachapoly_auth_decrypt(&cipher,bytes-36,nonce,wire+4,8,wire+bytes-24,wire+12,decoded)==0);
+    rtcp_audio_decoder_t *d;assert(rtcp_audio_decoder_create(&c.format,&d)==0);
+    size_t n;assert(rtcp_audio_decoder_decode(d,decoded,(size_t)bytes-36,pcm,960,&n)==0 && n==960);
+    bytes=airplay_audio_sender_encode(s,pcm,960,false,wire,sizeof(wire));assert(bytes>36);
+    assert(wire[6]==1 && wire[7]==224); /* 24k RTP clock, 48k capture */
+    rtcp_audio_decoder_destroy(d);airplay_audio_sender_destroy(s);
+#endif
+    mbedtls_chachapoly_free(&cipher);
+}
 int main(void)
 {
-    jitter(); mixing();
+    jitter(); mixing(); uplink();
 #ifdef RTCP_AUDIO_CODECS
     aac("tests/fixtures/audio/sine-48k.aac",0x800000);
     aac("tests/fixtures/audio/sine-44k.aac",0x400000); opus();

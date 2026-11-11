@@ -570,10 +570,10 @@ airplay_pair_verify_result_t airplay_pair_verify_get_event_keys(
     return AIRPLAY_PAIR_VERIFY_OK;
 }
 
-airplay_pair_verify_result_t airplay_pair_verify_derive_screen_output_key(
+static airplay_pair_verify_result_t derive_stream_key(
     const airplay_pair_verify_t *session,
     uint64_t stream_connection_id,
-    uint8_t output_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES])
+    uint8_t output_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES], const char *label)
 {
     if (output_key != NULL) memset(output_key, 0, AIRPLAY_PAIR_VERIFY_KEY_BYTES);
     if (session == NULL || output_key == NULL) {
@@ -594,8 +594,7 @@ airplay_pair_verify_result_t airplay_pair_verify_derive_screen_output_key(
     int rc = sha512 == NULL ? -1 : mbedtls_hkdf(
         sha512, (const uint8_t *)salt, (size_t)salt_len,
         session->shared_secret, sizeof(session->shared_secret),
-        (const uint8_t *)"DataStream-Output-Encryption-Key",
-        sizeof("DataStream-Output-Encryption-Key") - 1U,
+        (const uint8_t *)label, strlen(label),
         output_key, AIRPLAY_PAIR_VERIFY_KEY_BYTES);
     scrub(salt, sizeof(salt));
     if (rc != 0) {
@@ -604,6 +603,13 @@ airplay_pair_verify_result_t airplay_pair_verify_derive_screen_output_key(
     }
     return AIRPLAY_PAIR_VERIFY_OK;
 }
+
+airplay_pair_verify_result_t airplay_pair_verify_derive_screen_output_key(
+    const airplay_pair_verify_t *s, uint64_t id, uint8_t key[AIRPLAY_PAIR_VERIFY_KEY_BYTES])
+{ return derive_stream_key(s, id, key, "DataStream-Output-Encryption-Key"); }
+airplay_pair_verify_result_t airplay_pair_verify_derive_input_key(
+    const airplay_pair_verify_t *s, uint64_t id, uint8_t key[AIRPLAY_PAIR_VERIFY_KEY_BYTES])
+{ return derive_stream_key(s, id, key, "DataStream-Input-Encryption-Key"); }
 
 void airplay_pair_verify_destroy(airplay_pair_verify_t *session)
 {

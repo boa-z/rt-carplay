@@ -86,6 +86,8 @@ typedef struct {
     volatile bool listening;
     volatile int error;
     volatile bool authenticated;
+    volatile bool mfi_completed;
+    volatile unsigned wifi_configs, availability, invites, reinvites, invite_acks;
     volatile bool identification_accepted;
     volatile unsigned rx_bytes;
     volatile unsigned tx_bytes;
@@ -164,6 +166,7 @@ static void link_event(iap2_session_event_t event, void *context)
         break;
     case IAP2_SESSION_EVENT_MFI_AUTHENTICATED:
         link->authenticated = true;
+        link->mfi_completed = true;
         IAP2_LOG("MFi authenticated");
         break;
     case IAP2_SESSION_EVENT_MFI_FAILED:
@@ -195,13 +198,24 @@ static void link_event(iap2_session_event_t event, void *context)
         IAP2_LOG("wireless subscriptions sent");
         break;
     case IAP2_SESSION_EVENT_WIFI_CONFIG_SENT:
+        ++link->wifi_configs;
         IAP2_LOG("Wi-Fi configuration sent");
         break;
     case IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT:
+        ++link->invites;
         IAP2_LOG("CarPlayStartSession sent");
         break;
     case IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT:
+        ++link->reinvites;
         IAP2_LOG("CarPlayStartSession re-sent");
+        break;
+    case IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED:
+        ++link->availability;
+        IAP2_LOG("CarPlayAvailability received");
+        break;
+    case IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED:
+        ++link->invite_acks;
+        IAP2_LOG("CarPlayStartSession link-acked");
         break;
     case IAP2_SESSION_EVENT_LINK_READY:
         IAP2_LOG("iAP2 link ready");
@@ -514,6 +528,12 @@ void carplay_iap2_get_status(carplay_iap2_status_t *out)
     out->connected = s_link.link_up;
     out->identified = s_link.link_up && s_link.identification_accepted;
     out->authenticated = s_link.link_up && s_link.authenticated;
+    out->mfi_completed = s_link.mfi_completed;
+    out->wifi_configs = s_link.wifi_configs;
+    out->availability = s_link.availability;
+    out->invites = s_link.invites;
+    out->reinvites = s_link.reinvites;
+    out->invite_acks = s_link.invite_acks;
     out->error = s_link.error;
     rt_hw_interrupt_enable(flags);
 }
@@ -564,6 +584,11 @@ static int cmd_carplay_iap2(int argc, char **argv)
                    carplay_iap2_authenticated() ? "authenticated"
                        : (s_link.link_up ? "not authenticated" : "-"),
                    s_link.rx_bytes, s_link.tx_bytes, s_link.events);
+        rt_kprintf("  listening=%u error=%d MFi_completed=%u wifi_configs=%u "
+                   "availability=%u invites=%u reinvites=%u link_acks=%u\n",
+                   s_link.listening, s_link.error, s_link.mfi_completed,
+                   s_link.wifi_configs, s_link.availability, s_link.invites,
+                   s_link.reinvites, s_link.invite_acks);
         return 0;
     }
     rt_kprintf("usage: carplay_iap2 start|stop|status\n");

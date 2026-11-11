@@ -40,6 +40,8 @@ struct mdns_responder {
     uint8_t txt[1024];
     size_t txt_len;
     int fd;
+    rtcp_addr_t query_peer;
+    bool query_peer_pending;
 
     uint8_t rx[MDNS_MAX_PACKET];
     uint8_t tx[MDNS_MAX_PACKET];
@@ -551,6 +553,13 @@ int mdns_responder_poll_ex(mdns_responder_t *responder, const struct rtcp_net *n
         sizeof(responder->tx), &unicast);
     if (response_len == 0U) return 0;
 
+    if (from.family == RTCP_AF_INET && from.addr[0] != 0U &&
+        from.addr[0] != 127U && from.addr[0] < 224U &&
+        memcmp(from.addr, responder->ipv4, 4U) != 0) {
+        responder->query_peer = from;
+        responder->query_peer_pending = true;
+    }
+
     rtcp_addr_t destination;
     memset(&destination, 0, sizeof(destination));
     destination.family = RTCP_AF_INET;
@@ -568,6 +577,14 @@ int mdns_responder_poll_ex(mdns_responder_t *responder, const struct rtcp_net *n
     RTCP_LOGD(TAG, "answered %u bytes (%s)", (unsigned)response_len,
               unicast ? "unicast" : "multicast");
     return 1;
+}
+
+bool mdns_responder_take_query_peer(mdns_responder_t *responder, rtcp_addr_t *peer)
+{
+    if (!responder || !peer || !responder->query_peer_pending) return false;
+    *peer = responder->query_peer;
+    responder->query_peer_pending = false;
+    return true;
 }
 
 int mdns_responder_poll(mdns_responder_t *responder, const struct rtcp_net *net,

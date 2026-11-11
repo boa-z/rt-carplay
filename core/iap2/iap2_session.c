@@ -434,6 +434,12 @@ static bool send_wifi_configuration(iap2_session_t *session,
     return true;
 }
 
+static void carplay_invite_acked(uint16_t message_id, void *context)
+{
+    if (message_id == IAP2_MSG_CARPLAY_START_SESSION)
+        emit_event(context, IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED);
+}
+
 static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
                                        bool reinvite)
 {
@@ -478,7 +484,7 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
         return false;
     }
     if (!send_csm(session, IAP2_MSG_CARPLAY_START_SESSION, body, body_len,
-                  NULL, NULL, now_ms)) {
+                  carplay_invite_acked, session, now_ms)) {
         return false;
     }
     session->start_session_sent = true;
@@ -685,6 +691,7 @@ void iap2_session_handle_message(iap2_session_t *session,
                                       now_ms);
         break;
     case IAP2_MSG_CARPLAY_AVAILABILITY:
+        emit_event(session, IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED);
         if (!session->airplay_event_connected) {
             (void)send_carplay_start_session(session, now_ms, false);
         }

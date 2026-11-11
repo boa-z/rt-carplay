@@ -23,7 +23,7 @@ typedef struct {
     uint8_t peer_seq;
     csm_record_t messages[MAX_RECORDED_MESSAGES];
     size_t message_count;
-    unsigned events[16];
+    unsigned events[64];
     unsigned event_count;
 } harness_t;
 
@@ -372,10 +372,13 @@ int main(void)
 
     /* CarPlay availability -> start session invitation. */
     feed_peer_csm(session, 0x4300, NULL, 0, 70);
+    assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED));
+    assert(!event_seen(h, IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED));
     drain_tx(session, 71);
     const csm_record_t *start = last_message(h, 0x4301);
     assert(start != NULL && start->body_len > 0U);
     assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT));
+    assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED));
 
     /* No second invite while the first one is outstanding. */
     size_t invites = 0U;

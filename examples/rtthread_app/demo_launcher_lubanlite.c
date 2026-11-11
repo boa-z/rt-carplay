@@ -33,6 +33,7 @@ typedef struct {
     char pin[16];
     bool usb;
     bool wireless, bt_ready, bt_connected, bt_identified, bt_authenticated;
+    unsigned wifi_configs, availability, invites, reinvites, invite_acks;
     char ssid[33];
     rtcp_bt_pairing_status_t pairing;
     char ipv6[64];
@@ -170,7 +171,11 @@ static void sample_debug(void)
         carplay_iap2_status_t bt;
         carplay_iap2_get_status(&bt);
         sample.bt_ready = bt.listening; sample.bt_connected = bt.connected;
-        sample.bt_identified = bt.identified; sample.bt_authenticated = bt.authenticated;
+        sample.bt_identified = bt.identified;
+        sample.bt_authenticated = bt.authenticated || bt.mfi_completed;
+        sample.wifi_configs = bt.wifi_configs;
+        sample.availability = bt.availability; sample.invite_acks = bt.invite_acks;
+        sample.invites = bt.invites; sample.reinvites = bt.reinvites;
         rtcp_bt_lubanlite_pairing_status(&sample.pairing);
     }
 #endif
@@ -185,6 +190,9 @@ static void sample_debug(void)
     memcpy(status.ssid, sample.ssid, sizeof(status.ssid));
     status.bt_ready = sample.bt_ready; status.bt_connected = sample.bt_connected;
     status.bt_identified = sample.bt_identified; status.bt_authenticated = sample.bt_authenticated;
+    status.wifi_configs = sample.wifi_configs;
+    status.availability = sample.availability; status.invite_acks = sample.invite_acks;
+    status.invites = sample.invites; status.reinvites = sample.reinvites;
     status.pairing = sample.pairing;
     status.received = sample.received; status.frames = sample.frames;
     status.drops = sample.drops; status.errors = sample.errors;
@@ -622,13 +630,15 @@ static void update_page(lv_timer_t *timer)
         last_debug_ms = now;
         if (snapshot.wireless)
             lv_label_set_text_fmt(pin_label,
-                "Wi-Fi: %s\nBluetooth: %s | MFi: %s\nBT last HCI/security: %02x/%u | Bonds %u/%u: %s",
+                "Wi-Fi: %s\nBluetooth: %s | MFi: %s\nBT last HCI/security: %02x/%u | Bonds %u/%u: %s\nWi-Fi sent: %u | Availability: %u\nInvite: %u (+%u retries) | Link ACK: %u",
                 snapshot.ssid[0] ? snapshot.ssid : "starting",
                 snapshot.bt_connected ? "connected" : snapshot.bt_ready ? "discoverable" : "starting",
                 snapshot.bt_authenticated ? "authenticated" : snapshot.bt_identified ? "identified" : "waiting",
                 snapshot.pairing.hci_error, snapshot.pairing.security_error,
                 snapshot.pairing.bond_count, snapshot.pairing.bond_capacity,
-                snapshot.pairing.storage_error ? "I/O ERROR" : snapshot.pairing.persistent ? "storage enabled" : "RAM only");
+                snapshot.pairing.storage_error ? "I/O ERROR" : snapshot.pairing.persistent ? "storage enabled" : "RAM only",
+                snapshot.wifi_configs, snapshot.availability,
+                snapshot.invites, snapshot.reinvites, snapshot.invite_acks);
     }
     if ((int)snapshot.stage == last_stage && !mode_update) return;
     last_stage = (int)snapshot.stage;

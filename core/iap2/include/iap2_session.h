@@ -68,6 +68,8 @@ typedef enum {
     IAP2_SESSION_EVENT_MFI_ACK_FAILED,        /* 0xAA03 was not link-acked */
     IAP2_SESSION_EVENT_MFI_PHONE_REJECTED,    /* phone sent 0xAA04 */
     IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED, /* 0xAA03 could not be queued */
+    IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED,
+    IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED, /* link ACK, not application acceptance */
 } iap2_session_event_t;
 
 /*

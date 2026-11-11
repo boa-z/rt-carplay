@@ -80,6 +80,11 @@ int mdns_responder_poll_ex(mdns_responder_t *responder,
                            mdns_responder_packet_sink_t sink,
                            void *sink_context);
 
+/* Consume the IPv4 source of a successfully parsed query for our records.
+ * A discovery candidate only: it is not an authenticated CarPlay endpoint.
+ * Called by the same owner as poll_ex; loopback/self/invalid sources ignored. */
+bool mdns_responder_take_query_peer(mdns_responder_t *responder, rtcp_addr_t *peer);
+
 /* Sends a raw mDNS packet (e.g. a browser query) to 224.0.0.251:5353 on the
  * responder's socket.  Returns the number of bytes sent or a negative RTCP
  * error. */

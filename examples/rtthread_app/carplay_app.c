@@ -181,8 +181,8 @@ typedef struct {
     unsigned ctrl_attempts;
     unsigned ctrl_responses;
     int ctrl_last_status;
-    /* Last IPv4 peer that opened an RTSP connection: the phone on our AP.
-     * Used for a unicast mDNS query as well as the multicast one. */
+    /* Discovery candidate from an AirPlay query on the AP, superseded by
+     * the actual RTSP peer. Used only for a unicast mDNS query. */
     uint8_t ctrl_peer_ipv4[4];
     bool ctrl_peer_valid;
     unsigned browse_queries;
@@ -629,11 +629,20 @@ static void carplay_ctrl_tick(app_state_t *app, uint32_t now_ms)
 {
     if (app->browser == NULL || !app->ctrl_enabled) return;
 
-    /* Learn the phone's Wi-Fi address from its RTSP connection, then query it
-     * directly as well as via multicast.  The unicast query does not depend
-     * on multicast delivery through the soft-AP. */
+    /* Bootstrap from a query for our AirPlay records, before RTSP exists.
+     * This SDK's DHCP AP is /24. A candidate is only queried for DNS-SD;
+     * connect-out still requires the browser to resolve a Control SRV. */
     rtcp_addr_t peer;
-    if (airplay_rtsp_server_get_peer(app->server, &peer)) {
+    if (mdns_responder_take_query_peer(app->mdns, &peer) &&
+        memcmp(peer.addr, app->ipv4, 3U) == 0 &&
+        peer.addr[3] != 0U && peer.addr[3] != 255U) {
+        if (!app->ctrl_peer_valid || memcmp(app->ctrl_peer_ipv4, peer.addr, 4U))
+            APP_LOG("carplay_ctrl=peer source=mdns_query ip=%u.%u.%u.%u",
+                    peer.addr[0], peer.addr[1], peer.addr[2], peer.addr[3]);
+        memcpy(app->ctrl_peer_ipv4, peer.addr, 4U);
+        app->ctrl_peer_valid = true;
+    }
+    if (airplay_rtsp_server_get_peer(app->server, &peer) && peer.family == RTCP_AF_INET) {
         memcpy(app->ctrl_peer_ipv4, peer.addr, 4U);
         app->ctrl_peer_valid = true;
     }

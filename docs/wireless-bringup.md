@@ -26,6 +26,53 @@ SDK 的 `python3 packages/third-party/zephyr-bluetooth/tests/run_enable_settings
 隔离编译实际 `bt_enable()`，验证 settings 失败时不打开 HCI、恢复后可重试，
 以及真正完成启用后的重复调用仍返回 `-EALREADY`。
 
+## v29：已关联 AP、mDNS 有应答，但没有 CarPlay 画面
+
+板端新日志已有 WPA2 四次握手完成及 mDNS 回复；这说明 AP 关联和一部分
+UDP 处理已运行，不能据此证明 RFCOMM iAP2、MFi 或 CarPlay 会话邀请成功。
+`OnDisassoc reason=8` 后随即重新关联，单凭该片段无法解释离网的原因。
+
+代码中确认 Control 单播查询的候选地址仅从已建立的 RTSP 连接取得。
+因此 RTSP 尚未建立时，即使手机已查询本机 AirPlay 服务，仍会反复打印
+`unicast=none`，无法启用原本用于绕过 AP 组播问题的单播发现路径。
+这是发现流程的缺口，尚不能认定它是这台手机无法激活 CarPlay 的唯一根因。
+
+v29 在 responder 成功解析本机记录的查询后提取来源。应用只使用 AP 同一
+/24 内的非本机、非网络／广播 IPv4 地址作为候选（与本 SDK DHCP 的固定
+`255.255.255.0` 一致）。候选只用于向其 5353 端口查询 `_carplay-ctrl`，
+不会推定端口、伪造 DNS-SD 服务或直接发送 CarPlay 激活请求。
+Control connect-out 仍要求 browser 解析出 SRV；实际 RTSP IPv4 peer 优先。
+无关查询、响应包、畸形包、自身回环不会提供候选。
+
+同时保留本次无线服务的 MFi 成功、Wi-Fi 配置发送、Availability、Invite、
+重邀和链路 ACK 计数，RFCOMM 在 Wi-Fi 接管时正常关闭也不会抹掉这些计数。
+它们随无线服务重新启动清零。Invite 表示发送路径成功，不代表手机接受；
+link ACK 也只确认 iAP2 链路收到，不等同于 CarPlay 激活成功。
+
+验证时从选择 Wireless 前开始保存日志，卡住时执行：
+
+```text
+carplay_iap2 status
+carplay_bt status
+carplay_ctrl status
+carplay_status
+```
+
+* `MFi_completed=0`：先排查 RFCOMM/iAP2/MFi；手机系统显示蓝牙已连接不够。
+* MFi 完成但 `availability=0`：尚未收到手机的 CarPlay availability，保留早期
+  identification/subscriptions 日志，不用修改 Wi-Fi 密码来试错。
+* `availability>0`、`invites=0`：检查发邀请所需状态和参数，保留 iAP2 日志。
+* `invites>0`、`link_acks=0`：检查邀请是否还在队列中及 RFCOMM 链路是否断开。
+* 已有 ACK、无 RTSP：检查 Control 发现结果、手机激活／用户确认和网络接管。
+  新日志应有 `source=mdns_query` 及之后的 `unicast_rc`；没有 SRV 时仍不会
+  connect-out。请保留 `carplay_ctrl status` 的 packets、updates 和 endpoints。
+* RTSP 已进入配对：按该连接的请求／错误继续排查，不再停留在蓝牙状态上。
+
+已对比 DiPlay 的 0x4301 参数布局及 LIVI 的 mDNS socket 设置；未找到据此
+需要修改本地 0x4301 编码的证据。实际 SDK `udp_new()` 已把组播 TTL 初始化为
+`UDP_TTL`，本方案 `UDP_TTL=255`，因此 v29 不改 TTL、广播能力或协议公告值。
+主机回归验证了候选提取及邀请 ACK 事件，板端是否因此进入 RTSP 仍待验证。
+
 ## 已确认的代码问题及修正
 
 | 问题 | 实际源码和机制 | 修正 |

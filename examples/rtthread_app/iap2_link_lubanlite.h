@@ -38,6 +38,8 @@ bool carplay_iap2_authenticated(void);
 
 typedef struct {
     bool running, listening, connected, identified, authenticated;
+    unsigned wifi_configs, availability, invites, reinvites, invite_acks;
+    bool mfi_completed; /* retained through normal RFCOMM Wi-Fi handover */
     int error; /* asynchronous startup/session failure; reset on start */
 } carplay_iap2_status_t;
 void carplay_iap2_get_status(carplay_iap2_status_t *status);

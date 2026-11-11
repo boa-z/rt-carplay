@@ -141,13 +141,18 @@ static void test_parse_frame_errors(void)
     assert(rtcp_usbmux_parse_frame(stream, sizeof(stream), &frame_length,
                                    &proto, &payload, &payload_length) ==
            RTCP_EIO);
-    /* TCP frame without the mux magic. */
+    /* Incoming marker is opaque, matching usbmuxd. */
     memset(stream, 0, sizeof(stream));
     stream[3] = 6U;
     stream[7] = 36U;
     assert(rtcp_usbmux_parse_frame(stream, sizeof(stream), &frame_length,
-                                   &proto, &payload, &payload_length) ==
-           RTCP_EIO);
+                                   &proto, &payload, &payload_length) == 1);
+    stream[3] = 7; /* unsupported protocol remains invalid */
+    assert(rtcp_usbmux_parse_frame(stream, sizeof(stream), &frame_length,
+                                   &proto, &payload, &payload_length) == RTCP_EIO);
+    stream[3] = 6; stream[7] = 35; /* incomplete TCP header */
+    assert(rtcp_usbmux_parse_frame(stream, sizeof(stream), &frame_length,
+                                   &proto, &payload, &payload_length) == RTCP_EIO);
 }
 
 static void test_parse_tcp(void)

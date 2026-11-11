@@ -180,17 +180,15 @@ static bool plausible_frame_header(const uint8_t *data, size_t length)
     uint32_t proto = read_be32(data);
     uint32_t frame_size = read_be32(data + 4U);
     if (proto != RTCP_USBMUX_PROTO_VERSION && proto != RTCP_USBMUX_PROTO_SETUP &&
-        proto != RTCP_USBMUX_PROTO_TCP) {
+        proto != RTCP_USBMUX_PROTO_CONTROL && proto != RTCP_USBMUX_PROTO_TCP) {
         return false;
     }
     if (proto == RTCP_USBMUX_PROTO_VERSION) {
         return frame_size == RTCP_USBMUX_VERSION_PACKET_SIZE;
     }
-    if (frame_size < 8U || frame_size > (1U << 20)) return false;
-    if (length >= 16U && read_be32(data + 8U) != RTCP_USBMUX_MAGIC) {
-        return false;
-    }
-    return true;
+    size_t minimum = proto == RTCP_USBMUX_PROTO_TCP ? 36U :
+                     proto == RTCP_USBMUX_PROTO_SETUP ? 17U : 16U;
+    return frame_size >= minimum && frame_size <= (1U << 20);
 }
 
 int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
@@ -245,6 +243,16 @@ int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
                 offset += padding;
                 continue;
             }
+            const uint8_t *bad = host->reassembly + offset;
+            if (remaining >= 8U)
+                RTCP_LOGW(USBMUX_HOST_TAG, "invalid header proto=%08x length=%u buffered=%u",
+                          (unsigned)read_be32(bad), (unsigned)read_be32(bad + 4U),
+                          (unsigned)remaining);
+            if (remaining >= 16U)
+                RTCP_LOGW(USBMUX_HOST_TAG, "header field=%08x tx=%u rx=%u",
+                          (unsigned)read_be32(bad + 8U),
+                          (unsigned)((uint16_t)bad[12] << 8U | bad[13]),
+                          (unsigned)((uint16_t)bad[14] << 8U | bad[15]));
             RTCP_LOGW(USBMUX_HOST_TAG, "frame desynchronised, dropping");
             host->reassembly_length = 0U;
             return RTCP_EIO;
@@ -261,8 +269,24 @@ int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
              * this is distinct from the TCP stream acknowledgment. */
             const uint8_t *header = host->reassembly + offset;
             host->rx_index = (uint16_t)((uint16_t)header[14] << 8U | header[15]);
-            if (proto == RTCP_USBMUX_PROTO_TCP)
+            if (host->rx_frames < 3U)
+                RTCP_LOGI(USBMUX_HOST_TAG, "rx proto=%u length=%u field=%08x tx=%u rx=%u",
+                          (unsigned)proto, (unsigned)frame_length,
+                          (unsigned)read_be32(header + 8U),
+                          (unsigned)((uint16_t)header[12] << 8U | header[13]),
+                          (unsigned)host->rx_index);
+            if (proto == RTCP_USBMUX_PROTO_TCP) {
+                if (host->rx_frames < 3U)
+                    RTCP_LOGI(USBMUX_HOST_TAG, "tcp src=%u dst=%u flags=%02x",
+                              (unsigned)((uint16_t)payload[0] << 8U | payload[1]),
+                              (unsigned)((uint16_t)payload[2] << 8U | payload[3]),
+                              (unsigned)payload[13]);
                 handle_tcp(host, payload, payload_length);
+            } else if (proto == RTCP_USBMUX_PROTO_CONTROL) {
+                RTCP_LOGW(USBMUX_HOST_TAG, "device control type=%u bytes=%u",
+                          payload_length ? (unsigned)payload[0] : 0U,
+                          (unsigned)payload_length);
+            }
         }
         ++host->rx_frames;
         offset += frame_length;

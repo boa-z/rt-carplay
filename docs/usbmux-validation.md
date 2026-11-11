@@ -140,3 +140,39 @@ GetValue first, then perform a fresh-attachment pairing attempt. Only after a
 successful external session/readiness transition should Ethernet traffic be
 assessed. If the stream opens but a later Pair/SSL/service error appears,
 record its exact stage; that is new evidence rather than the same SYN timeout.
+
+
+## V9 result and asymmetric RX header validation
+
+V9 board evidence differs from v8: after the valid 20-byte VERSION reply,
+36 more bytes arrive. Both fresh-attachment tests reach RX bytes=56 but
+frames=1, then fail with `frame desynchronised`. The complete extra transfer
+was rejected before TCP dispatch. Its contents were not captured, so neither
+SYN|ACK nor RST nor a particular third-word value is yet established. IPHETH
+remains without first RX; this does not identify a pairing rejection.
+
+Rechecking usbmuxd's `device_data_input` shows no equality check between the
+peer's third header word and the host's outgoing 0xfeedface marker. Our RX
+parser and optional-padding plausibility check imposed that unsupported
+symmetry, and all earlier synthetic peer builders used our host marker.
+V10 treats that inbound word as opaque while retaining recognized protocol,
+bounded length and protocol-specific minimum size checks. VERSION stays
+exactly 20 bytes; TCP requires at least a 16-byte mux + 20-byte TCP header;
+SETUP requires its byte; CONTROL is recognized separately and logged by type
+and length, without dumping its contents or delivering it as TCP. Host TX
+still uses 0xfeedface.
+
+New first-frame diagnostics report protocol, length, third word and mux
+sequences, then TCP source/destination/flags. Invalid headers log only complete
+available header fields before dropping, without reading truncated storage.
+These logs contain no plist/TLS/pair-record payload. The successful header/TCP
+logs are limited to the first two post-VERSION frames. Their purpose is to
+identify the actual board reply, including the possibility of RST rather than
+SYN|ACK, without inferring it solely from a 36-byte length.
+
+An independent 36-byte SYN|ACK vector tests opaque third words 0,
+0x12345678 and 0xfeedface; each reaches stream establishment at total 56 RX
+bytes/two frames. Separate tests retain rejection of unknown protocols and
+undersized TCP headers and acceptance of CONTROL without TCP dispatch. These
+are constructed regression vectors, not bytes captured from this iPhone.
+The source-backed RX correction still requires board confirmation.

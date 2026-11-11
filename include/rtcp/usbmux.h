@@ -6,9 +6,10 @@
  * USBMUX is not iAP2 and not NCM.  It is a small framing protocol that
  * carries several TCP-like streams over one bulk pipe:
  *
- *   frame  = proto:u32be | length:u32be | magic:u32be | tx:u16be | rx:u16be
+ *   host v2 frame = proto:u32be | length:u32be | magic:u32be | tx:u16be | rx:u16be
  *            | payload
  *
+ * The peer's third header word is opaque on RX, matching usbmuxd.
  * The first frame sent by the host is the 20-byte version packet; it is the
  * initial packet uses an eight-byte header and three u32be words for
  * major (2), minor and padding, rather than the v2 header/magic.  The
@@ -28,6 +29,7 @@
 #include <stdint.h>
 
 #define RTCP_USBMUX_PROTO_VERSION 0U
+#define RTCP_USBMUX_PROTO_CONTROL 1U
 #define RTCP_USBMUX_PROTO_SETUP 2U
 #define RTCP_USBMUX_PROTO_TCP 6U
 
@@ -84,11 +86,14 @@ size_t rtcp_usbmux_build_tcp(uint8_t *output, size_t capacity, uint16_t tx_index
                              size_t payload_length);
 
 /*
- * Split one frame from a receive buffer.  On success returns 1 and sets
+ * Split one frame from a receive buffer. The outbound magic is not an
+ * inbound invariant: like usbmuxd, RX validates protocol and size instead.
+ *  On success returns 1 and sets
  * *frame_length, *proto and the payload pointer/length.  Returns 0 when the
  * buffer does not yet hold a complete frame (wait for more bulk data) and
  * RTCP_EIO when the header is not a valid USBMUX frame.  A frame length of
- * less than 8 or more than 1 MiB is treated as a desynchronised stream.
+ * below that protocol's minimum or more than 1 MiB is rejected, as is an
+ * unknown protocol. VERSION has a fixed 20-byte size.
  */
 int rtcp_usbmux_parse_frame(const uint8_t *data, size_t length,
                             size_t *frame_length, uint32_t *proto,

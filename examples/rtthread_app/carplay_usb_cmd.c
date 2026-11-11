@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "carplay_app.h"
+#include "carplay_usb.h"
 #include "carplay_mfi_provider.h"
 #include "iap2_session.h"
 #include "iap2_stream.h"
@@ -887,9 +888,52 @@ static int cmd_net(void)
     return 0;
 }
 
+/* Programmatic composition: shell commands and the demo share one transport.
+ * The demo worker serializes these calls; no blocking work runs in LVGL. */
+int carplay_usb_open(void)
+{
+    return rtcp_usb_lubanlite.ops->open(rtcp_usb_lubanlite.context, usb_event, NULL);
+}
+
+bool carplay_usb_attached(void)
+{
+    rtcp_usb_device_t device;
+    return rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context, &device) == RTCP_OK;
+}
+
+int carplay_usb_pair(void)
+{
+    (void)cmd_pair();
+    rtcp_stream_t service = rtcp_lockdown_session_service(&s_lockdown_session);
+    return service.ops != NULL ? RTCP_OK : RTCP_EIO;
+}
+
+int carplay_usb_start_iap2(void)
+{
+    (void)cmd_iap2();
+    return s_iap2_usb.running ? RTCP_OK : RTCP_EIO;
+}
+
+bool carplay_usb_iap2_running(void) { return s_iap2_usb.running; }
+
+int carplay_usb_close_session(void)
+{
+    if (!cmd_iap2_stop()) return RTCP_ETIMEDOUT;
+    rtcp_lockdown_session_close(&s_lockdown_session);
+    memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
+    return RTCP_OK;
+}
+
 static int cmd_carplay_usb(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "status";
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+    if (strcmp(what, "status") != 0 && strcmp(what, "net") != 0 &&
+        !(strcmp(what, "desc") == 0 && argc == 2)) {
+        rt_kprintf("[carplay_usb] automatic demo owns USB; unplug to end the session\n");
+        return 1;
+    }
+#endif
 
     if (strcmp(what, "start") == 0) {
         int ret = rtcp_usb_lubanlite.ops->open(

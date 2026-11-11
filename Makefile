@@ -163,3 +163,13 @@ check-lubanlite-touch:
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_touch \
 	  tests/unit/test_lubanlite_touch.c -o $(BUILD)/test_lubanlite_touch
 	$(BUILD)/test_lubanlite_touch
+
+# Automatic wired demo lifecycle with actual SDK LVGL public headers.
+.PHONY: check-lubanlite-demo
+check-lubanlite-demo:
+	@test -n "$(SDK_ROOT)" || (echo 'set SDK_ROOT to Luban-Lite checkout'; exit 1)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -Itests/support/lubanlite_demo \
+	  -I$(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c \
+	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_demo
+	$(BUILD)/test_lubanlite_demo

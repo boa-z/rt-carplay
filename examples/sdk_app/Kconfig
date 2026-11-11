@@ -7,8 +7,23 @@
 
 menu "rt-carplay application"
 
+config RTCARPLAY_DEMO_LAUNCHER
+    bool "LVGL wired demonstration launch page and automatic connection"
+    default n
+    depends on LPKG_USING_LVGL && LVGL_V_9 && RTCARPLAY_USB_HOST && RTCARPLAY_VIDEO
+    depends on !RT_USING_MODULE && !LPKG_USING_LVGL_SQUARELINE
+    help
+      Display an informational launch page, start the wired receiver and
+      automatically pair/start iAP2 when an iPhone is attached. No console
+      commands are needed. Unlock/trust/CarPlay consent on the phone remain
+      required. Unplugging closes the session and returns to the page.
+      Requires the SDK lv_user_gui_init hook. LVGL never opens the panel;
+      CarPlay owns touch exclusively. Do not mix manual start/stop commands
+      with this automatic owner. Disable for manual bring-up.
+
 config RTCARPLAY_AUTO_START
     bool "Start the AirPlay receiver automatically after boot"
+    depends on !RTCARPLAY_DEMO_LAUNCHER
     default n
     help
       Start the receiver from main() instead of waiting for the

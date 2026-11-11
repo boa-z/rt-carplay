@@ -1333,6 +1333,11 @@ int carplay_app_autostart_wired(void)
 
 static int cmd_carplay_start(int argc, char **argv)
 {
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+    (void)argc; (void)argv;
+    rt_kprintf("automatic wired demo is active; connect an unlocked iPhone\n");
+    return 0;
+#endif
     bool wired = argc > 1 && strcmp(argv[1], "wired") == 0;
     if (argc > 1 && !wired) {
         rt_kprintf("usage: carplay_start [wired]\n");
@@ -1358,6 +1363,10 @@ static int cmd_carplay_stop(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+    rt_kprintf("automatic wired demo owns the receiver; unplug to end the session\n");
+    return 0;
+#endif
     (void)carplay_app_stop();
     rt_kprintf("carplay stopped\n");
     return 0;

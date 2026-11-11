@@ -453,3 +453,43 @@ reserves touch for the receiver in this configuration; it does not dynamically
 return input to LVGL at receiver stop. `carplay_status` shows panel reads/events,
 queued inputs and event-channel HID writes. A successful HID write alone does
 not establish that the phone acted on the touch.
+
+
+## Automatic LVGL wired demonstration
+
+Enable `RTCARPLAY_DEMO_LAUNCHER` (LVGL v9 + USB host + video). The D213 SDK
+application target now enables it. The SDK's `lv_user_gui_init()` must call
+`carplay_demo_launcher_init()` under that option; main() does not also start a
+receiver. `RTCARPLAY_AUTO_START` is mutually exclusive.
+
+After boot, the English launch page displays USB/trust/connection guidance and
+the receiver PIN. Plug in an unlocked iPhone and accept Trust/CarPlay on the
+phone if requested. The worker starts the wired receiver, waits for attachment,
+pairs, waits for a usable IPv6 endpoint, then starts iAP2. The launch page stays
+visible until the first decoded frame; input remains exclusively owned by the
+receiver. No second LVGL panel reader or touch handoff is introduced.
+
+Pairing/TLS and teardown never run on the LVGL thread. All UI updates happen in
+a 250 ms LVGL timer, only on stage changes, without animation; a live video
+session does not continuously invalidate the hidden page. On unplug, the worker
+waits until iAP2 releases its carkit stream before closing pairing and stopping
+the receiver. The video sink restores the saved UI alpha, then the next receiver
+waits for a new phone attachment. A pairing/activation failure is attempted once
+per attachment; the page requests unplug/unlock/reconnect. Phone trust can keep
+the pair operation waiting; it is not cancelled by a UI timer.
+
+Manual `carplay_start`, `carplay_stop` and mutating `carplay_usb` commands are
+disabled in this demonstration build so they cannot race the owning worker.
+Read-only status commands remain available. Disable the launcher Kconfig option
+and rebuild to restore manual bring-up. Wireless start and audio-stream support
+are not added by the page. Board validation must cover initial boot, phone
+consent, first-frame display, physical touch, unplug and reconnect; host tests
+cannot validate the panel/DE transition.
+
+```
+make check-lubanlite-demo SDK_ROOT=/path/to/luban-lite
+```
+
+The host test drives the actual demo worker through pairing rejection/replug,
+network readiness, first-frame wait and delayed iAP2 shutdown. The UI compiles
+against SDK LVGL public headers but is not rendered by that test.

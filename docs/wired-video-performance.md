@@ -239,3 +239,16 @@ addresses part of the problem. Similar sender/receive gaps point toward source
 cadence or upstream flow control; short sender gaps with bursty receive gaps
 point toward delivery/scheduling. Large assembly gaps warrant TCP/USB traces.
 None of these observations alone establishes a root cause.
+
+
+## Additional v20 video-only snapshots
+
+The user subsequently reports 807 displayed frames with no drops/errors at
+4.3 FPS over 187.017 seconds, followed by 306 more frames over 48.388 seconds
+(6.3 FPS), again with no drops/errors/resets. Queue peak increases from nine
+to twelve and cumulative maximum queue delay from 137 to 192 ms; decode stays
+8/15 ms and presentation around 8/17 ms. These show transient queue pressure.
+No corresponding receive-status snapshot or confirmation of continuous motion
+accompanies those intervals, so source cadence versus delivery remains open.
+V21 adds a demo launcher, not a claimed fix for this remaining performance issue;
+it retains v20 TCP/gap diagnostics and v19 reference recovery.

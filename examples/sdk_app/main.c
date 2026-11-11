@@ -29,7 +29,9 @@ static void rtcarplay_autostart(void)
 
 int main(void)
 {
-#ifdef RTCARPLAY_AUTO_START
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+    rt_kprintf("rt-carplay: automatic wired demo; connect an unlocked iPhone\n");
+#elif defined(RTCARPLAY_AUTO_START)
     rtcarplay_autostart();
 #else
     rt_kprintf("rt-carplay: run carplay_start, then carplay_status "

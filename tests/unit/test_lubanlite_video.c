@@ -219,8 +219,10 @@ int main(int argc, char **argv) {
     s_sink.have_frame = true;
     s_sink.held.id = 99;
     render_remaining = 3;
+    assert(!s_sink.ui_hidden);
     assert(drain_frames(&s_sink) == 3);
     assert(updates == 1 && vsyncs == 1 && displayed_id == 3);
+    assert(s_sink.ui_hidden); /* launcher yields only when output is ready */
     assert(return_count == 3 && returned[0] == 1 && returned[1] == 2 && returned[2] == 99);
     assert(s_sink.frame_count == 1 && s_sink.skipped_frames == 2 && s_sink.held.id == 3);
     puts("Luban-Lite actual video sink regression passed");

@@ -71,6 +71,7 @@ typedef struct {
     bool have_frame;
     struct aicfb_alpha_config saved_ui_alpha;
     bool saved_ui_alpha_valid;
+    bool ui_hidden;
 
     volatile bool stop;
     volatile bool running;
@@ -235,6 +236,8 @@ static void disable_video_layer(video_sink_t *sink)
     (void)rt_device_control(sink->fb, AICFB_UPDATE_LAYER_CONFIG, &layer);
 }
 
+static void set_ui_alpha(video_sink_t *sink, const struct aicfb_alpha_config *cfg);
+
 static void present_frame(video_sink_t *sink, const struct mpp_frame *frame)
 {
     struct aicfb_layer_data layer;
@@ -306,6 +309,13 @@ static unsigned drain_frames(video_sink_t *sink)
         ++drained;
     }
     if (have_newest) {
+        if (!sink->ui_hidden) {
+            struct aicfb_alpha_config transparent = {0};
+            transparent.enable = 1;
+            transparent.mode = AICFB_GLOBAL_ALPHA_MODE;
+            set_ui_alpha(sink, &transparent);
+            sink->ui_hidden = true;
+        }
         uint32_t present_start = sink_now_ms();
         present_frame(sink, &newest);
         uint32_t present_elapsed = sink_now_ms() - present_start;
@@ -636,13 +646,7 @@ int carplay_video_sink_start(uint16_t display_width, uint16_t display_height)
         sink->saved_ui_alpha = ui;
         sink->saved_ui_alpha_valid = true;
     }
-    struct aicfb_alpha_config transparent;
-    memset(&transparent, 0, sizeof(transparent));
-    transparent.layer_id = AICFB_LAYER_TYPE_UI;
-    transparent.enable = 1;
-    transparent.mode = AICFB_GLOBAL_ALPHA_MODE;
-    transparent.value = 0;
-    set_ui_alpha(sink, &transparent);
+    /* Keep the launcher visible through pairing; hide it on first output. */
 
     sink->stop = false;
     sink->running = true;

@@ -370,3 +370,26 @@ Next collect `ipheth_status`, `ping 172.20.10.1`, `carplay_usb net` and
 `carplay_status` with the working session left open. Preserve request/response
 metadata around any subsequent RTSP connection. IPv6 peer reachability under
 load, physical unplug/replug, and media startup remain separate open checks.
+
+
+### Later v13 run: service-stage timeout with working gateway ICMP
+
+StartSession returns a complete 354-byte reply and StartService a complete
+383-byte reply. The command subsequently fails with RTCP_ETIMEDOUT at
+stage=service, paired=1. Source inspection shows this stage covers both
+opening the returned service port over USBMUX and its optional TLS handshake.
+The retained operation=StartService and last exchange ret=0 describe the last
+plist exchange, not a failed StartService request. These diagnostics do not
+distinguish service connection opening from service TLS negotiation; do not
+claim a certificate failure or erase trust based on this output. The EP85
+snapshot alone cannot resolve that distinction.
+
+All four subsequent gateway ICMP replies succeed (2, 1, 1, 1 ms, TTL 64).
+IPHETH is ready/carrier-up with RX=85, TX=16, rxerr=4 and zero TX/USB errors.
+Multiple NCM datagrams can be delivered per USB completion. This later run
+shows USB address 4 rather than the earlier 2, so the different error/frame
+counts do not establish growth on a single attachment. Collect counters
+before and after traffic on one attachment to assess the RX errors.
+
+The receiver remains running with zero audio packets. A running local
+receiver does not imply that the remote service or media session succeeded.

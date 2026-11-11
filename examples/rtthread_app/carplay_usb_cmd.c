@@ -34,6 +34,9 @@
 
 #include "carplay_app.h"
 #include "carplay_usb.h"
+#include "usb_pair_cache.h"
+#include "rtcp/plist.h"
+#include <stdio.h>
 #include "carplay_mfi_provider.h"
 #include "iap2_session.h"
 #include "iap2_stream.h"
@@ -413,6 +416,29 @@ static bool lockdown_session_active(void)
            s_lockdown_session.service.ops != NULL;
 }
 
+static int s_trust_cache; /* 0 unknown, 1 new, 2 reused, 3 saved, negative I/O */
+int carplay_usb_trust_cache_status(void) { return s_trust_cache; }
+
+static bool pair_cache_path(char *path, size_t capacity)
+{
+    rtcp_stream_t stream = {0};
+    if (lockdown_open_connection(NULL, 62078U, &stream) != RTCP_OK) return false;
+    uint8_t request[1024], reply[2048];
+    size_t n = rtcp_lockdown_build_get_value(request, sizeof(request), "rt-carplay", "UniqueDeviceID"), got = 0;
+    int ret = rtcp_lockdown_exchange(&stream, request, n, reply, sizeof(reply), &got, 30000U);
+    lockdown_close_connection(NULL, &stream);
+    char identifier[65];
+    if (ret != RTCP_OK || rtcp_plist_get_string(reply, got, "Value", identifier, sizeof(identifier)) != RTCP_OK) return false;
+    size_t length = strlen(identifier);
+    if (length < 16) return false;
+    for (size_t i=0; i<length; ++i) {
+        char c=identifier[i];
+        if (!((c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='-')) return false;
+    }
+    int written = snprintf(path, capacity, "/data/rt-carplay-usb-%s.bin", identifier);
+    return written > 0 && (size_t)written < capacity;
+}
+
 static int cmd_pair(void)
 {
     static rtcp_usb_device_t device;
@@ -481,9 +507,26 @@ static int cmd_pair(void)
     memset(&s_pair_record, 0, sizeof(s_pair_record));
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
 
+    char cache_path[128] = {0};
+    bool cacheable = pair_cache_path(cache_path, sizeof(cache_path));
+    int cached = cacheable ? carplay_usb_pair_cache_load(cache_path, &s_pair_record) : RTCP_ENOENT;
+    config.resume_pairing = cached == RTCP_OK;
+    s_trust_cache = config.resume_pairing ? 2 : (cached == RTCP_ENOENT ? 1 : cached);
+    rt_kprintf("[carplay_usb] trust cache=%s load=%d\n", config.resume_pairing ? "reuse" : "new", cached);
     rt_kprintf("[carplay_usb] pair: watch the phone and accept the trust "
                "dialog; generating keys takes a while\n");
     ret = rtcp_lockdown_session_open(&s_lockdown_session, &config);
+    if (ret != RTCP_OK && config.resume_pairing &&
+        s_lockdown_session.stage == RTCP_LOCKDOWN_STAGE_START_SESSION &&
+        (!strcmp(s_lockdown_session.remote_error, "InvalidHostID") ||
+         !strcmp(s_lockdown_session.remote_error, "InvalidPairRecord") ||
+         !strcmp(s_lockdown_session.remote_error, "MissingPairRecord"))) {
+        rt_kprintf("[carplay_usb] saved trust rejected; pairing again\n");
+        memset(&s_pair_record, 0, sizeof(s_pair_record));
+        config.resume_pairing = false;
+        s_trust_cache = 1;
+        ret = rtcp_lockdown_session_open(&s_lockdown_session, &config);
+    }
     if (ret != RTCP_OK) {
         rt_kprintf("[carplay_usb] pair: failed ret=%d stage=%s error='%s'\n",
                    ret, rtcp_lockdown_stage_name(s_lockdown_session.stage),
@@ -500,6 +543,12 @@ static int cmd_pair(void)
                    (unsigned)s_mux.rx_bytes, (unsigned)s_mux.rx_frames,
                    (unsigned)s_mux.reassembly_length);
         return 0;
+    }
+    if (!cacheable) cacheable = pair_cache_path(cache_path, sizeof(cache_path));
+    if (cacheable && !config.resume_pairing) {
+        int saved = carplay_usb_pair_cache_save(cache_path, &s_pair_record);
+        s_trust_cache = saved == RTCP_OK ? 3 : saved;
+        rt_kprintf("[carplay_usb] trust cache save=%d\n", saved);
     }
     rt_kprintf("[carplay_usb] pair: host=%s system=%s wifi=%s\n",
                s_lockdown_session.config.host_id,

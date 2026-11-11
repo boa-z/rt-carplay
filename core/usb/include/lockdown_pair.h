@@ -17,6 +17,7 @@
 #define RTCP_LOCKDOWN_PAIR_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "rtcp/rtcp.h"
@@ -74,5 +75,7 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
                               const char *wifi_address, const char *host_id,
                               const char *system_buid, rtcp_pair_rng_fn rng,
                               void *rng_context);
+
+bool rtcp_pair_record_valid(const rtcp_pair_record_t *record);
 
 #endif /* RTCP_LOCKDOWN_PAIR_H */

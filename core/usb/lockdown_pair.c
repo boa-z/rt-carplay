@@ -738,3 +738,25 @@ cleanup:
     }
     return result;
 }
+
+/* Validate persisted bounds before any TLS/parser reads. Cryptographic content
+ * is subsequently parsed by the TLS backend and authenticated by the phone. */
+bool rtcp_pair_record_valid(const rtcp_pair_record_t *r)
+{
+    if (!r) return false;
+    const char *ids[] = {r->host_id, r->system_buid};
+    for (unsigned k = 0; k < 2; ++k) {
+        if (ids[k][36] != '\0') return false;
+        for (unsigned i = 0; i < 36; ++i) {
+            char c = ids[k][i];
+            if (i == 8 || i == 13 || i == 18 || i == 23) { if (c != '-') return false; }
+            else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+        }
+    }
+#define VALID_FIELD(name) (r->name##_length > 0 && r->name##_length <= sizeof(r->name))
+    return memchr(r->wifi_address, 0, sizeof(r->wifi_address)) != NULL &&
+           VALID_FIELD(device_public_key) && VALID_FIELD(device_certificate) &&
+           VALID_FIELD(host_private_key) && VALID_FIELD(host_certificate) &&
+           VALID_FIELD(root_private_key) && VALID_FIELD(root_certificate);
+#undef VALID_FIELD
+}

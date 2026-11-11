@@ -31,7 +31,7 @@ PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
 PORT_LINUX_OBJS := $(PORT_LINUX_SRCS:%.c=$(BUILD)/%.o)
 PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
 
-TESTS := test_mfi2c \
+TESTS := test_mfi2c test_pairing_files \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session test_iap2_stream \
          test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
@@ -170,6 +170,6 @@ check-lubanlite-demo:
 	@test -n "$(SDK_ROOT)" || (echo 'set SDK_ROOT to Luban-Lite checkout'; exit 1)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -Itests/support/lubanlite_demo \
 	  -I$(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl \
-	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c examples/rtthread_app/pairing_manager.c \
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_demo
 	$(BUILD)/test_lubanlite_demo

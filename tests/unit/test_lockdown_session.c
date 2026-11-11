@@ -772,6 +772,17 @@ static void test_full_session(void)
     assert(rtcp_lockdown_session_service(&session).ops == NULL);
     assert_connections_closed();
 
+    /* Reconnect using the same trusted identity, with no Pair request. */
+    reset_phone(0U, false, true);
+    make_config(&config, &record);
+    config.resume_pairing = true;
+    assert(rtcp_pair_record_valid(&record));
+    assert(rtcp_lockdown_session_open(&session, &config) == RTCP_OK);
+    assert(s_phone.pair_requests == 0U);
+    assert(!strcmp(session.config.host_id, record.host_id));
+    rtcp_lockdown_session_close(&session);
+    assert_connections_closed();
+
     /* Closing twice is harmless. */
     rtcp_lockdown_session_close(&session);
 }

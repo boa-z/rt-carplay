@@ -65,6 +65,9 @@ typedef struct {
 
     /* Caller-owned storage for the generated record. */
     rtcp_pair_record_t *record;
+    /* Previously trusted record: skip Pair and authenticate StartSession with
+     * its stable HostID/BUID and root key. Explicit rejection is caller policy. */
+    bool resume_pairing;
 
     /* Per-read timeout; 0 uses 5000 ms. */
     uint32_t step_timeout_ms;

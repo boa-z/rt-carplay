@@ -141,3 +141,8 @@ carplay_bt_owner_t carplay_bt_owner(void);
  */
 int carplay_app_touch(uint8_t phase, uint16_t pointer_id,
                       uint16_t x, uint16_t y);
+
+/* Last AirPlay pairing-table write result, diagnostic snapshot. */
+int carplay_app_pairing_storage_error(void);
+
+void carplay_app_debug_counters(unsigned *received, unsigned *hid_sent, unsigned *hid_failed);

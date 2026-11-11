@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #pragma once
 #include <stddef.h>
+#include <stdint.h>
+uint32_t rt_tick_get_millisecond(void);
 typedef void *rt_mutex_t;
 typedef void *rt_thread_t;
 #define RT_EOK 0

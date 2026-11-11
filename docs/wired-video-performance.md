@@ -252,3 +252,10 @@ No corresponding receive-status snapshot or confirmation of continuous motion
 accompanies those intervals, so source cadence versus delivery remains open.
 V21 adds a demo launcher, not a claimed fix for this remaining performance issue;
 it retains v20 TCP/gap diagnostics and v19 reference recovery.
+
+
+## v22 persistence and management
+
+See [wired-pairing-persistence.md](wired-pairing-persistence.md) for the
+Pair-Setup storage failure, USB trust reuse and interactive LVGL file manager.
+These changes do not establish a video performance improvement.

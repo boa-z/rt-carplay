@@ -352,16 +352,17 @@ int rtcp_lockdown_session_open(rtcp_lockdown_session_t *session,
         return RTCP_EINVAL;
     }
 
+    if (config->resume_pairing && !rtcp_pair_record_valid(config->record)) return RTCP_EINVAL;
     memset(session, 0, sizeof(*session));
     session->config = *config;
 
-    if (session->config.host_id[0] == '\0' &&
+    if (!config->resume_pairing && session->config.host_id[0] == '\0' &&
         rtcp_pair_generate_uuid(session->config.host_id,
                                 sizeof(session->config.host_id),
                                 config->rng, config->rng_context) != RTCP_OK) {
         return RTCP_EIO;
     }
-    if (session->config.system_buid[0] == '\0' &&
+    if (!config->resume_pairing && session->config.system_buid[0] == '\0' &&
         rtcp_pair_generate_uuid(session->config.system_buid,
                                 sizeof(session->config.system_buid),
                                 config->rng, config->rng_context) != RTCP_OK) {
@@ -384,7 +385,12 @@ int rtcp_lockdown_session_open(rtcp_lockdown_session_t *session,
         return RTCP_ENOMEM;
     }
 
-    ret = pair(session);
+    if (config->resume_pairing) {
+        memcpy(session->config.host_id, config->record->host_id, sizeof(session->config.host_id));
+        memcpy(session->config.system_buid, config->record->system_buid, sizeof(session->config.system_buid));
+        session->paired = true;
+        ret = RTCP_OK;
+    } else ret = pair(session);
     if (ret == RTCP_OK) {
         ret = start_service(session);
     }

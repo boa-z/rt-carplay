@@ -19,6 +19,7 @@
 #include "airplay_ed25519.h"
 #include "airplay_info_plist.h"
 #include "airplay_pairing_store.h"
+#include "pairing_files.h"
 #include "airplay_rtsp_server.h"
 #include "airplay_txt.h"
 #include "airplay_vendor_ie.h"
@@ -171,6 +172,7 @@ typedef struct {
 
     uint16_t airplay_port;
     volatile bool airplay_connected;
+    volatile int pairing_storage_error;
 
     /* CarPlay Control browse/connect state (owned by the poll thread). */
     volatile bool ctrl_enabled;
@@ -282,38 +284,15 @@ static int store_load(uint8_t *blob, size_t capacity, size_t *len,
                       void *context)
 {
     app_state_t *app = context;
-    *len = 0U;
-    FILE *file = fopen(app->store_path, "rb");
-    if (file == NULL) return RTCP_OK; /* absent: empty controller table */
-    size_t got = fread(blob, 1U, capacity, file);
-    bool extra = fgetc(file) != EOF;
-    fclose(file);
-    if (got == capacity && extra) return RTCP_ENOMEM;
-    *len = got;
-    return RTCP_OK;
+    return carplay_file_load(app->store_path, blob, capacity, len);
 }
 
 static int store_save(const uint8_t *blob, size_t len, void *context)
 {
     app_state_t *app = context;
-    char temporary[sizeof(app->store_path) + 8U];
-    int written = rt_snprintf(temporary, sizeof(temporary), "%s.tmp",
-                              app->store_path);
-    if (written <= 0 || (size_t)written >= sizeof(temporary)) return RTCP_EINVAL;
-
-    FILE *file = fopen(temporary, "wb");
-    if (file == NULL) return RTCP_EIO;
-    bool ok = fwrite(blob, 1U, len, file) == len;
-    if (fclose(file) != 0) ok = false;
-    if (!ok) {
-        remove(temporary);
-        return RTCP_EIO;
-    }
-    if (rename(temporary, app->store_path) != 0) {
-        remove(temporary);
-        return RTCP_EIO;
-    }
-    return RTCP_OK;
+    int ret = carplay_file_save(app->store_path, blob, len);
+    app->pairing_storage_error = ret;
+    return ret;
 }
 
 /* ------------------------------------------------------------------ */
@@ -325,6 +304,16 @@ static bool provider_random(uint8_t *output, size_t len, void *context)
     app_state_t *app = context;
     if (app->os.random == NULL) return false;
     return app->os.random(output, len);
+}
+
+static bool provider_save_controller(const uint8_t *id, size_t length,
+                                     const uint8_t public_key[32], void *context)
+{
+    app_state_t *app = context;
+    bool ok = airplay_pairing_store_save_pairing(id, length, public_key, context);
+    if (!ok && app->pairing_storage_error == RTCP_OK) app->pairing_storage_error = RTCP_EIO;
+    APP_LOG("AirPlay pairing persistence=%s error=%d", ok ? "saved" : "failed", app->pairing_storage_error);
+    return ok;
 }
 
 static bool provider_sign(const uint8_t *message, size_t message_len,
@@ -358,7 +347,7 @@ static void fill_pairing(app_state_t *app,
     pairing->pair_setup.random = provider_random;
     pairing->pair_setup.sign_accessory = provider_sign;
     pairing->pair_setup.verify_controller = provider_verify;
-    pairing->pair_setup.save_pairing = airplay_pairing_store_save_pairing;
+    pairing->pair_setup.save_pairing = provider_save_controller;
     pairing->pair_setup.provider_context = app;
 
     pairing->pair_verify.accessory_identifier = app->accessory_identifier;
@@ -455,7 +444,7 @@ static bool send_hid_report(uint32_t hid_uid, const uint8_t *report,
     return sent;
 }
 
-#if defined(RTCARPLAY_TOUCH_PANEL)
+#if defined(RTCARPLAY_TOUCH_PANEL) && !defined(RTCARPLAY_DEMO_LAUNCHER)
 /* Panel reader thread -> touch queue; the poll thread turns the queue into
  * HID reports, so the panel thread never touches the event channel. */
 static void on_panel_touch(uint8_t phase, uint16_t pointer_id, uint16_t x,
@@ -1157,7 +1146,7 @@ int carplay_app_start(const carplay_app_config_t *config)
     }
     (void)rt_thread_startup(app->thread);
 
-#if defined(RTCARPLAY_TOUCH_PANEL)
+#if defined(RTCARPLAY_TOUCH_PANEL) && !defined(RTCARPLAY_DEMO_LAUNCHER)
     /* The touch queue exists now (app->running and app->lock); a board without
      * the panel driver keeps working through carplay_touch. */
     result = carplay_touch_panel_start(app->width, app->height, on_panel_touch,
@@ -1729,3 +1718,18 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_ab, carplay_ab,
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_bt, carplay_bt,
                      Bluetooth RFCOMM bring-up: start|stop|status);
 #endif
+
+int carplay_app_pairing_storage_error(void) { return s_app.pairing_storage_error; }
+
+void carplay_app_debug_counters(unsigned *received, unsigned *hid_sent, unsigned *hid_failed)
+{
+    if (received) {
+        *received = 0;
+        if (s_app.lock && rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK) {
+            *received = s_app.screen_stats.frames;
+            (void)rt_mutex_release(s_app.lock);
+        }
+    }
+    if (hid_sent) *hid_sent = s_app.hid_reports_sent;
+    if (hid_failed) *hid_failed = s_app.hid_reports_failed;
+}

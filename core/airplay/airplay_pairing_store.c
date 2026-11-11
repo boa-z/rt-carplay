@@ -183,6 +183,9 @@ bool airplay_pairing_store_save_pairing(
         if (table.count == AIRPLAY_PAIRING_STORE_MAX_CONTROLLERS) return false;
         ++table.count;
     }
+    if (index < s_table.count && memcmp(s_table.records[index].public_key,
+                                        public_key, AIRPLAY_PAIRING_STORE_PUBLIC_KEY_BYTES) == 0)
+        return true; /* already durable: avoid needless flash writes */
     controller_record_t *record = &table.records[index];
     memset(record, 0, sizeof(*record));
     record->identifier_len = (uint8_t)identifier_len;

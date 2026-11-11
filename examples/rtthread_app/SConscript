@@ -17,9 +17,9 @@ import building
 if not any(group.get('name') == 'rt-carplay' for group in building.Projects):
     SConscript(os.path.join(cwd, '..', '..', 'SConscript'))
 
-src = Glob('carplay_app.c')
+src = Glob('carplay_app.c') + Glob('pairing_files.c')
 if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
-    src += Glob('demo_launcher_lubanlite.c')
+    src += Glob('demo_launcher_lubanlite.c') + Glob('pairing_manager.c')
 # AirPlay /auth-setup MFiSAP provider lifecycle, shared by the wired USB and
 # wireless iAP2 transports.  Not transport-specific, so it is always built.
 src += Glob('carplay_mfi_provider.c')
@@ -44,7 +44,7 @@ if GetDepend('RTCARPLAY_IAP2'):
 
 # Wired USB host bring-up (carplay_usb command, descriptor inspection).
 if GetDepend('RTCARPLAY_USB_HOST'):
-    src += Glob('carplay_usb_cmd.c')
+    src += Glob('carplay_usb_cmd.c') + Glob('usb_pair_cache.c')
 
 group = DefineGroup('rt-carplay-app', src,
                     depend=['LPKG_USING_RT_CARPLAY'],

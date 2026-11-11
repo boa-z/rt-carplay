@@ -273,3 +273,18 @@ phone-side touch response require the next board run.
 ```sh
 make check-lubanlite-touch
 ```
+
+## V17 hardware baseline: picture and physical touch work
+
+After correcting an accidentally flashed different image, the user flashed
+v17 and confirms both visible video and physical touch response. GT911 now
+opens with five points and 1024x600 geometry. Authentication, event setup,
+RECORD and screen SETUP succeed. This validates the touch ownership repair.
+
+The remaining reported issue is severe video stutter. The log contains a
+screen count of 120 without a matching elapsed-time measurement for that
+counter, so it does not establish a source or decode frame rate. Inbound
+/command and /feedback still receive 405. The timing offset log overflows
+its int millisecond representation in this run; that line alone is not
+proof of a playback scheduling fault. Preserve v17 as the known working
+picture/touch baseline before performance changes.

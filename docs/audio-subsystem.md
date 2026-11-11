@@ -245,3 +245,21 @@ FDK-AAC is not bundled: its
 additional license terms require compatibility/distribution review for this
 GPL project. There is no private Apple SDK, key, or authentication material in
 this branch. LPCM/Opus voice and AAC-LC media are the implemented paths.
+
+## Recorded SDK build results (2026-11-11)
+
+Both configurations completed `scons -j8` without compiler warnings. GNU size
+below describes the **entire linked firmware**, not audio-only allocation:
+
+| Configuration | text | data | bss | total bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Default codecs, microphone off | 2,591,024 | 1,050,404 | 3,663,968 | 7,305,396 |
+| Codecs + microphone + experimental AEC | 2,735,184 | 1,054,340 | 3,695,072 | 7,484,596 |
+
+The workspace was returned to the default defconfig after voice validation.
+The generated default image is
+`../luban-lite-jc-carplay-oss/output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img`.
+Its SHA-256 for this build is
+`3623f14f82f263dd0e144b2a26017c83162d03a299bfcc6ac7eae2e8022a43b2`.
+Image bytes may change with build timestamps/toolchain. No image was flashed
+and no D213 audio test is claimed.

@@ -293,3 +293,11 @@ The first performance follow-up is documented in wired-video-performance.md.
 V18 removes the fixed wired sleep per recv, schedules the decoder ahead of the
 producer, coalesces already decoded output and adds stage statistics. These
 changes preserve the v17 authentication/touch fixes and do not modify IPHETH.
+
+
+V18 hardware then exposed a video reference-chain failure immediately after a
+second configuration reset. V19 caches/compares configuration and resynchronizes
+on IDR after changes, decode failures or input loss. See
+[wired-video-performance.md](wired-video-performance.md) for evidence, limitations
+and the focused board check. Authentication and touch are not the failing stage
+in that report.

@@ -111,4 +111,61 @@ and timing tests. The actual sink ASan/UBSan regression passes for configuration
 atomicity, packet-slot progress and decoded backlog handling. The backlog model
 verifies three outputs produce one layer update/vsync, two superseded returns,
 and release of the old scanout only after vsync. Full D213 build passes.
-V18 device FPS, latency and sustained touch behavior remain to be measured.
+V18 device FPS, latency and sustained touch behavior were not measured before
+the decoder failure below; its performance changes are not yet validated.
+
+
+## V19: preserve reference chains across repeated configuration
+
+The v18 board run reaches screen SETUP, receives two 33-byte H.264
+configuration messages, logs a decoder recreation, then reports missing
+references (`ref_pic_list_reordering: i(-1) < 0`) and VE error 80050100.
+Subsequent pictures inherit the damaged reference state. The log does not
+contain configuration bytes, so equal size alone does not prove identical
+SPS/PPS. This is a decoder correctness failure; it prevents a meaningful
+performance comparison.
+
+Source inspection confirms a pre-existing sink defect: every configuration
+after any displayed frame destroys the decoder, even when SPS/PPS are
+unchanged, then feeds following dependent pictures without requiring IDR.
+The v18 timing changes can expose that path differently; the log alone does
+not isolate which performance change made the defect visible.
+
+V19 compares full configuration bytes on the decoder owner thread. Identical
+configuration is skipped with a `repeated configuration ignored` diagnostic,
+preserving decoder references. Changed configuration is cached; recreation is
+deferred until the first slice of an IDR. The new decoder receives cached
+SPS/PPS before IDR, and dependent NALs are withheld meanwhile. Decode/submission
+failures similarly quarantine the decoder until an IDR permits recreation.
+Queue entries carry a loss generation so entries before a dropped input are
+not confused with entries after it; the latter require IDR resynchronization.
+A later IDR slice cannot start recovery: first_mb_in_slice must be zero.
+The display layer is disabled and vsync awaited before reset releases scanout.
+
+`carplay_video status` adds repeated_configs, waiting_idr, and skipped_nals.
+These skipped dependent NALs are separate from FIFO drops and skipped decoded
+presentations. V18 polling, priority, backlog handling and timing measurements
+remain in place, so this build isolates reference-chain lifetime repair.
+
+The actual sink ASan/UBSan tests now cover repeated config after output with
+an inter picture, changed config followed by inter/IDR, a decode error followed
+by inter/IDR, and an input gap followed by a later IDR slice before a complete
+IDR start. A small reference-dependent MPP model rejects inter pictures after
+reference destruction. It does not emulate VE, validate a real SPS or prove
+that decoded-backlog handling is correct on silicon. All 49 application tests
+and the boundary check pass. D213 image v19 requires board validation.
+
+Recovery currently waits for a sender IDR; it does not request one or promise
+a recovery deadline. If waiting_idr remains one and picture freezes, capture
+that status and reconnect once to establish a fresh stream. If missing-reference
+errors persist without configuration recreation, investigate the original
+bitstream/reference marking and independently disable output coalescing.
+Do not interpret the recovery guard as proof that the initial fault is fixed.
+
+Board check: repeat the usual start/pair/iap2 sequence, retain startup config,
+IDR and reset logs, and confirm picture plus touch. During continuous scrolling,
+run carplay_status and carplay_video status twice about ten seconds apart.
+Expected: no reference-error cascade, identical second config does not increment
+resets, waiting_idr clears after IDR, and no sustained drops/errors. Compare
+RX FPS, presentation FPS and queue/decode/present elapsed times in the second
+interval before deciding the next performance change.

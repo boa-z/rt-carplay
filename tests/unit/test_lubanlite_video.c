@@ -11,6 +11,8 @@
 static unsigned slots, decoded, destroyed, delays;
 static unsigned last_config_size;
 static bool pressure;
+static bool reference_mode, reference_active, fail_next;
+static unsigned packet_type;
 static unsigned render_remaining, render_id, returned[16], return_count;
 static unsigned updates, vsyncs, displayed_id;
 static uint8_t packet_data[1024];
@@ -42,7 +44,7 @@ struct mpp_decoder *mpp_decoder_create(enum mpp_codec_type t) {
     (void)t; return (struct mpp_decoder *)(uintptr_t)1;
 }
 void mpp_decoder_destory(struct mpp_decoder *d) {
-    (void)d; ++destroyed; slots = 0;
+    (void)d; ++destroyed; slots = 0; reference_active = false;
 }
 int mpp_decoder_init(struct mpp_decoder *d, struct decode_config *c) {
     (void)d; assert(c->packet_count == 2); return 0;
@@ -56,8 +58,9 @@ int mpp_decoder_get_packet(struct mpp_decoder *d, struct mpp_packet *p, int size
 int mpp_decoder_put_packet(struct mpp_decoder *d, struct mpp_packet *p) {
     (void)d;
     assert(slots < 2); ++slots;
+    const uint8_t *start = find_start_code(p->data, (uint8_t *)p->data + p->size);
+    packet_type = start != NULL ? start[3] & 31U : 0U;
     if (p->size == (int)sizeof(config)) {
-        assert(memcmp(p->data, config, sizeof(config)) == 0);
         last_config_size = (unsigned)p->size;
     }
     return DEC_OK;
@@ -66,6 +69,11 @@ int mpp_decoder_decode(struct mpp_decoder *d) {
     (void)d;
     if (!slots) return DEC_NO_READY_PACKET;
     --slots; ++decoded;
+    if (fail_next) { fail_next = false; reference_active = false; return -1; }
+    if (reference_mode) {
+        if (packet_type == 5) reference_active = true;
+        if (packet_type == 1) assert(reference_active);
+    }
     /* First retry exercises rendering backpressure in pump_decoder(). */
     if (pressure) { pressure = false; return DEC_NO_EMPTY_FRAME; }
     return DEC_OK;
@@ -110,6 +118,7 @@ static void reset(void) {
     s_sink.decoder = (struct mpp_decoder *)(uintptr_t)1;
     slots = decoded = destroyed = delays = last_config_size = 0;
     pressure = false;
+    reference_mode = reference_active = fail_next = false;
     render_remaining = return_count = updates = vsyncs = displayed_id = 0;
     render_id = 1;
 }
@@ -134,6 +143,63 @@ int main(int argc, char **argv) {
     assert(last_config_size == sizeof(config));
     assert(decoded == 11 && s_sink.nal_count == 11 && slots == 0);
     assert(s_sink.decode_errors == 0 && delays == 0);
+
+    reset(); /* Repeated SPS/PPS must preserve an established reference chain. */
+    reference_mode = true;
+    render_remaining = 1; /* establish frame_count before repeated config */
+    uint8_t inter[] = {0,0,0,1,0x41,0xb8,0x80};
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    sink_thread(&s_sink);
+    assert(destroyed == 0 && decoded == 3 && reference_active);
+    assert(s_sink.repeated_configs == 1 && s_sink.decode_errors == 0);
+
+    reset(); /* Changed SPS/PPS: skip dependent picture, replay config at IDR. */
+    reference_mode = true;
+    uint8_t changed[sizeof(config)];
+    memcpy(changed, config, sizeof(config)); changed[7] ^= 1;
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    carplay_video_sink_frame(true, changed, sizeof(changed), 0, NULL);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    sink_thread(&s_sink);
+    assert(destroyed == 1 && decoded == 5 && s_sink.waiting_nals == 1);
+    assert(reference_active && s_sink.decode_errors == 0);
+
+    reset(); /* Poisoned decoder is quarantined until cached config + IDR. */
+    reference_mode = true;
+    nal_entry_t cfg = {.data = (uint8_t *)config, .len = sizeof(config), .configure = true};
+    assert(accept_configuration(&s_sink, &cfg));
+    assert(submit_nal(&s_sink, &cfg) == 0); pump_decoder(&s_sink);
+    nal_entry_t idr = {.data = (uint8_t *)frame, .len = sizeof(frame)};
+    assert(prepare_picture(&s_sink, &idr));
+    assert(submit_nal(&s_sink, &idr) == 0); fail_next = true; pump_decoder(&s_sink);
+    assert(s_sink.wait_idr && s_sink.recovery_pending);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    sink_thread(&s_sink);
+    assert(destroyed == 1 && decoded == 5 && s_sink.waiting_nals == 1);
+    assert(reference_active && s_sink.decode_errors == 1);
+
+    reset(); /* Input loss invalidates only entries following the gap. */
+    reference_mode = true;
+    uint8_t later_idr_slice[] = {0,0,0,1,0x65,0x40,0x80};
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    drop_nal(&s_sink); /* next queued packet belongs after this missing input */
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    carplay_video_sink_frame(false, later_idr_slice, sizeof(later_idr_slice), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    sink_thread(&s_sink);
+    assert(destroyed == 1 && decoded == 6 && s_sink.waiting_nals == 2);
+    assert(reference_active && s_sink.decode_errors == 0);
 
     reset(); /* retry must decode to free slots on this same thread */
     slots = 2; pressure = true;

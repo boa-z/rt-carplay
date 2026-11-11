@@ -9,10 +9,9 @@
  * decoder and presents the resulting NV12 frames through the "aicfb" video
  * layer.  Only the sink thread touches the decoder and the display.
  *
- * A stream configuration message (SPS/PPS) is queued as one packet and
- * triggers at most one reset after frames have been shown. It marks the start of a new stream (reconnect or resolution
- * change); the decoder is recreated before that configuration is fed so the
- * new SPS can allocate buffers of the right size.
+ * Configuration messages may repeat within a live reference chain. Identical
+ * SPS/PPS are ignored; changed configuration and decode errors require an IDR
+ * before decoding resumes. Cached configuration is replayed on recovery.
  */
 #include "video_sink_lubanlite.h"
 
@@ -48,6 +47,7 @@ typedef struct {
     uint32_t pts_us;
     uint32_t queued_ms;
     bool configure;
+    unsigned loss_generation;
 } nal_entry_t;
 
 typedef struct {
@@ -80,8 +80,16 @@ typedef struct {
     unsigned frame_count;
     unsigned skipped_frames;
     unsigned dropped_nals;
+    unsigned loss_generation;
+    unsigned consumed_generation;
     unsigned decode_errors;
     unsigned decoder_resets;
+    uint8_t *configuration;
+    size_t configuration_len;
+    unsigned repeated_configs;
+    unsigned waiting_nals;
+    bool wait_idr;
+    bool recovery_pending;
     unsigned queue_peak;
     unsigned dequeued;
     uint64_t queue_wait_ms;
@@ -121,7 +129,10 @@ static const uint8_t *find_start_code(const uint8_t *cursor, const uint8_t *end)
 
 static void drop_nal(video_sink_t *sink)
 {
+    (void)rt_mutex_take(sink->lock, RT_WAITING_FOREVER);
+    ++sink->loss_generation;
     ++sink->dropped_nals;
+    (void)rt_mutex_release(sink->lock);
     if (sink->dropped_nals == 1U || sink->dropped_nals % 60U == 0U) {
         rt_kprintf("[" TAG "] queue full/alloc failure, dropped=%u\n",
                    sink->dropped_nals);
@@ -157,6 +168,7 @@ static void enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
     sink->queue[sink->head].len = len;
     sink->queue[sink->head].pts_us = pts_us;
     sink->queue[sink->head].configure = configure;
+    sink->queue[sink->head].loss_generation = sink->loss_generation;
     sink->queue[sink->head].queued_ms = sink_now_ms();
     sink->head = next;
     unsigned pending = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
@@ -331,6 +343,7 @@ static int submit_nal(video_sink_t *sink, const nal_entry_t *nal)
         /* Only this thread decodes. Waiting without pumping cannot release
          * either of the two MPP packet slots. */
         pump_decoder(sink);
+        if (sink->recovery_pending) return -1;
         rt_thread_mdelay(1);
     }
     if (ret != DEC_OK) {
@@ -374,8 +387,10 @@ static void pump_decoder(video_sink_t *sink)
             if (ret != DEC_NO_RENDER_FRAME) {
                 ++sink->decode_errors;
                 if (sink->decode_errors <= 3U) {
-                    rt_kprintf("[" TAG "] decode error %d\n", ret);
+                    rt_kprintf("[" TAG "] decode error %d; waiting for IDR\n", ret);
                 }
+                sink->wait_idr = true;
+                sink->recovery_pending = true;
             }
             break;
         }
@@ -413,15 +428,16 @@ static int create_decoder(video_sink_t *sink)
 /* Called from the sink thread only. */
 static void recreate_decoder(video_sink_t *sink)
 {
+    /* Disable and latch the layer before releasing its scanout buffer. */
+    disable_video_layer(sink);
+    (void)rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, NULL);
     if (sink->have_frame) {
         if (sink->decoder != NULL) {
             (void)mpp_decoder_put_frame(sink->decoder, &sink->held);
         }
         sink->have_frame = false;
     }
-    /* Stop the DE from scanning the buffer we are about to free. */
-    disable_video_layer(sink);
-    mpp_decoder_destory(sink->decoder);
+    if (sink->decoder != NULL) mpp_decoder_destory(sink->decoder);
     sink->decoder = NULL;
     ++sink->decoder_resets;
     if (create_decoder(sink) != RTCP_OK) {
@@ -430,6 +446,76 @@ static void recreate_decoder(video_sink_t *sink)
     } else {
         rt_kprintf("[" TAG "] decoder reset for a new stream\n");
     }
+}
+
+/* Worker-owned state: no producer may mutate decoder/configuration lifetime. */
+static bool accept_configuration(video_sink_t *sink, const nal_entry_t *nal)
+{
+    if (sink->configuration_len == nal->len && sink->configuration != NULL &&
+        memcmp(sink->configuration, nal->data, nal->len) == 0) {
+        ++sink->repeated_configs;
+        rt_kprintf("[" TAG "] repeated configuration ignored, bytes=%u count=%u\n",
+                   (unsigned)nal->len, sink->repeated_configs);
+        return false;
+    }
+    uint8_t *copy = malloc(nal->len);
+    if (copy == NULL) {
+        ++sink->decode_errors;
+        sink->wait_idr = true;
+        sink->recovery_pending = true;
+        return false;
+    }
+    memcpy(copy, nal->data, nal->len);
+    bool changed = sink->configuration != NULL || sink->frame_count != 0U;
+    free(sink->configuration);
+    sink->configuration = copy;
+    sink->configuration_len = nal->len;
+    sink->wait_idr = true;
+    if (changed) {
+        /* Delay recreation until IDR, discarding dependent pictures meanwhile. */
+        sink->recovery_pending = true;
+        rt_kprintf("[" TAG "] configuration changed; waiting for IDR\n");
+        return false;
+    }
+    return true;
+}
+
+static bool prepare_picture(video_sink_t *sink, const nal_entry_t *nal)
+{
+    if (!sink->wait_idr) return true;
+    const uint8_t *start = find_start_code(nal->data, nal->data + nal->len);
+    unsigned type = start != NULL && start + 3 < nal->data + nal->len
+                  ? start[3] & 31U : 0U;
+    /* first_mb_in_slice is ue(v): a leading one encodes zero. Never resume
+     * at a later slice of an IDR whose first slice may have been dropped. */
+    bool first_slice = start != NULL && start + 4 < nal->data + nal->len &&
+                       (start[4] & 0x80U) != 0U;
+    if (type != 5U || !first_slice) {
+        ++sink->waiting_nals;
+        return false;
+    }
+    if (sink->recovery_pending) {
+        if (sink->configuration == NULL) {
+            ++sink->waiting_nals;
+            return false;
+        }
+        recreate_decoder(sink);
+        if (sink->decoder == NULL) return false;
+        nal_entry_t config = {.data = sink->configuration,
+                              .len = sink->configuration_len};
+        /* Clear before pumping so any configuration failure re-arms recovery. */
+        sink->recovery_pending = false;
+        if (submit_nal(sink, &config) != 0) {
+            sink->recovery_pending = true;
+            return false;
+        }
+        pump_decoder(sink);
+        if (sink->recovery_pending) return false;
+    }
+    sink->wait_idr = false;
+    rt_kprintf("[" TAG "] IDR accepted; skipped dependent NALs=%u\n",
+               sink->waiting_nals);
+    return true;
 }
 
 static void sink_thread(void *argument)
@@ -446,19 +532,30 @@ static void sink_thread(void *argument)
                     free(nal.data);
                     break;
                 }
-                if (nal.configure && sink->frame_count != 0U) {
-                    recreate_decoder(sink);
+                if (nal.loss_generation != sink->consumed_generation) {
+                    sink->consumed_generation = nal.loss_generation;
+                    sink->wait_idr = true;
+                    sink->recovery_pending = true;
+                    rt_kprintf("[" TAG "] input loss; waiting for IDR\n");
                 }
-                (void)submit_nal(sink, &nal);
+                bool feed = nal.configure ? accept_configuration(sink, &nal)
+                                          : prepare_picture(sink, &nal);
+                if (feed && submit_nal(sink, &nal) != 0) {
+                    sink->wait_idr = true;
+                    sink->recovery_pending = true;
+                }
                 free(nal.data);
                 /* Do not wait for the FIFO to empty before consuming MPP
                  * packets: producers may continuously keep the FIFO full. */
-                pump_decoder(sink);
+                if (!sink->recovery_pending) pump_decoder(sink);
             }
         }
-        pump_decoder(sink);
+        if (!sink->recovery_pending) pump_decoder(sink);
     }
 
+    free(sink->configuration);
+    sink->configuration = NULL;
+    sink->configuration_len = 0;
     if (sink->have_frame) {
         if (sink->decoder != NULL) {
             (void)mpp_decoder_put_frame(sink->decoder, &sink->held);
@@ -779,6 +876,9 @@ static int cmd_carplay_video(int argc, char **argv)
                    (unsigned)elapsed, fps10 / 10U, fps10 % 10U,
                    nals - sink->report_nals, sink->queue_peak, sink->decoder_resets,
                    sink->skipped_frames);
+        rt_kprintf("[" TAG "] recovery: repeated_configs=%u waiting_idr=%u skipped_nals=%u\n",
+                   sink->repeated_configs, sink->wait_idr ? 1U : 0U,
+                   sink->waiting_nals);
         rt_kprintf("[" TAG "] elapsed_ms avg/max: queue=%u/%u decode=%u/%u present=%u/%u\n",
                    sink->dequeued ? (unsigned)(sink->queue_wait_ms / sink->dequeued) : 0U,
                    (unsigned)sink->queue_wait_max_ms,

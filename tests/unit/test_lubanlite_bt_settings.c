@@ -8,11 +8,17 @@
 #include <string.h>
 #include <unistd.h>
 static char store[256], temporary[256], backup[256];
-static bool fail_append, locked;
+static bool fail_append, fail_read, negative_errno, locked;
 static FILE *checked_open(const char *name, const char *mode)
 {
-    if (fail_append && !strcmp(name, store) && !strcmp(mode, "ab")) { errno = EIO; return NULL; }
-    return fopen(name, mode);
+    if ((fail_append && !strcmp(name, store) && !strcmp(mode, "ab")) ||
+        (fail_read && !strcmp(mode, "rb"))) {
+        errno = negative_errno ? -EIO : EIO;
+        return NULL;
+    }
+    FILE *file = fopen(name, mode);
+    if (!file && negative_errno && errno > 0) errno = -errno;
+    return file;
 }
 #define SETTINGS_FILE store
 #define SETTINGS_FILE_TMP temporary
@@ -44,8 +50,10 @@ static void restart(void)
     s_appends = 0; s_storage_error = 0;
     assert(!settings_subsys_init()); assert(!settings_load());
 }
-int main(void)
+int main(int argc, char **argv)
 {
+    (void)argv;
+    negative_errno = argc > 1;
     char directory[] = "/tmp/rt-carplay-bonds-XXXXXX";
     assert(mkdtemp(directory));
     snprintf(store, sizeof(store), "%s/bonds", directory);
@@ -79,6 +87,17 @@ int main(void)
     restart();
     assert(settings_load_one("bt/link_key/phone2", read, 16) == -ENOENT);
     assert(settings_load_one("bt/id", read, 16) == 16);
+    /* An actual read error still prevents init and preserves the file.
+     * Retrying after recovery must restore the existing local identity. */
+    s_ready = s_file_loaded = false;
+    memset(s_entries, 0, sizeof(s_entries));
+    fail_read = true;
+    assert(settings_subsys_init() == -EIO && !s_ready);
+    fail_read = false;
+    assert(!settings_subsys_init() && !settings_load());
+    assert(settings_load_one("bt/id", read, 16) == 16);
     unlink(store); unlink(temporary); unlink(backup); assert(!rmdir(directory));
     puts("Actual BT settings: reboot restore, reentrant handlers, compaction, torn suffix repair, I/O propagation, backup recovery and deletion passed");
+    printf("First-boot missing files and actual I/O failure/retry passed with %s errno\n",
+           negative_errno ? "Luban-Lite negative" : "POSIX positive");
 }

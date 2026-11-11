@@ -194,6 +194,7 @@ check-lubanlite-bonds:
 	  tests/unit/test_lubanlite_bt_settings.c \
 	  -Wl,-T,tests/support/lubanlite_demo/settings_sections.ld -o $(BUILD)/test_lubanlite_bt_settings
 	$(BUILD)/test_lubanlite_bt_settings
+	$(BUILD)/test_lubanlite_bt_settings negative-errno
 
 .PHONY: check-rtthread-multicast
 check-rtthread-multicast:

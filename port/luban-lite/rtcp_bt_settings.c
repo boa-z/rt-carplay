@@ -318,9 +318,21 @@ static bool file_load(void)
     FILE *file = fopen(SETTINGS_FILE, "rb");
 
     if (file == NULL) {
-        if (errno != ENOENT) return false;
+        /* Luban-Lite DFS/newlib passes through negative errno, whereas
+         * POSIX hosts use positive errno. First boot is valid in either
+         * case; other open failures must not discard existing bonds. */
+        int error = errno;
+        if (error != ENOENT && error != -ENOENT) {
+            RTCP_LOGE(TAG, "open failed path=%s errno=%d", SETTINGS_FILE, error);
+            return false;
+        }
         file = fopen(SETTINGS_FILE_BAK, "rb");
-        if (file == NULL) return errno == ENOENT;
+        if (file == NULL) {
+            error = errno;
+            if (error == ENOENT || error == -ENOENT) return true;
+            RTCP_LOGE(TAG, "open failed path=%s errno=%d", SETTINGS_FILE_BAK, error);
+            return false;
+        }
         s_needs_compact = true;
     }
 

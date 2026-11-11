@@ -4,6 +4,28 @@
 无线地址发布缺口。主机测试和完整 SDK 构建通过不等于新 iPhone 已实测稳定；
 尚没有这版固件在板上的蓝牙认证、Wi-Fi 接管日志。
 
+## v28：修复 v27 首次启动被误判为存储故障
+
+v27 板端日志在 `bt_settings_init()` 报 `settings_subsys_init failed (err -5)`，
+随后 `bt_enable()` 退出；尚未进入 H5 控制器启动或手机 SSP 配对。
+实际调用链为 SDK `hci_core.c::bt_enable()` → `bt_settings_init()` → 应用的
+`settings_subsys_init()` → `file_load()`。SDK `dfs_posix.c::open()` 将底层
+负数错误直接传给 `rt_set_errno()`，newlib `_open_r()` 不转换符号。
+因此刷机后缺失的 `bt_settings.bin` 会产生 `errno=-ENOENT`。v27 的
+`errno != ENOENT` 判断把它当成读盘失败，再统一映射成 `-EIO`（-5）。
+
+v28 对主文件和备份都识别正／负 `ENOENT`；其他错误仍返回失败，并记录
+失败路径及原始 errno。不关闭持久化，也不把所有存储失败当作首次启动。
+SDK 同时在这条早期失败路径清除 `BT_DEV_ENABLE`，防止重试被误报成
+`-EALREADY`；此时尚未打开 HCI 资源，不涉及运行中控制器的强制复位。
+同一份实际后端测试分别模拟 POSIX 正 errno 和 SDK 负 errno，覆盖首次无文件、
+备份恢复、真实 I/O 错误阻止初始化，以及错误恢复后重试保留身份。
+板端下一步应先看到 `settings storage ready`，再观察蓝牙控制器初始化结果；
+此修复不代表 SSP、Wi-Fi 接管或此前 Wi-Fi reserved-page 告警已经完成实测。
+SDK 的 `python3 packages/third-party/zephyr-bluetooth/tests/run_enable_settings.py`
+隔离编译实际 `bt_enable()`，验证 settings 失败时不打开 HCI、恢复后可重试，
+以及真正完成启用后的重复调用仍返回 `-EALREADY`。
+
 ## 已确认的代码问题及修正
 
 | 问题 | 实际源码和机制 | 修正 |

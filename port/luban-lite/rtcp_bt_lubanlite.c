@@ -716,8 +716,8 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
     /* The iPhone keeps its half of a bond across our reboots.  Restore the
      * link keys before the device becomes connectable; otherwise iOS finds
      * the device but every reconnect fails until it is forgotten and paired
-     * again.  Nothing in this SDK runs settings_subsys_init(), so do it here
-     * (it loads /data/bt_settings.bin). */
+     * again. bt_enable() initializes the settings backend; this idempotent
+     * call verifies it before dispatching the restored records to the host. */
     err = settings_subsys_init();
     if (err != 0) {
         RTCP_LOGW(BT_TAG, "settings_subsys_init failed (%d)", err);

@@ -79,6 +79,9 @@ struct iap2_core {
     uint8_t retries;
     bool peer_sync_received;
     bool waiting_ack;
+    bool tcp_transport;
+    bool peer_no_retransmissions;
+    bool peer_no_acks;
     uint64_t marker_deadline_ms;
     uint64_t sync_deadline_ms;
     uint64_t tx_deadline_ms;
@@ -224,6 +227,10 @@ static bool send_sync(iap2_core_t *core)
         11, 2, 1, /* EA session */
         12, 1, 2, /* file transfer session */
     };
+    if (core->tcp_transport) {
+        memset(payload + 4, 0, 6);
+        payload[12] = 2; /* control session version */
+    }
     write_be16(payload + 2, IAP2_MAX_LINK_FRAME_BYTES);
     return send_link_frame(core, payload, sizeof(payload), IAP2_CONTROL_SYNCHRONIZE,
                            IAP2_INITIAL_SEQUENCE, 0);
@@ -340,6 +347,8 @@ static void handle_frame(iap2_core_t *core,
             core->peer_max_outgoing = payload[1];
             core->peer_max_length = read_be16(payload + 2);
             core->peer_sync_received = true;
+            core->peer_no_retransmissions = core->tcp_transport && payload[8] == 0;
+            core->peer_no_acks = core->tcp_transport && payload[9] == 0;
             core->last_rx_sequence = sequence;
             if (core->peer_max_outgoing == 0 || core->peer_max_length <= 10) {
                 fail(core, "peer_iap2_limits_invalid");
@@ -413,7 +422,7 @@ static void handle_frame(iap2_core_t *core,
                                          distance);
         } else {
             /* This also acknowledges duplicates and stale retransmissions. */
-            ack_sent = send_ack(core);
+            ack_sent = core->peer_no_acks || send_ack(core);
         }
         if (!ack_sent) {
             fail(core, "data_ack_send_failed");
@@ -505,6 +514,7 @@ void iap2_core_reset(iap2_core_t *core, const char *reason)
     core->retransmit_len = 0;
     core->peer_max_length = 0;
     core->peer_max_outgoing = 0;
+    core->peer_no_retransmissions = core->peer_no_acks = false;
     core->sent_sequence = IAP2_INITIAL_SEQUENCE;
     core->last_rx_sequence = 0;
     core->waiting_sequence = 0;
@@ -652,6 +662,12 @@ bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
         fail(core, "csm_send_failed");
         return false;
     }
+    if (core->peer_no_retransmissions) {
+        /* Reliable TCP already owns retransmission. There will be no link ACK
+         * in this negotiated mode; completion means transport accepted. */
+        if (acked_callback) acked_callback(message_id, acked_context);
+        return true;
+    }
     core->retransmit_len = link_len;
     core->waiting_sequence = core->sent_sequence;
     core->waiting_message_id = message_id;
@@ -702,4 +718,9 @@ uint32_t iap2_core_rx_frames(const iap2_core_t *core)
 uint32_t iap2_core_bad_frames(const iap2_core_t *core)
 {
     return core != NULL ? core->bad_frames : 0;
+}
+
+void iap2_core_set_tcp_transport(iap2_core_t *core)
+{
+    if (core && core->state == IAP2_CORE_IDLE) core->tcp_transport = true;
 }

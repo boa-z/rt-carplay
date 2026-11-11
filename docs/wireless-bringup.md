@@ -147,3 +147,74 @@ settings 后端覆盖普通重启恢复、文件尾部截断及备份恢复；�
 SDK 的 `python3 packages/third-party/zephyr-bluetooth/tests/run_br_keys.py` 编译
 实际 `keys_br.c`，分别验证 1／4 个槽位、满池恢复返回错误及主动删除后释放槽位；
 仅替换其外部依赖，不运行 SSP 或控制器。
+
+## v30：已有画面但 iPhone 一直显示 Connecting
+
+v29 的实机日志已证明无线视频可用：动态阶段约 21～25 FPS，解码约
+9～10 ms、显示约 7～8 ms。随后静止界面的低帧率，且 assembly 接近零、
+sender_gap 随之增大，不能单独当成接收停顿。
+
+但连接完成链路存在已确认的代码缺口：
+
+- 初始 SETUP 的 `enabledFeatures` 声明 `iAPChannel`，实际却没有接受
+  `type=130 (0x82)`；手机请求后返回空 streams。
+- `modesChanged`、`disableBluetooth` 被统一当成未知命令返回 405。
+- RFCOMM 启动链路没有由 AirPlay 触发的安全交接出口。
+
+这证明此前处于“视频已启动，但运行期 iAP2/交接未完成”的实现状态。
+它是 Connecting 不结束的首要候选；弹窗是否因此消失仍须实机确认，
+主机测试与编译不能替代该验证。
+
+v30 按 DiPlay `CarPlayMediaEngine.kt`、`IapTunnel.kt`、
+`AirPlayIapTunnelStream.kt`、`Iap2LinkEngine.kt` 和 Controller 的交接门槛补齐：
+
+1. 只接受 iAP UUID `E9459FD0-BCAD-4C45-820F-1E72447EF2F2`，要求有效 seed；
+   响应包含 `type=130 / streamID=1 / dataPort`，存在时回显 streamConnectionID。
+   当前仅支持单独的 type-130 SETUP；混合请求、其他 DataStream UUID 仍拒绝。
+2. 用 **seed**（不是 streamConnectionID）派生 `DataStream-Salt<seed>` 输出密钥；
+   只接受当前 RTSP 对端。ChaCha20-Poly1305 解密后按 32 字节
+   APTransportPackage 头的大小与 `comm` 类型解析，把链路字节交给独立 iAP2
+   会话。跨 TCP/加密帧分片均可流式处理，不按 package 大小分配内存。
+3. 出站完整 iAP2 链路帧通过加密 event `/command` 的 `iAPSendMessage` 发送；
+   使用 1024 字节加密分帧，证书不会被原 HID 路径的 512 字节缓冲限制。
+   TCP 隧道使用 control-session version 2 / zero-ACK 同步配置，并按对端同步
+   参数处理无重传模式；USB、RFCOMM 的原同步配置保留。
+4. `modesChanged` 作为通知确认，当前不从中推断本机的音频资源操作；
+   `disableBluetooth` 校验 deviceID 后只排队。等隧道上的 MFi、Identification
+   完成才释放捕获的 bootstrap ACL，保留配对与 RFCOMM listener。代次变化时
+   拒绝释放新接入的手机。不能以首帧或 event TCP connected 代替交接门槛。
+5. endpoint、cipher、iAP2 状态都由 RTSP owner 串行管理；错误/TEARDOWN/停止时
+   清理，不复用已消耗的 seed；seed 与屏幕/音频的输出密钥使用记录共享，避免
+   不同端点重复使用相同 key/nonce。MFi 完整寄存器事务也加锁，防止 bootstrap
+   和新隧道的签名/证书访问交错。
+
+本次没有实现其他 DataStream、音频播放位置反馈或未知 `/command` 的通用成功
+应答；`/feedback` 等剩余协议缺口仍独立存在。这里的“tunnel authenticated”
+是手机在 iAP2 上确认 MFi 成功，不是仅仅解密出一个数据包。
+
+上板步骤（保留同一版镜像进行普通重启/重连）：
+
+1. 刷 v30，首次按正常无线流程配对并启动。保存从蓝牙连接到首帧后至少
+   30 秒的日志，同时记录手机 Connecting 弹窗出现/消失的时刻。
+2. 应依次看到 `iap_setup=ready`、`Wi-Fi tunnel iAP2 starting`，再由隧道会话
+   完成 Identification、MFi。`disableBluetooth accepted` 可能在前后任意一侧。
+3. 成功交接的唯一新增完成日志是
+   `wireless handoff complete: tunnel authenticated/identified; Bluetooth released`。
+   `carplay_iap2 status` 应显示
+   `tunnel=1 identified=1 authenticated=1 handoff_complete=1`。
+   正常的 RFCOMM/ACL 关闭不能导致视频或 AP 被停掉。
+4. 持续操作地图/列表 60 秒，验证画面和触摸；再普通断连重连、普通重启、
+   USB/Wireless 模式切换各一次，确认无残留隧道或错误断开其他 ACL。
+5. 若 `iap_setup=ready` 后没有 starting，检查手机是否连到 dataPort；若 starting
+   后没有就绪，保留具体 iAP2/MFi 错误；若 `handoff_complete=1` 后手机仍
+   Connecting，则“缺少隧道/交接足以解释弹窗”的假设被证伪，应继续检查手机
+   对会话完成的其他要求，不把现有补丁描述为已实测修复。
+
+主机验证新增：加密/网络分片、对端绑定、坏 tag、非法 package 大小、
+证书大小的 event 多帧发送、TCP zero-ACK、UINT64_MAX seed、SETUP 重试、
+TEARDOWN 选择 streamID、关闭后禁止重用密钥、畸形/未知控制命令。
+
+另运行 `make check-lubanlite-handoff`：隔离编译实际 BT adapter 的交接函数和
+实际 owner 的 tick/排队函数，验证认证/识别门槛、异步 HCI 关闭、新会话代次、
+3 秒关闭超时、HCI 失败、对端已离开以及 bt_conn 引用平衡。只有确认 ACL
+关闭后才置 handoff_complete；发出 HCI 断开命令本身不算完成。

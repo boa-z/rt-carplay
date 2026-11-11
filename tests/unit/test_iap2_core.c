@@ -92,8 +92,42 @@ static void clear_tx(harness_t *h)
     h->tx_len = 0;
 }
 
+static void test_tcp_zero_ack(void)
+{
+    harness_t h={0};
+    iap2_core_t *core=iap2_core_create(capture_tx,capture_message,capture_state,&h);
+    iap2_core_set_tcp_transport(core);
+    assert(iap2_core_start(core,0));
+    clear_tx(&h);
+    static const uint8_t marker[]={0xff,0x55,0x02,0,0xee,0x10};
+    iap2_core_feed(core,marker,sizeof(marker),1);
+    assert(h.tx_len == 29 && h.tx[9+12] == 2);
+    for (unsigned i=4;i<10;++i) assert(h.tx[9+i]==0);
+    clear_tx(&h);
+    uint8_t sync[19]={1,4,0x08,0,0,0,0,0,0,0,10,0,2,11,2,1,12,1,2};
+    uint8_t frame[128];
+    size_t n=make_peer_frame(0x80,30,0,0,sync,sizeof(sync),frame,sizeof(frame));
+    iap2_core_feed(core,frame,n,2);
+    n=make_peer_frame(0x40,30,99,0,NULL,0,frame,sizeof(frame));
+    iap2_core_feed(core,frame,n,3);
+    assert(iap2_core_state(core)==IAP2_CORE_READY);
+    clear_tx(&h);
+    assert(iap2_core_send_csm_with_ack_callback(core,0xaa03,NULL,0,capture_csm_acked,&h,4));
+    assert(h.acked_callbacks==1);
+    assert(iap2_core_send_csm(core,0x5000,NULL,0,5));
+    size_t sent=h.tx_len;
+    iap2_core_advance_time(core,20000);
+    assert(h.tx_len==sent && iap2_core_state(core)==IAP2_CORE_READY);
+    uint8_t csm[]={0x40,0x40,0,6,0x1d,0};
+    n=make_peer_frame(0x40,31,99,10,csm,sizeof(csm),frame,sizeof(frame));
+    iap2_core_feed(core,frame,n,20001);
+    assert(h.messages==1 && h.tx_len==sent); /* no gratuitous data ACK */
+    iap2_core_destroy(core);
+}
+
 int main(void)
 {
+    test_tcp_zero_ack();
     harness_t h = {0};
     iap2_core_t *core = iap2_core_create(capture_tx, capture_message, capture_state, &h);
     assert(core != NULL);

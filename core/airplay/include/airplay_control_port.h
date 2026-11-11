@@ -56,3 +56,5 @@ bool airplay_control_port_send_hid_report(airplay_control_port_t *port,
 /* DiPlay's main-screen forceKeyFrame command, rate limited per session. */
 bool airplay_control_port_request_main_screen_keyframe(
     airplay_control_port_t *port);
+
+bool airplay_control_port_send_iap(airplay_control_port_t *, const uint8_t *, size_t);

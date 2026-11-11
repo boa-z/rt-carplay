@@ -204,3 +204,7 @@ void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address);
  * board-verified; see rtcp_random_lubanlite.c and the port README.
  */
 bool rtcp_lubanlite_random(uint8_t *output, size_t len);
+
+/* Release only the last accepted iAP2 bootstrap ACL, retaining bonds/listener. */
+unsigned rtcp_bt_lubanlite_bootstrap_generation(void);
+int rtcp_bt_lubanlite_handoff(unsigned generation);

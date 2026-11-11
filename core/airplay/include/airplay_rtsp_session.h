@@ -48,6 +48,9 @@ typedef void (*airplay_rtsp_stop_media_cb_t)(void *context);
  * when a well-formed volume parameter is present. */
 typedef void (*airplay_rtsp_volume_cb_t)(float volume_db, void *context);
 
+typedef bool (*airplay_rtsp_start_iap_cb_t)(const airplay_rtsp_pairing_t *, uint64_t seed,
+                                           uint16_t *port, void *context);
+typedef bool (*airplay_rtsp_disable_bt_cb_t)(const char *device_id, void *context);
 typedef struct {
     airplay_rtsp_pairing_config_t pairing;
     const uint8_t *info_plist;
@@ -64,6 +67,10 @@ typedef struct {
     void *media_context;
     airplay_rtsp_volume_cb_t on_volume;
     void *volume_context;
+    airplay_rtsp_start_iap_cb_t start_iap;
+    airplay_rtsp_stop_media_cb_t stop_iap;
+    airplay_rtsp_disable_bt_cb_t disable_bluetooth;
+    void *command_context;
 } airplay_rtsp_session_config_t;
 
 typedef enum {
@@ -99,3 +106,6 @@ airplay_pair_verify_result_t airplay_rtsp_session_get_control_keys(
 void airplay_rtsp_session_mark_control_cipher_active(
     airplay_rtsp_session_t *session);
 void airplay_rtsp_session_destroy(airplay_rtsp_session_t *session);
+
+/* Owner reports terminal socket loss; consumed seed remains non-reusable. */
+void airplay_rtsp_session_iap_closed(airplay_rtsp_session_t *session);

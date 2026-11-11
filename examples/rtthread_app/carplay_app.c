@@ -1075,6 +1075,14 @@ int carplay_app_start(const carplay_app_config_t *config)
     server_config.screen_message_context = app;
     server_config.on_event_state = on_event_state;
     server_config.event_state_context = app;
+#if defined(RTCARPLAY_IAP2)
+    if (!app->wired) {
+        server_config.on_iap_bytes = carplay_iap2_tunnel_bytes;
+        server_config.on_iap_tick = carplay_iap2_tunnel_tick;
+        server_config.on_iap_stop = carplay_iap2_tunnel_stop;
+        server_config.disable_bluetooth = carplay_iap2_request_handoff;
+    }
+#endif
 #if defined(RTCARPLAY_AUDIO)
     if (app->audio_started) {
         server_config.on_audio_pcm = on_audio_pcm;
@@ -1835,4 +1843,9 @@ void carplay_app_performance_report(void)
         rx.pending_header_bytes, rx.pending_body_bytes, rx.pending_age_ms);
     app->perf_ms = now; app->perf_screen = rx; app->perf_video = video;
 #endif
+}
+
+bool carplay_app_send_iap(const uint8_t *bytes, size_t len)
+{
+    return airplay_rtsp_server_send_iap(s_app.server, bytes, len);
 }

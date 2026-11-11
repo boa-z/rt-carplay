@@ -214,8 +214,33 @@ static void test_argument_checks(void)
     airplay_control_port_destroy(NULL);
 }
 
+static bool capture_iap_write(const uint8_t *bytes, size_t len, void *context)
+{
+    capture_t *capture=context;
+    assert(capture->len + len <= sizeof(capture->bytes));
+    memcpy(capture->bytes + capture->len, bytes, len);
+    capture->len += len; ++capture->calls;
+    return true;
+}
+static void test_large_iap_command(void)
+{
+    uint8_t key[32]={0}, payload[1500]; memset(payload,0x42,sizeof(payload));
+    capture_t capture={0};
+    airplay_control_port_t *port=NULL;
+    assert(airplay_control_port_create(&rtcp_os_linux,key,key,0,0,capture_iap_write,&capture,&port)==RTCP_OK);
+    assert(airplay_control_port_send_iap(port,payload,sizeof(payload)));
+    assert(capture.calls==2);
+    airplay_control_cipher_t *peer=make_peer(key,key);
+    char plaintext[3000];
+    decrypt_capture(peer,&capture,plaintext,sizeof(plaintext));
+    assert(strstr(plaintext,"POST /command RTSP/1.0") && strstr(plaintext,"Content-Length:"));
+    airplay_control_cipher_destroy(peer);
+    airplay_control_port_destroy(port);
+}
+
 int main(void)
 {
+    test_large_iap_command();
     test_event_ack();
     test_authentication_failure();
     test_write_failure_destroys_channel();

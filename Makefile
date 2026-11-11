@@ -39,7 +39,7 @@ TESTS := test_mfi2c test_pairing_files \
          test_airplay_control_stream test_airplay_screen_stream \
          test_airplay_audio_stream test_airplay_mfi_sap test_airplay_mfi_sap_backend \
          test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify \
-         test_airplay_rtsp_pairing test_airplay_rtsp_session \
+         test_airplay_rtsp_pairing test_airplay_rtsp_session test_airplay_iap_tunnel \
          test_airplay_pairing_store \
          test_airplay_control_cipher test_airplay_control_port \
          test_airplay_timing_port test_airplay_event_port \
@@ -204,3 +204,7 @@ check-rtthread-multicast:
 	  -Iport/rtthread/include tests/unit/test_rtthread_multicast.c port/rtthread/rtcp_net_rtthread.c \
 	  -o $(BUILD)/test_rtthread_multicast
 	$(BUILD)/test_rtthread_multicast
+
+.PHONY: check-lubanlite-handoff
+check-lubanlite-handoff:
+	python3 tests/run_lubanlite_handoff.py

@@ -100,6 +100,7 @@ typedef struct {
     iap2_session_transport_t transport;
     /* Wired only: CarPlay NCM control interface number in the active USB
      * configuration (the references use 3). */
+    bool airplay_tunnel; /* reliable Wi-Fi DataStream, independent iAP2 link */
     uint8_t car_play_interface_number;
     /* Wired only: reported to the phone after authentication.  Zero means
      * "no charging current claimed", matching the reference bring-up. */

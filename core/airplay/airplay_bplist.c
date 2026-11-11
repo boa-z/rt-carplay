@@ -423,6 +423,7 @@ airplay_bplist_result_t airplay_bplist_get_data(
 }
 
 typedef enum {
+    BPLIST_WRITE_DATA,
     BPLIST_WRITE_STRING,
     BPLIST_WRITE_INTEGER,
     BPLIST_WRITE_ARRAY,
@@ -432,6 +433,8 @@ typedef enum {
 typedef struct {
     bplist_write_kind_t kind;
     const char *text;
+    const uint8_t *data;
+    size_t data_len;
     uint64_t number;
     uint8_t references[12];
     uint8_t reference_count;
@@ -466,14 +469,17 @@ static bool emit_write_object(const bplist_write_object_t *object,
 {
     if (object == NULL || output == NULL || offset == NULL) return false;
     switch (object->kind) {
+    case BPLIST_WRITE_DATA:
     case BPLIST_WRITE_STRING: {
-        size_t length = strlen(object->text);
+        bool data = object->kind == BPLIST_WRITE_DATA;
+        uint8_t marker = data ? 0x40U : 0x50U;
+        size_t length = data ? object->data_len : strlen(object->text);
         if (*offset >= capacity) return false;
         if (length < 15U) {
-            output[(*offset)++] = (uint8_t)(0x50U | (uint8_t)length);
+            output[(*offset)++] = (uint8_t)(marker | (uint8_t)length);
         } else {
             /* Binary plist uses a following integer object when the count nibble is 0xf. */
-            output[(*offset)++] = 0x5fU;
+            output[(*offset)++] = marker | 0x0fU;
             uint8_t width = integer_width((uint64_t)length);
             uint8_t power = width == 1U ? 0U : width == 2U ? 1U : width == 4U ? 2U : 3U;
             if (*offset >= capacity) return false;
@@ -481,7 +487,7 @@ static bool emit_write_object(const bplist_write_object_t *object,
             if (!write_be(output, capacity, offset, (uint64_t)length, width)) return false;
         }
         if (length > capacity - *offset) return false;
-        memcpy(output + *offset, object->text, length);
+        memcpy(output + *offset, data ? (const void *)object->data : (const void *)object->text, length);
         *offset += length;
         return true;
     }
@@ -662,6 +668,7 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
         if (entry->data_port == 0U) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
         uint8_t pairs = 2U; /* type, dataPort */
         if (entry->control_port != 0U) ++pairs;
+        if (entry->stream_id != 0U) ++pairs;
         if (entry->has_connection_id) ++pairs;
         if ((size_t)count + 1U + (size_t)pairs * 2U > BPLIST_WRITER_MAX_OBJECTS) {
             return AIRPLAY_BPLIST_TOO_LARGE;
@@ -703,8 +710,31 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
             objects[value_id + p].number = entry->stream_connection_id;
             ++p;
         }
+        if (entry->stream_id != 0U) {
+            objects[key_id + p].kind = BPLIST_WRITE_STRING;
+            objects[key_id + p].text = "streamID";
+            objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
+            objects[value_id + p].number = entry->stream_id;
+        }
         count = (uint8_t)(dict_id + 1U + pairs * 2U);
     }
 
     return build_setup_response(objects, count, output, output_capacity, output_len);
+}
+
+/* Outbound bytes include the complete iAP2 link frame, not just its CSM body. */
+airplay_bplist_result_t airplay_bplist_build_iap_command(
+    const uint8_t *data, size_t len, uint8_t *out, size_t capacity, size_t *written)
+{
+    if (!data || !len || len > 2048U) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_write_object_t objects[] = {
+        {.kind=BPLIST_WRITE_DICTIONARY, .references={1,2,3,4}, .reference_count=4},
+        {.kind=BPLIST_WRITE_STRING, .text="type"},
+        {.kind=BPLIST_WRITE_STRING, .text="params"},
+        {.kind=BPLIST_WRITE_STRING, .text="iAPSendMessage"},
+        {.kind=BPLIST_WRITE_DICTIONARY, .references={5,6}, .reference_count=2},
+        {.kind=BPLIST_WRITE_STRING, .text="data"},
+        {.kind=BPLIST_WRITE_DATA, .data=data, .data_len=len},
+    };
+    return build_setup_response(objects, 7, out, capacity, written);
 }

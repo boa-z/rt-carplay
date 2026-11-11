@@ -40,6 +40,15 @@ typedef struct {
     bool running, listening, connected, identified, authenticated;
     unsigned wifi_configs, availability, invites, reinvites, invite_acks;
     bool mfi_completed; /* retained through normal RFCOMM Wi-Fi handover */
+    bool tunnel_connected, tunnel_identified, tunnel_authenticated, handoff_complete;
     int error; /* asynchronous startup/session failure; reset on start */
 } carplay_iap2_status_t;
 void carplay_iap2_get_status(carplay_iap2_status_t *status);
+
+#include <stddef.h>
+#include <stdint.h>
+/* Invoked exclusively by the RTSP owner; independent from the RFCOMM pump. */
+bool carplay_iap2_tunnel_bytes(const uint8_t *, size_t, void *);
+bool carplay_iap2_tunnel_tick(void *);
+void carplay_iap2_tunnel_stop(void *);
+bool carplay_iap2_request_handoff(const char *, void *);

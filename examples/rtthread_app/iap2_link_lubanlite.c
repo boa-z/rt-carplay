@@ -95,11 +95,16 @@ typedef struct {
 } iap2_link_t;
 
 static iap2_link_t s_link;
+static iap2_link_t s_tunnel;
+static bool s_handoff_requested, s_handoff_done;
+static unsigned s_handoff_generation;
+static uint64_t s_handoff_at_ms;
 static volatile bool s_serve;
 
 static bool link_tx(const uint8_t *bytes, size_t len, void *context)
 {
     iap2_link_t *link = context;
+    if (link == &s_tunnel) return carplay_app_send_iap(bytes, len);
     if (link->fd < 1) return false;
     int sent = rtcp_bt_lubanlite_send(link->fd, bytes, len);
     if (sent != (int)len) {
@@ -221,6 +226,7 @@ static void link_event(iap2_session_event_t event, void *context)
         IAP2_LOG("iAP2 link ready");
         break;
     case IAP2_SESSION_EVENT_LINK_DEAD:
+        if (link == &s_tunnel) link->error = RTCP_EIO;
         IAP2_LOG("iAP2 link failed (protocol)");
         break;
     default:
@@ -300,6 +306,7 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
     config.get_airplay = link_get_airplay;
     config.on_event = link_event;
     config.context = link;
+    config.airplay_tunnel = link == &s_tunnel;
 
     link->session = iap2_session_create(&config);
     return link->session != NULL ? RTCP_OK : RTCP_ENOMEM;
@@ -534,6 +541,10 @@ void carplay_iap2_get_status(carplay_iap2_status_t *out)
     out->invites = s_link.invites;
     out->reinvites = s_link.reinvites;
     out->invite_acks = s_link.invite_acks;
+    out->tunnel_connected = s_tunnel.link_up;
+    out->tunnel_identified = s_tunnel.identification_accepted;
+    out->tunnel_authenticated = s_tunnel.authenticated;
+    out->handoff_complete = s_handoff_done;
     out->error = s_link.error;
     rt_hw_interrupt_enable(flags);
 }
@@ -589,6 +600,11 @@ static int cmd_carplay_iap2(int argc, char **argv)
                    s_link.listening, s_link.error, s_link.mfi_completed,
                    s_link.wifi_configs, s_link.availability, s_link.invites,
                    s_link.reinvites, s_link.invite_acks);
+        carplay_iap2_status_t runtime;
+        carplay_iap2_get_status(&runtime);
+        rt_kprintf("  tunnel=%u identified=%u authenticated=%u handoff_complete=%u\n",
+                   runtime.tunnel_connected, runtime.tunnel_identified,
+                   runtime.tunnel_authenticated, runtime.handoff_complete);
         return 0;
     }
     rt_kprintf("usage: carplay_iap2 start|stop|status\n");
@@ -887,3 +903,64 @@ static int cmd_carplay_mfi(int argc, char **argv)
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_mfi, carplay_mfi,
                      raw MFi 2.0C bus dump (bring-up diagnostic));
 #endif
+
+/* The AirPlay owner is the sole writer of this state. Bluetooth retains its
+ * own session until the new transport has proved authentication/identity. */
+bool carplay_iap2_tunnel_bytes(const uint8_t *bytes, size_t len, void *context)
+{
+    (void)context;
+    if (!s_tunnel.session) {
+        memset(&s_tunnel, 0, sizeof(s_tunnel));
+        if (link_session_create(&s_tunnel, link_mfi()) != RTCP_OK) return false;
+        s_tunnel.link_up = true;
+        IAP2_LOG("Wi-Fi tunnel iAP2 starting");
+        iap2_session_link_up(s_tunnel.session, rtcp_os_rtthread.now_ms());
+        iap2_session_notify_airplay_event(s_tunnel.session, true, rtcp_os_rtthread.now_ms());
+    }
+    if (len) iap2_session_feed(s_tunnel.session, bytes, len, rtcp_os_rtthread.now_ms());
+    return s_tunnel.error == RTCP_OK;
+}
+bool carplay_iap2_tunnel_tick(void *context)
+{
+    (void)context;
+    if (!s_tunnel.session) return true;
+    iap2_session_advance(s_tunnel.session, rtcp_os_rtthread.now_ms());
+    if (!s_handoff_done && s_handoff_requested && s_tunnel.authenticated &&
+        s_tunnel.identification_accepted && s_tunnel.error == RTCP_OK) {
+        if (!s_handoff_at_ms) s_handoff_at_ms = rtcp_os_rtthread.now_ms();
+        int result = rtcp_bt_lubanlite_handoff(s_handoff_generation);
+        if (result == RTCP_OK) {
+            s_handoff_done = true;
+            IAP2_LOG("wireless handoff complete: tunnel authenticated/identified; Bluetooth released");
+        } else if (result != RTCP_ETIMEDOUT ||
+                   rtcp_os_rtthread.now_ms() - s_handoff_at_ms >= 3000U) {
+            /* No per-tick retries/log floods on HCI failure. */
+            s_handoff_requested = false;
+            IAP2_LOG("wireless handoff failed rc=%d", result);
+        }
+    }
+    return s_tunnel.error == RTCP_OK;
+}
+void carplay_iap2_tunnel_stop(void *context)
+{
+    (void)context;
+    if (s_tunnel.session) {
+        iap2_session_link_down(s_tunnel.session);
+        iap2_session_destroy(s_tunnel.session);
+        IAP2_LOG("Wi-Fi tunnel iAP2 stopped");
+    }
+    memset(&s_tunnel, 0, sizeof(s_tunnel));
+    s_handoff_requested = s_handoff_done = false;
+}
+bool carplay_iap2_request_handoff(const char *device, void *context)
+{
+    (void)device; (void)context;
+    if (!s_handoff_requested && !s_handoff_done)
+        IAP2_LOG("disableBluetooth accepted: waiting for authenticated iAP2 tunnel");
+    if (!s_handoff_requested && !s_handoff_done) {
+        s_handoff_generation = rtcp_bt_lubanlite_bootstrap_generation();
+        s_handoff_at_ms = 0;
+    }
+    s_handoff_requested = true;
+    return true;
+}

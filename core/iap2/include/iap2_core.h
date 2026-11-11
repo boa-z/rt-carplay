@@ -38,7 +38,8 @@ bool iap2_core_send_csm(iap2_core_t *core,
                         const uint8_t *body,
                         size_t body_len,
                         uint64_t now_ms);
-/* Completion runs when the peer link acknowledges the CSM frame. */
+/* Completion runs on peer link ACK; in negotiated TCP no-retransmission
+ * mode it runs when transport accepts the frame (no link ACK is expected). */
 bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
                                           uint16_t message_id,
                                           const uint8_t *body,
@@ -50,3 +51,7 @@ iap2_core_state_t iap2_core_state(const iap2_core_t *core);
 uint32_t iap2_core_rx_frames(const iap2_core_t *core);
 uint32_t iap2_core_bad_frames(const iap2_core_t *core);
 
+
+/* Before start only. TCP iAP2 uses control session version 2 and zero-ACK
+ * synchronization; RFCOMM/USB defaults remain unchanged. */
+void iap2_core_set_tcp_transport(iap2_core_t *core);

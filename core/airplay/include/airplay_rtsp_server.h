@@ -66,6 +66,12 @@ typedef struct {
     /* Event-channel connect/disconnect notifications. */
     airplay_rtsp_event_state_cb_t on_event_state;
     void *event_state_context;
+    /* Optional wireless iAP2 runtime. All callbacks run on the RTSP owner. */
+    bool (*on_iap_bytes)(const uint8_t *, size_t, void *);
+    bool (*on_iap_tick)(void *); /* false retires this tunnel, preserving video */
+    void (*on_iap_stop)(void *);
+    airplay_rtsp_disable_bt_cb_t disable_bluetooth;
+    void *iap_context;
 } airplay_rtsp_server_config_t;
 
 int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
@@ -107,3 +113,5 @@ bool airplay_rtsp_server_single_cipher_frame(const airplay_rtsp_server_t *server
 /* Stops the connection and all endpoints.  Must be called from the poll
  * thread; no callback is invoked afterwards. */
 void airplay_rtsp_server_stop(airplay_rtsp_server_t *server);
+
+bool airplay_rtsp_server_send_iap(airplay_rtsp_server_t *, const uint8_t *, size_t);

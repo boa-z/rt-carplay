@@ -570,6 +570,7 @@ iap2_session_t *iap2_session_create(const iap2_session_config_t *config)
         free(session);
         return NULL;
     }
+    if (config->airplay_tunnel) iap2_core_set_tcp_transport(session->core);
     return session;
 }
 

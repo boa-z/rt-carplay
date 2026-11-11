@@ -7,6 +7,7 @@
  * here.
  */
 #include "airplay_rtsp_server.h"
+#include "airplay_iap_tunnel.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -75,6 +76,7 @@ struct airplay_rtsp_server {
     airplay_rtsp_session_t *session;
     rtsp_connection_t connection;
 
+    airplay_iap_tunnel_t *iap_tunnel;
     airplay_event_port_t *event_port;
     airplay_timing_port_t *timing_port;
     airplay_screen_server_t *screen_server;
@@ -678,6 +680,37 @@ static void server_teardown_connection(airplay_rtsp_server_t *server,
     memset(&server->peer, 0, sizeof(server->peer));
 }
 
+static bool server_iap_bytes(const uint8_t *p, size_t n, void *context)
+{
+    airplay_rtsp_server_t *s = context;
+    return s->event_connected && s->config.on_iap_bytes &&
+        s->config.on_iap_bytes(p, n, s->config.iap_context);
+}
+static void server_stop_iap(void *context)
+{
+    airplay_rtsp_server_t *s = context;
+    airplay_iap_tunnel_stop(s->iap_tunnel); s->iap_tunnel = NULL;
+    airplay_rtsp_session_iap_closed(s->session);
+    if (s->config.on_iap_stop) s->config.on_iap_stop(s->config.iap_context);
+}
+static bool server_start_iap(const airplay_rtsp_pairing_t *pairing, uint64_t seed,
+                             uint16_t *port, void *context)
+{
+    airplay_rtsp_server_t *s = context;
+    uint8_t key[32];
+    if (s->iap_tunnel || !s->config.on_iap_bytes ||
+        airplay_rtsp_pairing_derive_output_key(pairing, seed, key) != AIRPLAY_PAIR_VERIFY_OK) return false;
+    int result = airplay_iap_tunnel_start(s->net, &s->peer, key, server_iap_bytes, s, &s->iap_tunnel);
+    mbedtls_platform_zeroize(key, sizeof(key));
+    if (result != RTCP_OK) return false;
+    *port = airplay_iap_tunnel_port(s->iap_tunnel);
+    return true;
+}
+bool airplay_rtsp_server_send_iap(airplay_rtsp_server_t *s, const uint8_t *p, size_t n)
+{
+    return s && !s->stopping && s->event_connected && airplay_event_port_send_iap(s->event_port, p, n);
+}
+
 static void server_accept(airplay_rtsp_server_t *server)
 {
     rtcp_addr_t peer;
@@ -714,6 +747,12 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.media_context = server;
     session_config.on_volume = server_volume;
     session_config.volume_context = server;
+    if (server->config.on_iap_bytes) {
+        session_config.start_iap = server_start_iap;
+        session_config.stop_iap = server_stop_iap;
+    }
+    session_config.disable_bluetooth = server->config.disable_bluetooth;
+    session_config.command_context = server->config.iap_context;
 
     if (airplay_rtsp_session_create_borrowing_info_plist(
             &session_config, &server->session) != AIRPLAY_RTSP_SESSION_OK) {
@@ -898,9 +937,10 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
     int rtsp_fd = server->client_fd >= 0 ? server->client_fd
                                          : server->listener_fd;
 
-    struct rtcp_pollfd fds[4 + 2 * AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
+    struct rtcp_pollfd fds[5 + 2 * AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
     int count = 0;
     int rtsp_index = -1;
+    int iap_index = -1;
     int event_index = -1;
     int timing_index = -1;
     int screen_index = -1;
@@ -916,6 +956,11 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         fds[count].events = RTCP_POLLIN;
         fds[count].revents = 0;
         ++count;
+    }
+    int iap_fd = airplay_iap_tunnel_fd(server->iap_tunnel);
+    if (iap_fd >= 0) {
+        iap_index = count;
+        fds[count++] = (struct rtcp_pollfd){.fd=iap_fd, .events=RTCP_POLLIN};
     }
     if (event_fd >= 0) {
         event_index = count;
@@ -998,6 +1043,16 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         }
     }
 
+    if (iap_index >= 0 && fds[iap_index].revents &&
+        !airplay_iap_tunnel_poll(server->iap_tunnel)) {
+        RTCP_LOGW(TAG, "iap_tunnel=closed");
+        server_stop_iap(server);
+    }
+    if (server->config.on_iap_tick && server->iap_tunnel &&
+        !server->config.on_iap_tick(server->config.iap_context)) {
+        RTCP_LOGW(TAG, "iap_tunnel=protocol_failed");
+        server_stop_iap(server);
+    }
     if (server->screen_failed) {
         server_teardown_connection(server, "screen_stream_lost");
     }

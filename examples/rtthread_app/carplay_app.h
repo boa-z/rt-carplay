@@ -149,3 +149,6 @@ void carplay_app_debug_counters(unsigned *received, unsigned *hid_sent, unsigned
 
 /* Low-priority lifecycle owner only, while not starting/stopping the app. */
 void carplay_app_performance_report(void);
+
+/* RTSP owner only: tunneled iAP2 writes use encrypted event /command. */
+bool carplay_app_send_iap(const uint8_t *, size_t);

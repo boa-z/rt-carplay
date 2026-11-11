@@ -259,6 +259,9 @@ static bool s_listening;
 static bool s_stop;
 static uint8_t s_rx_dropped;
 static struct bt_conn *s_pair_conn;
+static bt_addr_t s_bootstrap_peer;
+static bool s_bootstrap_peer_valid;
+static unsigned s_bootstrap_generation;
 static rtcp_bt_pairing_status_t s_pair;
 static uint32_t s_pair_sequence;
 
@@ -650,11 +653,15 @@ static struct bt_rfcomm_dlc_ops s_link_ops = {
 static int server_accept_cb(struct bt_conn *conn, struct bt_rfcomm_server *server,
                             struct bt_rfcomm_dlc **dlc)
 {
-    (void)conn;
     (void)server;
     if (s_stop) return -1;
     for (size_t i = 0U; i < BT_LINK_MAX; ++i) {
         if (s_links[i].state == BT_LINK_FREE) {
+            rt_base_t irq = rt_hw_interrupt_disable();
+            s_bootstrap_peer = *bt_conn_get_dst_br(conn);
+            s_bootstrap_peer_valid = true;
+            if (++s_bootstrap_generation == 0) ++s_bootstrap_generation;
+            rt_hw_interrupt_enable(irq);
             s_links[i].state = BT_LINK_CONNECTING;
             s_links[i].handed_out = false;
             s_links[i].head = 0U;
@@ -956,6 +963,40 @@ void rtcp_bt_lubanlite_set_event_cb(void (*cb)(int ev, void *user), void *user)
 {
     s_event_cb = cb;
     s_event_user = user;
+}
+
+unsigned rtcp_bt_lubanlite_bootstrap_generation(void)
+{
+    return s_bootstrap_generation;
+}
+int rtcp_bt_lubanlite_handoff(unsigned generation)
+{
+    bt_addr_t peer;
+    rt_base_t irq = rt_hw_interrupt_disable();
+    if (generation != s_bootstrap_generation) {
+        rt_hw_interrupt_enable(irq);
+        return RTCP_ESTATE;
+    }
+    bool valid = s_bootstrap_peer_valid;
+    peer = s_bootstrap_peer;
+    rt_hw_interrupt_enable(irq);
+    if (!valid) return RTCP_OK; /* phone may already have closed the ACL */
+    struct bt_conn *conn = bt_conn_lookup_addr_br(&peer);
+    if (!conn) return RTCP_OK;
+    struct bt_conn_info info;
+    int result = bt_conn_get_info(conn, &info);
+    if (result == 0 && info.state == BT_CONN_STATE_DISCONNECTED) {
+        bt_conn_unref(conn);
+        return RTCP_OK;
+    }
+    if (result == 0 && info.state == BT_CONN_STATE_DISCONNECTING) {
+        bt_conn_unref(conn);
+        return RTCP_ETIMEDOUT; /* owner retries until HCI confirms closure */
+    }
+    if (result == 0) result = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    bt_conn_unref(conn);
+    RTCP_LOGI(BT_TAG, "wireless handoff: bootstrap ACL release rc=%d", result);
+    return result == 0 ? RTCP_ETIMEDOUT : RTCP_EIO;
 }
 
 void rtcp_bt_lubanlite_drop_link(int fd)

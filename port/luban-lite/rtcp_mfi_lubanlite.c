@@ -163,7 +163,21 @@ static const struct rtcp_mfi2c_bus s_bus_ops = {
 
 static const struct rtcp_mfi s_mfi_ops;
 
-int rtcp_mfi_lubanlite_start(const char *i2c_bus_name, uint8_t address)
+/* A complete certificate/sign/probe is one coprocessor transaction. The bus
+ * lock alone covers individual transfers, not the multi-register engine. */
+static struct rt_mutex s_mfi_transaction;
+static bool s_mfi_lock_ready;
+static void mfi_lock(void)
+{
+    rt_enter_critical();
+    if (!s_mfi_lock_ready) {
+        rt_mutex_init(&s_mfi_transaction, "cp-mfi", RT_IPC_FLAG_PRIO);
+        s_mfi_lock_ready = true;
+    }
+    rt_exit_critical();
+    rt_mutex_take(&s_mfi_transaction, RT_WAITING_FOREVER);
+}
+static int mfi_start_unlocked(const char *i2c_bus_name, uint8_t address)
 {
     if (s_mfi.ready) return RTCP_OK;
     if (i2c_bus_name == NULL || i2c_bus_name[0] == '\0') return RTCP_EINVAL;
@@ -348,7 +362,7 @@ static int mfi_info(struct rtcp_mfi_info *out)
     return RTCP_OK;
 }
 
-static int mfi_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
+static int mfi_sign_unlocked(const uint8_t *challenge, size_t len, uint8_t *sig,
                     size_t sig_cap, size_t *sig_len)
 {
     if (!s_mfi.ready) return RTCP_ESTATE;
@@ -395,7 +409,7 @@ static int mfi_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
 #define MFI_CERT_ATTEMPTS 5
 #define MFI_CERT_RECOVERY_MS 400
 
-static int mfi_read_cert(uint8_t *der, size_t cap, size_t *der_len)
+static int mfi_read_cert_unlocked(uint8_t *der, size_t cap, size_t *der_len)
 {
     if (!s_mfi.ready) return RTCP_ESTATE;
     if (der == NULL || der_len == NULL) return RTCP_EINVAL;
@@ -447,6 +461,27 @@ static int mfi_read_cert(uint8_t *der, size_t cap, size_t *der_len)
     return result == RTCP_OK ? RTCP_EIO : result;
 }
 
+int rtcp_mfi_lubanlite_start(const char *bus, uint8_t address)
+{
+    mfi_lock();
+    int result = mfi_start_unlocked(bus, address);
+    rt_mutex_release(&s_mfi_transaction);
+    return result;
+}
+static int mfi_sign(const uint8_t *challenge, size_t len, uint8_t *sig, size_t cap, size_t *written)
+{
+    mfi_lock();
+    int result = mfi_sign_unlocked(challenge, len, sig, cap, written);
+    rt_mutex_release(&s_mfi_transaction);
+    return result;
+}
+static int mfi_read_cert(uint8_t *der, size_t cap, size_t *written)
+{
+    mfi_lock();
+    int result = mfi_read_cert_unlocked(der, cap, written);
+    rt_mutex_release(&s_mfi_transaction);
+    return result;
+}
 static const struct rtcp_mfi s_mfi_ops = {
     .info = mfi_info,
     .sign = mfi_sign,

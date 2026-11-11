@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "airplay_command_plist.h"
+#include "airplay_bplist.h"
 #include "airplay_control_stream.h"
 #include "airplay_hid_plist.h"
 #include "mbedtls/platform_util.h"
@@ -145,19 +146,23 @@ static int send_plaintext_locked(airplay_control_port_t *port,
                                  const uint8_t *plaintext,
                                  size_t plaintext_len)
 {
-    uint8_t frame[AIRPLAY_CONTROL_MAX_PLAINTEXT +
+    uint8_t frame[AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES +
                   AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES];
-    size_t frame_len = 0U;
-    airplay_control_cipher_result_t result = airplay_control_cipher_encrypt(
-        port->cipher, plaintext, plaintext_len, frame, sizeof(frame),
-        &frame_len);
-    if (result != AIRPLAY_CONTROL_CIPHER_OK) {
+    size_t offset = 0;
+    while (offset < plaintext_len) {
+        size_t n = plaintext_len - offset;
+        if (n > AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES)
+            n = AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES;
+        size_t frame_len = 0;
+        airplay_control_cipher_result_t result = airplay_control_cipher_encrypt(
+            port->cipher, plaintext + offset, n, frame, sizeof(frame), &frame_len);
+        bool written = result == AIRPLAY_CONTROL_CIPHER_OK &&
+            port->write_cb(frame, frame_len, port->context);
         mbedtls_platform_zeroize(frame, sizeof(frame));
-        return RTCP_EIO;
+        if (!written) return RTCP_EIO;
+        offset += n;
     }
-    bool written = port->write_cb(frame, frame_len, port->context);
-    mbedtls_platform_zeroize(frame, sizeof(frame));
-    return written ? RTCP_OK : RTCP_EIO;
+    return RTCP_OK;
 }
 
 static bool send_event_ack(const airplay_rtsp_request_t *request, void *context)
@@ -384,4 +389,31 @@ done_without_lock:
     mbedtls_platform_zeroize(body, sizeof(body));
     mbedtls_platform_zeroize(header, sizeof(header));
     return false;
+}
+
+bool airplay_control_port_send_iap(airplay_control_port_t *port,
+                                  const uint8_t *bytes, size_t len)
+{
+    if (!port) return false;
+    uint8_t plaintext[2560U];
+    char header[192];
+    size_t plist_len = 0;
+    bool sent = false;
+    if (airplay_bplist_build_iap_command(bytes, len, plaintext,
+            sizeof(plaintext), &plist_len) != AIRPLAY_BPLIST_OK) return false;
+    lock(port);
+    if (!port->active) goto done;
+    if (++port->cseq == 0) port->cseq = 1;
+    int n = snprintf(header, sizeof(header),
+        "POST /command RTSP/1.0\r\nContent-Type: application/x-apple-binary-plist\r\n"
+        "Content-Length: %u\r\nCSeq: %u\r\n\r\n", (unsigned)plist_len, (unsigned)port->cseq);
+    if (n <= 0 || (size_t)n >= sizeof(header) || (size_t)n + plist_len > sizeof(plaintext)) goto done;
+    memmove(plaintext + n, plaintext, plist_len);
+    memcpy(plaintext, header, (size_t)n);
+    sent = send_plaintext_locked(port, plaintext, (size_t)n + plist_len) == RTCP_OK;
+    if (!sent) destroy_channel(port);
+done:
+    mbedtls_platform_zeroize(plaintext, sizeof(plaintext));
+    unlock(port);
+    return sent;
 }

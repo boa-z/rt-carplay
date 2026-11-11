@@ -118,6 +118,7 @@ typedef struct {
     uint64_t stream_type;
     uint16_t data_port;
     uint16_t control_port; /* 0 omits controlPort (screen stream). */
+    uint32_t stream_id; /* nonzero adds streamID (iAP tunnel = 1) */
     bool has_connection_id;
     uint64_t stream_connection_id;
 } airplay_bplist_stream_entry_t;
@@ -128,3 +129,6 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
     uint8_t *output,
     size_t output_capacity,
     size_t *output_len);
+
+airplay_bplist_result_t airplay_bplist_build_iap_command(
+    const uint8_t *data, size_t len, uint8_t *out, size_t capacity, size_t *written);

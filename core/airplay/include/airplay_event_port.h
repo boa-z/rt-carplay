@@ -47,3 +47,5 @@ bool airplay_event_port_send_hid_report(airplay_event_port_t *port,
                                         uint32_t hid_uid,
                                         const uint8_t *report,
                                         size_t report_len);
+
+bool airplay_event_port_send_iap(airplay_event_port_t *, const uint8_t *, size_t);

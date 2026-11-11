@@ -253,8 +253,30 @@ int main(void)
     printf("screen burst: 20 authenticated frames, reads=%u owner_dispatches=%u (old one-read path needs at least 40)\n",
            stats.recv_calls - baseline_reads, stats.read_batches - baseline_batches);
 
-    /* A frame that fails authentication kills the one-peer data stream. */
+    /* Partial body unavailable for 1.25 s while the owner runs every 50 ms:
+     * do not confuse missing input with the owner failing to run. */
     body_len = seal_frame(key, 24U, plaintext, sizeof(plaintext), header, body);
+    airplay_screen_server_owner_tick(server);
+    assert(send_all(client, header, sizeof(header)));
+    assert(wait_event(airplay_screen_server_get_fd(server)));
+    airplay_screen_server_poll(server);
+    for (unsigned i = 0; i < 25; ++i) {
+        fake_now_us += 50000U;
+        airplay_screen_server_owner_tick(server);
+    }
+    airplay_screen_server_get_stats(server, &stats);
+    assert(stats.pending_body_bytes == body_len && stats.pending_age_ms == 1250);
+    assert(stats.owner_gap_max_us == 50000U && !stats.owner_gap_over100ms);
+    assert(send_all(client, body, body_len));
+    assert(wait_event(airplay_screen_server_get_fd(server)));
+    airplay_screen_server_poll(server);
+    airplay_screen_server_get_stats(server, &stats);
+    assert(stats.partial_gap_max_us == 1250000U && stats.partial_gap_over100ms);
+    assert(stats.recv_block_max_us <= 1000U && !stats.pending_body_bytes);
+    assert(capture.calls == 25U);
+
+    /* A frame that fails authentication kills the one-peer data stream. */
+    body_len = seal_frame(key, 25U, plaintext, sizeof(plaintext), header, body);
     body[body_len - 1U] ^= 0x80U;
     send_frame(client, header, body, body_len);
 

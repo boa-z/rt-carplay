@@ -1742,8 +1742,14 @@ void carplay_app_debug_counters(unsigned *received, unsigned *hid_sent, unsigned
 /* Called by the low-priority demo owner, never from the network/decoder path.
  * Print common-window deltas automatically, so a cadence report does not
  * require two shell commands with different startup/static intervals. */
+extern void ipheth_performance_report(void) __attribute__((weak));
+extern void rtcp_lubanlite_usb_probe_report(void) __attribute__((weak));
+extern void carplay_usb_mux_probe_report(void) __attribute__((weak));
 void carplay_app_performance_report(void)
 {
+    if (ipheth_performance_report) ipheth_performance_report();
+    if (rtcp_lubanlite_usb_probe_report) rtcp_lubanlite_usb_probe_report();
+    if (carplay_usb_mux_probe_report) carplay_usb_mux_probe_report();
 #if defined(RTCARPLAY_VIDEO)
     app_state_t *app = &s_app;
     if (!app->running || !app->lock) return;
@@ -1751,7 +1757,7 @@ void carplay_app_performance_report(void)
     if (rt_mutex_take(app->lock, RT_WAITING_NO) != RT_EOK) return;
     rx = app->screen_stats;
     (void)rt_mutex_release(app->lock);
-    if (!rx.frames) return;
+    if (!rx.frames && !rx.owner_calls) return;
     uint32_t now = (uint32_t)rt_tick_get_millisecond();
     carplay_video_perf_t video;
     carplay_video_sink_perf(&video);
@@ -1772,20 +1778,33 @@ void carplay_app_performance_report(void)
     unsigned dequeued = video.dequeued - prev->dequeued;
     unsigned decodes = video.decode_calls - prev->decode_calls;
     unsigned presents = video.present_calls - prev->present_calls;
-    rt_kprintf("[carplay-perf] dt=%ums rx=%u.%u show=%u.%u KiB/s=%u reads=%u batches=%u budget_yields=%u queue=%u peak_total=%u drop=%u err=%u\n",
+    /* Keep each call below the SDK's 128-byte console buffer in ordinary
+     * operation. Long multi-metric calls truncate diagnostic fields. */
+    rt_kprintf("[carplay-perf] dt=%ums rx=%u.%u show=%u.%u KiB/s=%u\n",
         (unsigned)dt, rx10 / 10, rx10 % 10, show10 / 10, show10 % 10,
-        (unsigned)((rx.wire_bytes - old->wire_bytes) * 1000U / dt / 1024U),
+        (unsigned)((rx.wire_bytes - old->wire_bytes) * 1000U / dt / 1024U));
+    rt_kprintf("[carplay-perf] reads=%u batches=%u budget_yields=%u queue=%u peak_total=%u drop=%u err=%u\n",
         rx.recv_calls - old->recv_calls, rx.read_batches - old->read_batches,
         rx.read_budget_yields - old->read_budget_yields, video.pending, video.queue_peak,
         video.drops - prev->drops, video.errors - prev->errors);
-    rt_kprintf("[carplay-perf] avg_us rx_gap=%u sender_gap=%u assembly=%u process=%u | avg_ms queue=%u decode=%u present=%u\n",
+    rt_kprintf("[carplay-perf] avg_us rx_gap=%u sender_gap=%u assembly=%u process=%u\n",
         gaps ? (unsigned)((rx.frame_gap_us - old->frame_gap_us) / gaps) : 0,
         sender ? (unsigned)((rx.sender_gap_us - old->sender_gap_us) / sender) : 0,
         messages ? (unsigned)((rx.assembly_us - old->assembly_us) / messages) : 0,
-        messages ? (unsigned)((rx.process_us - old->process_us) / messages) : 0,
+        messages ? (unsigned)((rx.process_us - old->process_us) / messages) : 0);
+    rt_kprintf("[carplay-perf] avg_ms queue=%u decode=%u present=%u\n",
         dequeued ? (unsigned)((video.queue_ms - prev->queue_ms) / dequeued) : 0,
         decodes ? (unsigned)((video.decode_ms - prev->decode_ms) / decodes) : 0,
         presents ? (unsigned)((video.present_ms - prev->present_ms) / presents) : 0);
+    rt_kprintf("[screen-wait] owner_calls=%u ge100ms=%u max_total_us=%u\n",
+        rx.owner_calls - old->owner_calls, rx.owner_gap_over100ms - old->owner_gap_over100ms,
+        rx.owner_gap_max_us);
+    rt_kprintf("[screen-wait] partial_gaps=%u ge100ms=%u max_total_us=%u\n",
+        rx.partial_gaps - old->partial_gaps, rx.partial_gap_over100ms - old->partial_gap_over100ms,
+        rx.partial_gap_max_us);
+    rt_kprintf("[screen-wait] recv_ge10ms=%u max_total_us=%u pending_header=%u body_left=%u age_ms=%u\n",
+        rx.recv_block_over10ms - old->recv_block_over10ms, rx.recv_block_max_us,
+        rx.pending_header_bytes, rx.pending_body_bytes, rx.pending_age_ms);
     app->perf_ms = now; app->perf_screen = rx; app->perf_video = video;
 #endif
 }

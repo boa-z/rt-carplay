@@ -32,9 +32,19 @@ static int send_tcp(rtcp_usbmux_host_t *host,
                   (unsigned)host->tx_index, (unsigned)connection->remote_port,
                   (unsigned)flags, (unsigned)connection->tx_sequence,
                   (unsigned)connection->tx_acknowledgment, (unsigned)payload_length);
-    ++host->tx_index;
-    return host->transport.send(host->transport.user, host->tx_frame,
-                                frame_length);
+    uint16_t index = host->tx_index++;
+    ++host->tx_attempts;
+    int ret = host->transport.send(host->transport.user, host->tx_frame,
+                                   frame_length);
+    if (ret < 0) {
+        ++host->tx_failures;
+        host->failed_tx_index = index;
+        host->failed_tx_port = connection->remote_port;
+        host->failed_tx_flags = flags;
+        host->failed_tx_length = (uint32_t)frame_length;
+        host->failed_tx_result = ret;
+    }
+    return ret;
 }
 
 static bool rx_push(rtcp_usbmux_connection_t *connection, const uint8_t *data,

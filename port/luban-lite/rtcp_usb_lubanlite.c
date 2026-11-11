@@ -196,6 +196,58 @@ static int map_urb_error(int error)
 
 /* endpoint == NULL selects EP0. Caller buffers are copied only while this
  * function runs; no HCD ever retains a caller's data or stack Setup packet. */
+/* One five-second window, copied/reset with interrupts masked. No UART or
+ * allocation while measuring; the demo's low-priority reporter drains it. */
+struct usb_probe_metric { uint32_t n, total, max, over100; };
+static struct {
+    struct usb_probe_metric in_wait, in_hold, out_wait, out_hold, ep0_wait, ep0_hold;
+    uint32_t errors, shorts, last_ep, last_actual, last_length, last_pid;
+    int last_rc;
+} s_usb_probe;
+static void usb_probe_add(struct usb_probe_metric *m, uint32_t elapsed)
+{
+    ++m->n; m->total += elapsed;
+    if (elapsed > m->max) m->max = elapsed;
+    m->over100 += elapsed >= 100;
+}
+uint32_t usbh_control_probe_now_ms(void)
+{
+    return (uint32_t)rt_tick_get_millisecond();
+}
+void usbh_control_probe_record(struct usbh_hubport *hport, uint8_t request,
+                                uint32_t wait_ms, uint32_t hold_ms)
+{
+    /* Carrier only: MAC/setup/enumeration are a different workload. */
+    if (hport->device_desc.idVendor != APPLE_USB_VENDOR_ID || request != 0x45) return;
+    size_t flags = usb_osal_enter_critical_section();
+    usb_probe_add(&s_usb_probe.ep0_wait, wait_ms);
+    usb_probe_add(&s_usb_probe.ep0_hold, hold_ms);
+    usb_osal_leave_critical_section(flags);
+}
+static void usb_probe_print(const char *name, const struct usb_probe_metric *m)
+{
+    rt_kprintf("[usb-lock] %s n=%u avg=%u max=%u ge100=%u ms\n", name, m->n,
+        m->n ? m->total / m->n : 0, m->max, m->over100);
+}
+void rtcp_lubanlite_usb_probe_report(void)
+{
+    static uint32_t previous;
+    uint32_t now = usbh_control_probe_now_ms();
+    if ((uint32_t)(now - previous) < 5000) return;
+    uint32_t dt = now - previous; previous = now;
+    size_t flags = usb_osal_enter_critical_section();
+    __typeof__(s_usb_probe) p = s_usb_probe;
+    memset(&s_usb_probe, 0, sizeof(s_usb_probe));
+    usb_osal_leave_critical_section(flags);
+    if (!p.in_hold.n && !p.out_hold.n && !p.ep0_hold.n && !p.errors) return;
+    rt_kprintf("[usb-lock] dt=%ums errors=%u shorts=%u\n", dt, p.errors, p.shorts);
+    usb_probe_print("in_wait", &p.in_wait); usb_probe_print("in_hold", &p.in_hold);
+    usb_probe_print("out_wait", &p.out_wait); usb_probe_print("out_hold", &p.out_hold);
+    usb_probe_print("ep0_wait", &p.ep0_wait); usb_probe_print("ep0_hold", &p.ep0_hold);
+    if (p.errors || p.shorts) rt_kprintf("[usb-lock] last_ep=%02x rc=%d actual/length=%u/%u pid=%u\n",
+        p.last_ep, p.last_rc, p.last_actual, p.last_length, p.last_pid);
+}
+
 static int dma_transfer(struct usbh_hubport *hport,
                         const struct usb_endpoint_descriptor *endpoint,
                         const struct usb_setup_packet *setup, void *data,
@@ -232,7 +284,9 @@ static int dma_transfer(struct usbh_hubport *hport,
         t->endpoint = *t->urb.ep;
         t->urb.ep = &t->endpoint;
     }
+    uint32_t probe_start = usbh_control_probe_now_ms();
     usb_osal_mutex_take(hport->mutex);
+    uint32_t probe_locked = usbh_control_probe_now_ms();
     /* Serialize read/submit/write of the endpoint toggle. Reject detected
      * generation changes and suppress stale toggle updates after reconnect. */
     size_t flags = usb_osal_enter_critical_section();
@@ -298,7 +352,29 @@ static int dma_transfer(struct usbh_hubport *hport,
         }
     }
     if (pipe && pipe->generation != generation) ret = RTCP_ESTATE;
+    uint32_t probe_end = usbh_control_probe_now_ms();
     usb_osal_mutex_give(hport->mutex);
+    if (endpoint) {
+        flags = usb_osal_enter_critical_section();
+        usb_probe_add(input ? &s_usb_probe.in_wait : &s_usb_probe.out_wait,
+                      probe_locked - probe_start);
+        usb_probe_add(input ? &s_usb_probe.in_hold : &s_usb_probe.out_hold,
+                      probe_end - probe_locked);
+        bool short_out = !input && ret >= 0 && (size_t)ret != length;
+        s_usb_probe.shorts += short_out;
+        if (ret < 0 || short_out) {
+            /* IN idle timeouts are normal, not a missing OUT packet. */
+            if (!input || ret != RTCP_ETIMEDOUT) ++s_usb_probe.errors;
+            if (!input || ret != RTCP_ETIMEDOUT) {
+                s_usb_probe.last_ep = endpoint->bEndpointAddress;
+                s_usb_probe.last_actual = t->urb.actual_length;
+                s_usb_probe.last_length = (uint32_t)length;
+                s_usb_probe.last_pid = t->urb.data_toggle;
+                s_usb_probe.last_rc = ret;
+            }
+        }
+        usb_osal_leave_critical_section(flags);
+    }
     if (reclaim) {
         usb_osal_sem_delete(t->done);
         rt_free_align(t);

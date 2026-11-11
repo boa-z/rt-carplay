@@ -201,6 +201,25 @@ static struct {
 } s_mux_transport;
 
 static rtcp_usbmux_host_t s_mux;
+/* Snapshot only scalar diagnostics, never the mux scratch/TLS state. */
+void carplay_usb_mux_probe_report(void)
+{
+    static uint32_t previous;
+    uint32_t now = (uint32_t)rt_tick_get_millisecond();
+    if ((uint32_t)(now - previous) < 5000) return;
+    previous = now;
+    rt_base_t f = rt_hw_interrupt_disable();
+    unsigned attempts = s_mux.tx_attempts, failures = s_mux.tx_failures;
+    unsigned index = s_mux.failed_tx_index, port = s_mux.failed_tx_port;
+    unsigned flags = s_mux.failed_tx_flags, length = s_mux.failed_tx_length;
+    int result = s_mux.failed_tx_result;
+    unsigned controls = s_mux.control_count;
+    bool started = s_mux.started;
+    rt_hw_interrupt_enable(f);
+    if (started) rt_kprintf("[mux-perf] total_tx=%u failed=%u controls=%u\n", attempts, failures, controls);
+    if (started && failures) rt_kprintf("[mux-perf] last_failed_index=%u port=%u flags=%02x length=%u rc=%d\n",
+        index, port, flags, length, result);
+}
 static uint8_t s_mux_reply[MUX_REPLY_MAX];
 
 static int mux_transport_send(void *user, const uint8_t *data, size_t length)

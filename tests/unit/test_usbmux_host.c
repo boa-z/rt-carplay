@@ -26,6 +26,7 @@ typedef struct {
     uint32_t now_ms;
 } fake_transport_t;
 
+static int send_error;
 static int fake_send(void *user, const uint8_t *data, size_t length)
 {
     fake_transport_t *fake = user;
@@ -34,7 +35,7 @@ static int fake_send(void *user, const uint8_t *data, size_t length)
     memcpy(fake->sent[fake->sent_count].data, data, length);
     fake->sent[fake->sent_count].length = length;
     ++fake->sent_count;
-    return 0;
+    return send_error;
 }
 
 static int fake_recv(void *user, uint8_t *data, size_t capacity,
@@ -610,8 +611,33 @@ static void test_optional_reply_padding(void)
     rtcp_usbmux_connection_close(&host, connection);
 }
 
+/* Reproduce the ignored automatic ACK failure and record the missing index.
+ * A diagnostic patch must not retry possibly partially-sent TLS data. */
+static void test_failed_ack_probe(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    start_host(&host, &fake);
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1, 100, 1,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0);
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, RTCP_USBMUX_LOCKDOWN_PORT, 0, 1000, &connection) == RTCP_OK);
+    host.tx_index = 110;
+    queue_device_frame(&fake, RTCP_USBMUX_LOCKDOWN_PORT, 1, 101, 1,
+                       RTCP_USBMUX_TH_ACK, "x", 1);
+    send_error = RTCP_ETIMEDOUT;
+    assert(rtcp_usbmux_pump(&host, 10, 0) > 0);
+    assert(host.tx_index == 111 && host.tx_failures == 1);
+    assert(host.failed_tx_index == 110 && host.failed_tx_flags == RTCP_USBMUX_TH_ACK);
+    assert(host.failed_tx_length == 36 && host.failed_tx_result == RTCP_ETIMEDOUT);
+    send_error = 0;
+    assert(rtcp_usbmux_connection_send(&host, connection, "y", 1) == RTCP_OK);
+    assert(fake.sent[fake.sent_count - 1].data[13] == 111);
+}
+
 int main(void)
 {
+    test_failed_ack_probe();
     test_connect_and_stream();
     test_connect_reset();
     test_connect_timeout();

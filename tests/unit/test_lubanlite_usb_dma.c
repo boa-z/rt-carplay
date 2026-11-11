@@ -6,6 +6,8 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+static uint32_t probe_clock, lock_delay;
+uint32_t rt_tick_get_millisecond(void) { return probe_clock; }
 static int allocations, semaphores, locked, fail_alloc, fail_sem;
 static int submit_error, timeout, kill_error, short_by, extra, kills;
 static struct usbh_urb *pending;
@@ -49,9 +51,9 @@ usb_osal_sem_t usb_osal_sem_create(uint32_t initial)
 void usb_osal_sem_delete(usb_osal_sem_t s) { semaphores--; free(s); }
 int usb_osal_sem_give(usb_osal_sem_t s) { *(int *)s = 1; return 0; }
 int usb_osal_sem_take(usb_osal_sem_t s, uint32_t ms)
-{ assert(ms); return *(int *)s ? 0 : -USB_ERR_TIMEOUT; }
+{ assert(ms); if (!*(int *)s) probe_clock += ms; return *(int *)s ? 0 : -USB_ERR_TIMEOUT; }
 int usb_osal_mutex_take(usb_osal_mutex_t m)
-{ assert(m && !locked); locked = 1; return 0; }
+{ assert(m && !locked); probe_clock += lock_delay; locked = 1; return 0; }
 int usb_osal_mutex_give(usb_osal_mutex_t m)
 { assert(m && locked); locked = 0; return 0; }
 int usbh_submit_urb(struct usbh_urb *u)
@@ -227,5 +229,18 @@ int main(void)
     simulate_pid = 0;
     assert(lubanlite_bulk_transfer(NULL, 0x85, large, sizeof(large), 100) == 16384);
     assert(large[16383] == 0xa5 && large[16384] == 0x37); clean();
+    /* Distinguish waiting for the shared mutex from holding it across idle
+     * Bulk IN. Counters must not change delivery, cancellation or ownership. */
+    memset(&s_usb_probe, 0, sizeof(s_usb_probe));
+    lock_delay = 37; timeout = 1;
+    assert(submit_bulk(&h, &ep, unaligned, 1, 200, NULL) == RTCP_ETIMEDOUT);
+    assert(s_usb_probe.in_wait.max == 37 && s_usb_probe.in_hold.max == 201);
+    assert(!s_usb_probe.errors); /* idle IN timeout is expected */
+    lock_delay = 0; timeout = 0; ep.bEndpointAddress = 4; short_by = 1;
+    memset(bytes, 0x37, sizeof(bytes));
+    assert(submit_bulk(&h, &ep, unaligned, 9, 200, NULL) == 8);
+    assert(s_usb_probe.shorts == 1 && s_usb_probe.errors == 1);
+    assert(s_usb_probe.last_ep == 4 && s_usb_probe.last_actual == 8);
+    clean();
     puts("Luban-Lite DMA alignment, copy bounds and cancellation tests passed");
 }

@@ -21,6 +21,11 @@ typedef struct airplay_screen_server airplay_screen_server_t;
 /* Monotonic elapsed wall time includes callback execution and preemption. */
 typedef struct {
     uint32_t recv_calls;
+    uint32_t owner_calls, owner_gap_over100ms;
+    uint32_t owner_gap_max_us; /* lifetime maxima, explicitly labeled */
+    uint32_t partial_gaps, partial_gap_over100ms, partial_gap_max_us;
+    uint32_t recv_block_over10ms, recv_block_max_us;
+    uint32_t pending_body_bytes, pending_header_bytes, pending_age_ms;
     uint32_t read_batches;       /* owner dispatches, excluding accept */
     uint32_t read_budget_yields; /* 16 reads or 2 ms; callback may overrun */
     uint32_t messages;
@@ -63,6 +68,8 @@ int airplay_screen_server_get_fd(const airplay_screen_server_t *server);
 
 void airplay_screen_server_get_stats(const airplay_screen_server_t *server,
                                       airplay_screen_server_stats_t *stats);
+/* Called every RTSP owner iteration, even when the Screen fd is idle. */
+void airplay_screen_server_owner_tick(airplay_screen_server_t *server);
 void airplay_screen_server_poll(airplay_screen_server_t *server);
 void airplay_screen_server_stop(airplay_screen_server_t *server,
                                 const struct rtcp_net *net);

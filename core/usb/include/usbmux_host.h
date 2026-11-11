@@ -71,6 +71,11 @@ typedef struct {
     uint16_t next_local_port;
     uint16_t tx_index;
     uint16_t rx_index;
+    uint32_t tx_attempts, tx_failures;
+    uint16_t failed_tx_index, failed_tx_port;
+    uint8_t failed_tx_flags;
+    uint32_t failed_tx_length;
+    int failed_tx_result;
     bool version_received;
     uint32_t peer_major;
     uint32_t peer_minor;

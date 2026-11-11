@@ -890,6 +890,7 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
 {
     if (server == NULL) return RTCP_EINVAL;
     if (server->stopping) return RTCP_ESTATE;
+    airplay_screen_server_owner_tick(server->screen_server);
 
     int event_fd = airplay_event_port_get_fd(server->event_port);
     int timing_fd = airplay_timing_port_get_fd(server->timing_port);

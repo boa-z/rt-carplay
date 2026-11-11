@@ -320,3 +320,53 @@ through the final operation/stage/error and any `USB completion error`,
 explicitly shows `paired=0/1`. Then record `ipheth_status`, `carplay_usb net`
 and `usb_ehci_status 1`. Do not erase trust records or assume TLS began when
 StartSession's body was not fully read.
+
+
+## V13 board result: activation and wired network traffic succeed
+
+The supplied run completes SetValue, DevicePublicKey, WiFiAddress, Pair,
+StartSession (354-byte reply) and StartService (383-byte reply). The command
+reports an open service stream and session/service TLS enabled. IPHETH reports
+RX=79, TX=18, 81 receive completions, one control completion, ready=yes and
+carrier=up. DHCP leases 172.20.10.4/28 with gateway/DNS 172.20.10.1; the local
+IPv6 Link-Local address is valid. There is one unclassified RX error and no USB
+or TX errors. This establishes a working combination, not a controlled proof
+that the 16 KiB chunk limit alone cured all earlier intermittent failures.
+
+The preserved image is v13, SHA256
+`72b542a84c1600799df01e696ebc017e46051a35a1cb2c5a019621799f3c989d`;
+its manifest pins application e168c31, SDK a6c3a34a4 and driver 25792b9.
+No new image is needed to continue connectivity testing.
+
+### Subsequent wired application run
+
+`carplay_start wired` opens the IPv6 RTSP listener. `carplay_usb iap2` reports
+link ready, MFi authenticated and identification accepted over the TLS carkit
+stream. The advertised endpoint is [FE80::DCB5:4FFF:FE73:DD03]:7000. A client
+connects and exchanges three `/pair-setup`, two `/pair-verify` and one
+`/auth-setup` request. All six responses are locally reported as status 200;
+RTSP encryption is enabled after pair verify. The local MFi signature check
+returns verified=1 and auth-setup emits a 1076-byte response, followed by peer
+closure at connection lifetime 1602 ms. No media SETUP or streaming is shown.
+Local signature verification and a sent 200 response do not prove that the
+phone accepted the complete authentication response. This failure boundary
+belongs to the application authentication/session layer and needs a reference
+protocol/response comparison before claiming a cause.
+
+The `peer=254.128.0.0` log is a formatting defect: server_accept unconditionally
+prints the first four address bytes as IPv4, including for IPv6 peers. It is not
+an IPv4 route observation. The complete peer address was not captured here.
+
+Repeated endpoint-85 timeouts occur while iAP2/RTSP still make progress. The
+iAP2 stream interface explicitly treats a no-data read timeout as a usable,
+idle link. An Active qTD retaining all bytes cannot prove a controller failure
+or a device NAK without a bus trace. The current port dumps every timeout,
+including idle polls; treat these as diagnostic noise unless accompanied by
+lost progress or a failed framed exchange. Do not conflate USBMUX endpoint 85
+with IPHETH endpoint 86, or infer that the phone's RTSP close was caused by
+these snapshots. The touch-device open failure is another independent issue.
+
+Next collect `ipheth_status`, `ping 172.20.10.1`, `carplay_usb net` and
+`carplay_status` with the working session left open. Preserve request/response
+metadata around any subsequent RTSP connection. IPv6 peer reachability under
+load, physical unplug/replug, and media startup remain separate open checks.

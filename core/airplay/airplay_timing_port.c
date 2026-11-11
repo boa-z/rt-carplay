@@ -22,6 +22,7 @@ struct airplay_timing_port {
     bool request_pending;
     uint64_t pending_timestamp;
     uint64_t next_request_us;
+    uint64_t next_sample_log_us;
 };
 
 static uint64_t monotonic_us(const airplay_timing_port_t *port)
@@ -102,9 +103,14 @@ void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
         if (airplay_timing_parse_response(
                 incoming, (size_t)received, port->pending_timestamp,
                 timing_now_ntp(port), &round_trip_seconds, &offset_seconds)) {
-            RTCP_LOGD(TAG, "clock_sample rtt_ms=%d offset_ms=%d",
-                      (int)(round_trip_seconds * 1000.0),
-                      (int)(offset_seconds * 1000.0));
+            /* Keep sampling each second; UART needs only an occasional
+             * successful sample, especially while decoding live video. */
+            if (now_us >= port->next_sample_log_us) {
+                RTCP_LOGD(TAG, "clock_sample rtt_ms=%d offset_ms=%d",
+                          (int)(round_trip_seconds * 1000.0),
+                          (int)(offset_seconds * 1000.0));
+                port->next_sample_log_us = now_us + UINT64_C(30000000);
+            }
             port->request_pending = false;
         }
     }

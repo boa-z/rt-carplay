@@ -167,3 +167,62 @@ and the boundary check passed, as did the independent Python/OpenSSL peer
 checks and both original/patched actual-ALT ASan/UBSan tests. These results
 establish the backend correction and integration; they do not claim a
 successful on-phone media session before the next hardware result.
+
+## V15 device result: authentication accepted, live screen stalls
+
+The phone now proceeds past auth-setup after `aes_ctr_check verified=1`:
+initial SETUP, event-channel connection, GET /info, RECORD, screen SETUP
+(type 110) and a screen TCP connection all succeed. It sends a 33-byte H.264
+configuration and encrypted frames accepted by the screen AEAD path. This
+establishes phone acceptance after the real AES backend repair. The previous
+repeatable close after the sixth request is resolved in this run.
+
+POST /command and /feedback still receive 405; screen setup nevertheless follows
+these responses. Their semantics remain outstanding, as do audio and touch.
+No complete usable video session is claimed.
+
+The video sink receives another configuration and resets twice consecutively.
+MPP then reports a negative frame-buffer request (-1867127296 bytes), failure
+to allocate 18 frame buffers and a co-located buffer failure. The later counters
+are pending=15/13, NALs=14 unchanged, frames=8 unchanged, dropped=440 unchanged,
+errors=242/244; the network screen receiver reaches frame 720. Input transport
+continues while decoder progress stalls. The eight sink frames count buffers
+returned by MPP, not independently verified visible frames.
+
+Two defects are reproduced with the actual sink source and a two-slot MPP model:
+
+* A configuration's SPS and PPS were separate queue entries, both marked to
+  recreate the decoder after any previous output. Recreating again for PPS
+  discards the newly submitted SPS. Configurations now occupy one complete
+  Annex-B packet, which MPP can walk internally, and cause at most one reset.
+  A full FIFO rejects the whole configuration rather than admitting half.
+* The worker drained its FIFO before pumping the decoder. With two MPP slots,
+  the third packet waits for slots that only this worker can release. The
+  worker now pumps after each submission and also pumps during slot retries.
+
+The SDK PPS parser also dereferenced a missing SPS. A separate regression runs
+its actual h264_nal.c: the original fails under ASan/UBSan on a null SPS access;
+the patched parser returns an error. Slice parsing rejects a missing SPS, frame
+manager allocation failure is propagated, and partially allocated frame buffers
+cannot enter hardware decode on subsequent slices. The exact hardware values
+behind the negative allocation have not been captured; the reset/missing-SPS
+sequence explains a concrete invalid-state path, rather than proving every
+observed allocation value.
+
+Successful timing samples are still processed once per second but printed at
+most once per 30 seconds. Screen setup logs use 32-bit pieces for 64-bit values
+because RT-Thread's formatter does not support the previous `%llu` usage and
+misreported subsequent arguments such as the bound screen port.
+
+Validation: all 49 host tests and the platform boundary check pass. The actual
+sink regression with SDK public headers passes ASan/UBSan for atomic configuration,
+post-output reset, FIFO overflow, packet-slot starvation and render backpressure.
+Both original-sink cases fail as expected. The actual SDK PPS parser regression
+passes, while the original fails on a null pointer. The complete D213 build
+passes. V16 device video progress and visible output remain to be validated.
+
+```sh
+make check-lubanlite-video SDK_ROOT=/path/to/luban-lite
+# In the SDK checkout:
+packages/artinchip/mpp/tests/run-h264-missing-sps.sh
+```

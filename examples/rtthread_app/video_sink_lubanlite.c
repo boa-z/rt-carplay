@@ -9,8 +9,8 @@
  * decoder and presents the resulting NV12 frames through the "aicfb" video
  * layer.  Only the sink thread touches the decoder and the display.
  *
- * A stream configuration message (SPS/PPS) that arrives after frames have
- * been shown marks the start of a new stream (reconnect or resolution
+ * A stream configuration message (SPS/PPS) is queued as one packet and
+ * triggers at most one reset after frames have been shown. It marks the start of a new stream (reconnect or resolution
  * change); the decoder is recreated before that configuration is fed so the
  * new SPS can allocate buffers of the right size.
  */
@@ -159,6 +159,13 @@ void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
     if (!sink->running || annex_b == NULL || annex_b_len == 0U) return;
 
     uint32_t pts_us = (uint32_t)(sender_time_ns / 1000U);
+    /* Keep SPS/PPS atomic: resetting for each NAL destroys the SPS before
+     * decoding its PPS. MPP walks Annex-B start codes inside this packet. */
+    if (configuration) {
+        enqueue_nal(sink, annex_b, annex_b_len, pts_us, true);
+        (void)rt_sem_release(sink->wake);
+        return;
+    }
     const uint8_t *end = annex_b + annex_b_len;
     const uint8_t *cursor = find_start_code(annex_b, end);
     if (cursor == NULL) return; /* not Annex-B; nothing to feed the decoder */
@@ -257,6 +264,8 @@ static unsigned drain_frames(video_sink_t *sink)
     return presented;
 }
 
+static void pump_decoder(video_sink_t *sink);
+
 static int submit_nal(video_sink_t *sink, const nal_entry_t *nal)
 {
     if (sink->decoder == NULL) return -1;
@@ -272,6 +281,9 @@ static int submit_nal(video_sink_t *sink, const nal_entry_t *nal)
             ++sink->decode_errors;
             return -1;
         }
+        /* Only this thread decodes. Waiting without pumping cannot release
+         * either of the two MPP packet slots. */
+        pump_decoder(sink);
         rt_thread_mdelay(1);
     }
     if (ret != DEC_OK) {
@@ -382,6 +394,9 @@ static void sink_thread(void *argument)
                 }
                 (void)submit_nal(sink, &nal);
                 free(nal.data);
+                /* Do not wait for the FIFO to empty before consuming MPP
+                 * packets: producers may continuously keep the FIFO full. */
+                pump_decoder(sink);
             }
         }
         pump_decoder(sink);

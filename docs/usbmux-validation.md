@@ -423,3 +423,15 @@ software-AES interop check did not cover. See the
 for the source chain, deterministic reproduction and separate SDK correction.
 The responder now validates its real AES-CTR backend with a NIST known-answer
 check before replying. No control-channel framing change is part of this fix.
+
+## V15 hardware: post-auth media transport established
+
+The supplied run opens carkit TLS port 63567, authenticates iAP2 and completes
+AirPlay auth-setup with the runtime AES-CTR check verified. The phone proceeds
+to initial SETUP, event connection, /info, RECORD and type-110 screen SETUP.
+The screen receiver continues through 720 frames. The blocking failure has
+moved to the local MPP sink (NALs=14, frames=8, FIFO pending=15/13,
+errors=242/244), with duplicate resets and an invalid frame allocation.
+See wired-auth-investigation.md for the independently reproduced sink and
+SDK-parser fixes in v16. No USBMUX or IPHETH code changes are required for
+these fixes; audio, command handling and usable display remain unvalidated.

@@ -143,3 +143,16 @@ check-lubanlite-usb:
 	  -I$(CHERRYUSB_ROOT)/class/hub -ffunction-sections -fdata-sections \
 	  tests/unit/test_lubanlite_usb_dma.c core/usb/usb_device.c -Wl,--gc-sections -o $(BUILD)/test_lubanlite_usb_dma
 	$(BUILD)/test_lubanlite_usb_dma
+
+# Actual video sink with a bounded MPP model and the SDK's public headers.
+.PHONY: check-lubanlite-video
+check-lubanlite-video:
+	@test -f "$(SDK_ROOT)/packages/artinchip/mpp/include/mpp_decoder.h" || (echo "Set SDK_ROOT to Luban-Lite SDK"; exit 1)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_video \
+	  -I$(SDK_ROOT)/packages/artinchip/mpp/include \
+	  -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_video.c \
+	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_video
+	$(BUILD)/test_lubanlite_video
+	$(BUILD)/test_lubanlite_video queue

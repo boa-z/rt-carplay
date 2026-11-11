@@ -170,8 +170,9 @@ static bool server_start_screen(const airplay_rtsp_pairing_t *pairing,
         server_stop_screen(server);
         return false;
     }
-    RTCP_LOGI(TAG, "screen_setup=ready port=%u connection_id=%llu",
-              (unsigned)*bound_port, (unsigned long long)stream_connection_id);
+    RTCP_LOGI(TAG, "screen_setup=ready port=%u connection_id=0x%08x%08x",
+              (unsigned)*bound_port, (unsigned)(stream_connection_id >> 32),
+              (unsigned)(stream_connection_id & UINT32_MAX));
     return true;
 }
 

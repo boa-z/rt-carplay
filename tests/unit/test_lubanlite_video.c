@@ -1,0 +1,131 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Actual sink + SDK public headers; model a two-slot MPP decoder. */
+#include <assert.h>
+#include <stdarg.h>
+#include <stdio.h>
+#ifndef VIDEO_SINK_SOURCE
+#define VIDEO_SINK_SOURCE "../../examples/rtthread_app/video_sink_lubanlite.c"
+#endif
+#include VIDEO_SINK_SOURCE
+
+static unsigned slots, decoded, destroyed, delays;
+static unsigned last_config_size;
+static bool pressure;
+static uint8_t packet_data[1024];
+static const uint8_t config[] = {0,0,0,1,0x67,0x42,0x00,0x1f,0x80,
+                                0,0,0,1,0x68,0xce,0x38,0x80};
+static const uint8_t frame[] = {0,0,0,1,0x65,0xb8,0x80};
+
+int rt_kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+int rt_mutex_take(rt_mutex_t m, int t) { (void)m; (void)t; return 0; }
+int rt_mutex_release(rt_mutex_t m) { (void)m; return 0; }
+int rt_sem_release(rt_sem_t s) { (void)s; return 0; }
+int rt_sem_take(rt_sem_t s, int t) {
+    (void)s; (void)t;
+    if (s_sink.head == s_sink.tail) { s_sink.stop = true; return -1; }
+    return 0;
+}
+void rt_thread_mdelay(int ms) { (void)ms; assert(++delays < 10); }
+int rt_device_control(rt_device_t d, int cmd, void *arg) {
+    (void)d; (void)cmd; (void)arg; return 0;
+}
+struct mpp_decoder *mpp_decoder_create(enum mpp_codec_type t) {
+    (void)t; return (struct mpp_decoder *)(uintptr_t)1;
+}
+void mpp_decoder_destory(struct mpp_decoder *d) {
+    (void)d; ++destroyed; slots = 0;
+}
+int mpp_decoder_init(struct mpp_decoder *d, struct decode_config *c) {
+    (void)d; assert(c->packet_count == 2); return 0;
+}
+int mpp_decoder_get_packet(struct mpp_decoder *d, struct mpp_packet *p, int size) {
+    (void)d;
+    if (slots == 2) return DEC_NO_EMPTY_PACKET;
+    assert(size > 0 && (size_t)size <= sizeof(packet_data));
+    p->data = packet_data; return DEC_OK;
+}
+int mpp_decoder_put_packet(struct mpp_decoder *d, struct mpp_packet *p) {
+    (void)d;
+    assert(slots < 2); ++slots;
+    if (p->size == (int)sizeof(config)) {
+        assert(memcmp(p->data, config, sizeof(config)) == 0);
+        last_config_size = (unsigned)p->size;
+    }
+    return DEC_OK;
+}
+int mpp_decoder_decode(struct mpp_decoder *d) {
+    (void)d;
+    if (!slots) return DEC_NO_READY_PACKET;
+    --slots; ++decoded;
+    /* First retry exercises rendering backpressure in pump_decoder(). */
+    if (pressure) { pressure = false; return DEC_NO_EMPTY_FRAME; }
+    return DEC_OK;
+}
+int mpp_decoder_get_frame(struct mpp_decoder *d, struct mpp_frame *f) {
+    (void)d; (void)f; return DEC_NO_RENDER_FRAME;
+}
+int mpp_decoder_put_frame(struct mpp_decoder *d, struct mpp_frame *f) {
+    (void)d; (void)f; return DEC_OK;
+}
+
+/* Lifecycle is not invoked by the worker regression. */
+rt_device_t rt_device_find(const char *name) { (void)name; abort(); }
+rt_sem_t rt_sem_create(const char *n, unsigned v, int f) {
+    (void)n; (void)v; (void)f; abort();
+}
+rt_mutex_t rt_mutex_create(const char *n, int f) { (void)n; (void)f; abort(); }
+int rt_sem_delete(rt_sem_t s) { (void)s; abort(); }
+int rt_mutex_delete(rt_mutex_t m) { (void)m; abort(); }
+rt_thread_t rt_thread_create(const char *n, void (*fn)(void *), void *arg,
+                             unsigned stack, unsigned prio, unsigned tick) {
+    (void)n; (void)fn; (void)arg; (void)stack; (void)prio; (void)tick; abort();
+}
+int rt_thread_startup(rt_thread_t t) { (void)t; abort(); }
+
+static void reset(void) {
+    memset(&s_sink, 0, sizeof(s_sink));
+    s_sink.running = true;
+    s_sink.lock = (rt_mutex_t)(uintptr_t)1;
+    s_sink.decoder = (struct mpp_decoder *)(uintptr_t)1;
+    slots = decoded = destroyed = delays = last_config_size = 0;
+    pressure = false;
+}
+int main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "queue") == 0) {
+        reset();
+        for (unsigned i = 0; i < 10; ++i)
+            carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+        sink_thread(&s_sink);
+        assert(decoded == 10 && s_sink.nal_count == 10 && delays == 0);
+        puts("bounded packet queue progresses without waiting");
+        return 0;
+    }
+    reset();
+    s_sink.frame_count = 8; /* configuration after an established stream */
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    assert(carplay_video_sink_pending() == 1);
+    for (unsigned i = 0; i < 10; ++i)
+        carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    sink_thread(&s_sink);
+    assert(destroyed == 1 && s_sink.decoder_resets == 1);
+    assert(last_config_size == sizeof(config));
+    assert(decoded == 11 && s_sink.nal_count == 11 && slots == 0);
+    assert(s_sink.decode_errors == 0 && delays == 0);
+
+    reset(); /* retry must decode to free slots on this same thread */
+    slots = 2; pressure = true;
+    nal_entry_t nal = {.data = (uint8_t *)frame, .len = sizeof(frame)};
+    assert(submit_nal(&s_sink, &nal) == 0);
+    pump_decoder(&s_sink);
+    assert(decoded == 3 && slots == 0 && delays == 1);
+
+    reset(); /* full queue must not admit only half a configuration */
+    for (unsigned i = 0; i < SINK_QUEUE_LENGTH - 1; ++i)
+        carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    assert(s_sink.dropped_nals == 1);
+    sink_thread(&s_sink);
+    assert(destroyed == 0 && decoded == SINK_QUEUE_LENGTH - 1);
+    puts("Luban-Lite actual video sink regression passed");
+    return 0;
+}

@@ -548,8 +548,9 @@ static airplay_rtsp_session_result_t handle_setup(
                                    "Bad Request", response, response_capacity,
                                    response_len);
         }
-        RTCP_LOGI(TAG, "setup=stream_candidate index=%u type=%llu",
-                 (unsigned)index, (unsigned long long)candidate_type);
+        RTCP_LOGI(TAG, "setup=stream_candidate index=%u type=0x%08x%08x",
+                 (unsigned)index, (unsigned)(candidate_type >> 32),
+                 (unsigned)(candidate_type & UINT32_MAX));
         if (candidate_type == 110U) {
             if (has_screen_stream) {
                 return status_response(request, AIRPLAY_RTSP_STATUS_BAD_REQUEST,
@@ -705,9 +706,11 @@ static airplay_rtsp_session_result_t handle_setup(
         }
         screen_port = bound_port;
         started_screen_now = true;
-        RTCP_LOGI(TAG, "screen_start=ready stream_type=%llu connection_id=%llu port=%u",
-                 (unsigned long long)screen_type,
-                 (unsigned long long)screen_connection_id, (unsigned)bound_port);
+        RTCP_LOGI(TAG, "screen_start=ready port=%u stream_type=0x%08x%08x connection_id=0x%08x%08x",
+                 (unsigned)bound_port, (unsigned)(screen_type >> 32),
+                 (unsigned)(screen_type & UINT32_MAX),
+                 (unsigned)(screen_connection_id >> 32),
+                 (unsigned)(screen_connection_id & UINT32_MAX));
     }
 
     uint8_t started_audio_mask = 0U;

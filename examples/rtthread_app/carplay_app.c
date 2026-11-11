@@ -195,6 +195,11 @@ typedef struct {
     void *screen_context;
 
     airplay_screen_server_stats_t screen_stats;
+#if defined(RTCARPLAY_VIDEO)
+    uint32_t perf_ms;
+    airplay_screen_server_stats_t perf_screen;
+    carplay_video_perf_t perf_video;
+#endif
     uint32_t screen_sample_ms;
     uint32_t screen_report_ms;
     uint32_t screen_report_frames;
@@ -1732,4 +1737,55 @@ void carplay_app_debug_counters(unsigned *received, unsigned *hid_sent, unsigned
     }
     if (hid_sent) *hid_sent = s_app.hid_reports_sent;
     if (hid_failed) *hid_failed = s_app.hid_reports_failed;
+}
+
+/* Called by the low-priority demo owner, never from the network/decoder path.
+ * Print common-window deltas automatically, so a cadence report does not
+ * require two shell commands with different startup/static intervals. */
+void carplay_app_performance_report(void)
+{
+#if defined(RTCARPLAY_VIDEO)
+    app_state_t *app = &s_app;
+    if (!app->running || !app->lock) return;
+    airplay_screen_server_stats_t rx;
+    if (rt_mutex_take(app->lock, RT_WAITING_NO) != RT_EOK) return;
+    rx = app->screen_stats;
+    (void)rt_mutex_release(app->lock);
+    if (!rx.frames) return;
+    uint32_t now = (uint32_t)rt_tick_get_millisecond();
+    carplay_video_perf_t video;
+    carplay_video_sink_perf(&video);
+    if (!app->perf_ms) {
+        app->perf_ms = now;
+        app->perf_screen = rx; app->perf_video = video;
+        return;
+    }
+    uint32_t dt = now - app->perf_ms;
+    if (dt < 5000U) return;
+    const airplay_screen_server_stats_t *old = &app->perf_screen;
+    const carplay_video_perf_t *prev = &app->perf_video;
+    unsigned rx10 = (unsigned)((uint64_t)(rx.frames - old->frames) * 10000U / dt);
+    unsigned show10 = (unsigned)((uint64_t)(video.frames - prev->frames) * 10000U / dt);
+    unsigned messages = rx.messages - old->messages;
+    unsigned gaps = rx.frame_gap_count - old->frame_gap_count;
+    unsigned sender = rx.sender_gap_count - old->sender_gap_count;
+    unsigned dequeued = video.dequeued - prev->dequeued;
+    unsigned decodes = video.decode_calls - prev->decode_calls;
+    unsigned presents = video.present_calls - prev->present_calls;
+    rt_kprintf("[carplay-perf] dt=%ums rx=%u.%u show=%u.%u KiB/s=%u reads=%u batches=%u budget_yields=%u queue=%u peak_total=%u drop=%u err=%u\n",
+        (unsigned)dt, rx10 / 10, rx10 % 10, show10 / 10, show10 % 10,
+        (unsigned)((rx.wire_bytes - old->wire_bytes) * 1000U / dt / 1024U),
+        rx.recv_calls - old->recv_calls, rx.read_batches - old->read_batches,
+        rx.read_budget_yields - old->read_budget_yields, video.pending, video.queue_peak,
+        video.drops - prev->drops, video.errors - prev->errors);
+    rt_kprintf("[carplay-perf] avg_us rx_gap=%u sender_gap=%u assembly=%u process=%u | avg_ms queue=%u decode=%u present=%u\n",
+        gaps ? (unsigned)((rx.frame_gap_us - old->frame_gap_us) / gaps) : 0,
+        sender ? (unsigned)((rx.sender_gap_us - old->sender_gap_us) / sender) : 0,
+        messages ? (unsigned)((rx.assembly_us - old->assembly_us) / messages) : 0,
+        messages ? (unsigned)((rx.process_us - old->process_us) / messages) : 0,
+        dequeued ? (unsigned)((video.queue_ms - prev->queue_ms) / dequeued) : 0,
+        decodes ? (unsigned)((video.decode_ms - prev->decode_ms) / decodes) : 0,
+        presents ? (unsigned)((video.present_ms - prev->present_ms) / presents) : 0);
+    app->perf_ms = now; app->perf_screen = rx; app->perf_video = video;
+#endif
 }

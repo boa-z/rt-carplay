@@ -131,6 +131,7 @@ static void sample_debug(void)
         snprintf(sample.ipv6, sizeof(sample.ipv6), "%s", endpoint.ipv6);
     carplay_video_sink_stats(NULL, &sample.frames, &sample.drops, &sample.errors);
     carplay_app_debug_counters(&sample.received, &sample.hid_sent, &sample.hid_failed);
+    carplay_app_performance_report();
     sample.trust = carplay_usb_trust_cache_status();
     sample.storage_error = carplay_app_pairing_storage_error();
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);

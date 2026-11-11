@@ -104,10 +104,9 @@ static bool ensure_body(airplay_screen_server_t *server, size_t required)
 }
 
 /*
- * The net seam has blocking sockets, so each poll performs at most one recv().
- * poll() only reports the socket readable when at least one byte is queued,
- * which bounds the call; a second recv() could block waiting for the rest of
- * a frame and stall the RTSP server thread that drives this poll loop.
+ * Each step performs at most one recv on a blocking socket. The caller
+ * checks readiness again before another step: never read an incomplete body
+ * blindly, since that would block the shared RTSP/HID owner.
  */
 static void handle_client(airplay_screen_server_t *server)
 {
@@ -296,7 +295,28 @@ void airplay_screen_server_poll(airplay_screen_server_t *server)
         return; /* Let the next readable event supply the first frame. */
     }
 
-    handle_client(server);
+    /* Drain an already queued burst without rebuilding the complete RTSP,
+     * event, timing and audio poll set for every 128-byte header/body piece.
+     * Recheck readiness before EACH additional blocking recv. Bound work by
+     * both read count and elapsed time so control/HID regain their owner.
+     * One callback/recv can overrun the time budget; this is cooperative. */
+    uint64_t started = screen_now_us(server);
+    ++server->stats.read_batches;
+    for (unsigned reads = 0; reads < 16U; ++reads) {
+        handle_client(server); /* initial readiness supplied by the owner */
+        if (server->failed || server->stop_requested) break;
+        if (reads == 15U || screen_now_us(server) - started >= 2000U) {
+            ++server->stats.read_budget_yields;
+            break;
+        }
+        if (!server->net->poll) break; /* legacy caller supplies readiness */
+        struct rtcp_pollfd fd = {
+            .fd = server->client_fd, .events = RTCP_POLLIN, .revents = 0,
+        };
+        int ready = server->net->poll(&fd, 1, 0);
+        if (ready < 0) { fail_server(server, "burst_poll"); break; }
+        if (ready == 0 || !(fd.revents & RTCP_POLLIN)) break;
+    }
 }
 
 void airplay_screen_server_stop(airplay_screen_server_t *server,

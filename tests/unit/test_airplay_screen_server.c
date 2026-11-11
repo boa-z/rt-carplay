@@ -24,6 +24,13 @@ static unsigned exit_count;
 static uint64_t fake_now_us = 10000U;
 static uint64_t sender_ntp = (UINT64_C(2) << 32) | UINT64_C(0x80000000);
 static uint64_t fake_clock_us(void) { return fake_now_us; }
+static bool stepped_clock;
+static int measured_recv(int fd, void *buffer, size_t bytes)
+{
+    int n = rtcp_net_linux.recv(fd, buffer, bytes);
+    if (n > 0 && stepped_clock) fake_now_us += 1000U;
+    return n;
+}
 
 static int capture_message(airplay_screen_message_type_t type,
                            uint8_t *annex_b,
@@ -152,8 +159,10 @@ int main(void)
 
     struct rtcp_os os = rtcp_os_linux;
     os.now_us = fake_clock_us;
+    struct rtcp_net measured_net = rtcp_net_linux;
+    measured_net.recv = measured_recv;
     airplay_screen_server_t *server = NULL;
-    assert(airplay_screen_server_start(&os, &rtcp_net_linux, key,
+    assert(airplay_screen_server_start(&os, &measured_net, key,
                                        &config, &server) == RTCP_OK);
     uint16_t port = airplay_screen_server_get_port(server);
     assert(port != 0U);
@@ -211,8 +220,41 @@ int main(void)
     assert(stats.sender_gap_count == 3U && stats.sender_gap_max_us == 33333U);
     assert(stats.assembly_us == 6000U && stats.assembly_max_us == 2000U);
 
+    /* One queued burst retains nonce/order and yields after at most 16
+     * reads, rather than monopolizing the control/HID owner until empty. */
+    unsigned baseline_batches = stats.read_batches;
+    unsigned baseline_reads = stats.recv_calls;
+    uint8_t burst[20 * (AIRPLAY_SCREEN_HEADER_BYTES + sizeof(plaintext) + AIRPLAY_SCREEN_TAG_BYTES)];
+    size_t used = 0;
+    for (unsigned i = 0; i < 20; ++i) {
+        body_len = seal_frame(key, 4U + i, plaintext, sizeof(plaintext), header, body);
+        memcpy(burst + used, header, sizeof(header)); used += sizeof(header);
+        memcpy(burst + used, body, body_len); used += body_len;
+    }
+    assert(send_all(client, burst, used));
+    assert(wait_event(airplay_screen_server_get_fd(server)));
+    airplay_screen_server_poll(server);
+    assert(capture.calls > 5U && capture.calls <= 12U);
+    airplay_screen_server_get_stats(server, &stats);
+    assert(stats.read_budget_yields >= 1U);
+    unsigned before = capture.calls;
+    stepped_clock = true;
+    assert(wait_event(airplay_screen_server_get_fd(server)));
+    airplay_screen_server_poll(server);
+    assert(capture.calls - before <= 1U); /* 2 ms cooperative budget */
+    stepped_clock = false;
+    while (capture.calls < 24U) {
+        assert(wait_event(airplay_screen_server_get_fd(server)));
+        airplay_screen_server_poll(server);
+    }
+    assert(exit_count == 0U);
+    airplay_screen_server_get_stats(server, &stats);
+    assert(stats.frames == 24U && stats.read_batches < stats.recv_calls);
+    printf("screen burst: 20 authenticated frames, reads=%u owner_dispatches=%u (old one-read path needs at least 40)\n",
+           stats.recv_calls - baseline_reads, stats.read_batches - baseline_batches);
+
     /* A frame that fails authentication kills the one-peer data stream. */
-    body_len = seal_frame(key, 4U, plaintext, sizeof(plaintext), header, body);
+    body_len = seal_frame(key, 24U, plaintext, sizeof(plaintext), header, body);
     body[body_len - 1U] ^= 0x80U;
     send_frame(client, header, body, body_len);
 

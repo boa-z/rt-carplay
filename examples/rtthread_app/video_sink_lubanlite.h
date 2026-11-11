@@ -35,3 +35,12 @@ void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
 void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
                               size_t annex_b_len, uint64_t sender_time_ns,
                               void *context);
+
+/* Coherent diagnostic counters copied with interrupts briefly masked on this
+ * single-core target. These are elapsed wall times, not isolated CPU costs. */
+typedef struct {
+    unsigned frames, packets, drops, errors, pending, queue_peak;
+    unsigned dequeued, decode_calls, present_calls;
+    uint64_t queue_ms, decode_ms, present_ms;
+} carplay_video_perf_t;
+void carplay_video_sink_perf(carplay_video_perf_t *stats);

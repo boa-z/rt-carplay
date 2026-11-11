@@ -259,3 +259,11 @@ it retains v20 TCP/gap diagnostics and v19 reference recovery.
 See [wired-pairing-persistence.md](wired-pairing-persistence.md) for the
 Pair-Setup storage failure, USB trust reuse and interactive LVGL file manager.
 These changes do not establish a video performance improvement.
+
+## v24 reference comparison and bounded receive experiment
+
+See [zalink-performance-comparison.md](zalink-performance-comparison.md) for the
+same-platform Zalink pipeline, pinned UxPlay/DiPlay/LIVI/carplayd references,
+bounded Screen burst reads and automatic common-window five-second reports.
+The decoder/presentation pipeline remains unchanged in this experiment; no
+board FPS gain is claimed before continuous-motion measurements.

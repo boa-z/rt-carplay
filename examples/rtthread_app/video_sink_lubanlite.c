@@ -736,6 +736,22 @@ void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
     if (errors != NULL) *errors = s_sink.decode_errors;
 }
 
+void carplay_video_sink_perf(carplay_video_perf_t *out)
+{
+    if (!out) return;
+    rt_base_t level = rt_hw_interrupt_disable();
+    *out = (carplay_video_perf_t) {
+        .frames = s_sink.frame_count, .packets = s_sink.nal_count,
+        .drops = s_sink.dropped_nals, .errors = s_sink.decode_errors,
+        .pending = (s_sink.head + SINK_QUEUE_LENGTH - s_sink.tail) % SINK_QUEUE_LENGTH,
+        .queue_peak = s_sink.queue_peak, .dequeued = s_sink.dequeued,
+        .decode_calls = s_sink.decode_calls, .present_calls = s_sink.present_calls,
+        .queue_ms = s_sink.queue_wait_ms, .decode_ms = s_sink.decode_ms,
+        .present_ms = s_sink.present_ms,
+    };
+    rt_hw_interrupt_enable(level);
+}
+
 /* ------------------------------------------------------------------ */
 /* Bring-up shell command: decode an Annex-B file without a controller */
 /* ------------------------------------------------------------------ */

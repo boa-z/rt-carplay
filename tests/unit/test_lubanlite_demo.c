@@ -10,6 +10,7 @@ static unsigned mode, starts, pairs, closes, stops, net_checks, pictures, failed
 static bool session_live, quiesced, receiver_running;
 static unsigned reports;
 uint32_t rt_tick_get_millisecond(void) { return 0; }
+void carplay_app_performance_report(void) {}
 int carplay_usb_trust_cache_status(void) { return 0; }
 int carplay_app_pairing_storage_error(void) { return mode == 3 && status.stage == DEMO_CONNECT ? RTCP_EIO : 0; }
 void carplay_app_debug_counters(unsigned *r, unsigned *h, unsigned *e) { *r=*h=*e=0; }

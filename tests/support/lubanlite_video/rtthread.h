@@ -2,6 +2,9 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+typedef uintptr_t rt_base_t;
+rt_base_t rt_hw_interrupt_disable(void);
+void rt_hw_interrupt_enable(rt_base_t);
 typedef void *rt_mutex_t;
 typedef void *rt_sem_t;
 typedef void *rt_thread_t;

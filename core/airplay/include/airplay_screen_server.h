@@ -21,6 +21,8 @@ typedef struct airplay_screen_server airplay_screen_server_t;
 /* Monotonic elapsed wall time includes callback execution and preemption. */
 typedef struct {
     uint32_t recv_calls;
+    uint32_t read_batches;       /* owner dispatches, excluding accept */
+    uint32_t read_budget_yields; /* 16 reads or 2 ms; callback may overrun */
     uint32_t messages;
     uint32_t frames;
     uint64_t wire_bytes;

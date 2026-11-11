@@ -20,6 +20,8 @@ static const uint8_t config[] = {0,0,0,1,0x67,0x42,0x00,0x1f,0x80,
                                 0,0,0,1,0x68,0xce,0x38,0x80};
 static const uint8_t frame[] = {0,0,0,1,0x65,0xb8,0x80};
 
+rt_base_t rt_hw_interrupt_disable(void) { return 0; }
+void rt_hw_interrupt_enable(rt_base_t level) { (void)level; }
 uint32_t rt_tick_get_millisecond(void) { return 100; }
 int rt_kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 int rt_mutex_take(rt_mutex_t m, int t) { (void)m; (void)t; return 0; }

@@ -393,3 +393,21 @@ before and after traffic on one attachment to assess the RX errors.
 
 The receiver remains running with zero audio packets. A running local
 receiver does not imply that the remote service or media session succeeded.
+
+
+## V14 source investigation and bounded transport fix
+
+The [wired authentication investigation](wired-auth-investigation.md) records a
+reproduced data-loss race in v13's post-timeout diagnostics, its actual-port
+ASan/UBSan regression, the correction and independent Python/OpenSSL peer
+checks of the MFiSAP/control-cipher code. A completed read is now delivered
+normally if its callback runs during diagnostics or just before a failed
+cancel; its next DATA PID is retained. Idle bulk-IN timeout dumps are opt-in.
+Service-connect and service-TLS failures retain distinct operation names.
+
+This is a confirmed source defect with a deterministic reproduction. The
+supplied UART does not prove this race caused its service timeout or RTSP peer
+close; those hardware conclusions remain open. No IPHETH framing, USBMUX wire
+sequence, TLS version, MFi response format or RTSP frame-size policy changes
+are included. All 48 host tests, platform boundary, actual-port sanitizer
+regression, and independent peer crypto checks passed.

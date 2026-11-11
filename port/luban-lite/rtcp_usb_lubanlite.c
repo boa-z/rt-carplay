@@ -179,6 +179,13 @@ static void transfer_complete(void *arg, int nbytes)
 extern void usbh_ehci_transfer_snapshot(struct usbh_urb *, int)
     __attribute__((weak));
 
+/* Bulk IN reads are also the iAP2 idle poll (200 ms). A no-data timeout is
+ * expected; dumping UART state on each poll perturbs scheduling. Enable only
+ * for transport bring-up. Actual submission/completion failures still log. */
+#ifndef RTCP_USB_TRACE_IN_TIMEOUTS
+#define RTCP_USB_TRACE_IN_TIMEOUTS 0
+#endif
+
 static int map_urb_error(int error)
 {
     if (error == -USB_ERR_TIMEOUT) return RTCP_ETIMEDOUT;
@@ -238,37 +245,56 @@ static int dma_transfer(struct usbh_hubport *hport,
         USB_LOG_WRN("USB submit error ep=%02x raw=%d length=%u\r\n",
                      t->urb.ep->bEndpointAddress, ret, (unsigned)length);
         ret = map_urb_error(ret);
-    } else if (usb_osal_sem_take(t->done, timeout_ms) < 0) {
-        /* On cancellation failure retain URB, callback argument and DMA
-         * storage: a late HCD access must not touch freed memory. */
-        USB_LOG_WRN("USB wait timeout ep=%02x length=%u actual=%u pid=%u urb=%d\r\n",
-                     t->urb.ep->bEndpointAddress, (unsigned)length,
-                     (unsigned)t->urb.actual_length, t->urb.data_toggle,
-                     t->urb.errorcode);
-        if (usbh_ehci_transfer_snapshot)
-            usbh_ehci_transfer_snapshot(&t->urb, -USB_ERR_TIMEOUT);
-        /* UART snapshot output can outlast an in-flight transfer. If its
-         * callback has now completed, there is nothing left to cancel. */
-        reclaim = usb_osal_sem_take(t->done, 1U) == 0;
-        if (!reclaim) reclaim = usbh_kill_urb(&t->urb) == 0;
-        ret = RTCP_ETIMEDOUT;
-    } else if (t->urb.errorcode < 0) {
-        USB_LOG_WRN("USB completion error ep=%02x urb=%d actual=%u pid=%u\r\n",
-                     t->urb.ep->bEndpointAddress, t->urb.errorcode,
-                     (unsigned)t->urb.actual_length, t->urb.data_toggle);
-        ret = map_urb_error(t->urb.errorcode);
     } else {
-        flags = usb_osal_enter_critical_section();
-        if (pipe && pipe->generation == generation)
-            pipe->data_toggle = t->urb.data_toggle;
-        usb_osal_leave_critical_section(flags);
-        size_t actual = t->urb.actual_length;
-        size_t prefix = endpoint ? 0U : sizeof(t->setup);
-        if (actual < prefix || actual - prefix > length) {
-            ret = RTCP_EIO;
-        } else {
-            ret = (int)(actual - prefix);
-            if (input && ret > 0) memcpy(data, t->data, (size_t)ret);
+        bool completed = usb_osal_sem_take(t->done, timeout_ms) == 0;
+        if (!completed) {
+            if (!endpoint || !input || RTCP_USB_TRACE_IN_TIMEOUTS) {
+                USB_LOG_WRN("USB wait timeout ep=%02x length=%u actual=%u pid=%u urb=%d\r\n",
+                             t->urb.ep->bEndpointAddress, (unsigned)length,
+                             (unsigned)t->urb.actual_length, t->urb.data_toggle,
+                             t->urb.errorcode);
+                if (usbh_ehci_transfer_snapshot)
+                    usbh_ehci_transfer_snapshot(&t->urb, -USB_ERR_TIMEOUT);
+            }
+            /* The callback may run after the initial wait expires, including
+             * while UART diagnostics block. A consumed completion still owns
+             * valid bytes and the next DATA PID: deliver it normally. Losing
+             * either corrupts the shared mux/TLS stream on the next read. */
+            completed = usb_osal_sem_take(t->done, 1U) == 0;
+            if (!completed) {
+                /* On cancellation failure retain URB, callback argument and
+                 * DMA storage for a possible late HCD access. */
+                reclaim = usbh_kill_urb(&t->urb) == 0;
+                /* EHCI can complete and release hcpriv just before kill's
+                 * critical section. A failed kill then means "already done"
+                 * only when the callback semaphore confirms completion. */
+                if (!reclaim && usb_osal_sem_take(t->done, 1U) == 0) {
+                    completed = true;
+                    reclaim = true;
+                }
+                if (!completed) ret = RTCP_ETIMEDOUT;
+            }
+        }
+        if (completed) {
+            if (t->urb.errorcode < 0) {
+                USB_LOG_WRN("USB completion error ep=%02x urb=%d actual=%u pid=%u\r\n",
+                             t->urb.ep->bEndpointAddress, t->urb.errorcode,
+                             (unsigned)t->urb.actual_length, t->urb.data_toggle);
+                ret = map_urb_error(t->urb.errorcode);
+            } else {
+                flags = usb_osal_enter_critical_section();
+                if (pipe && pipe->generation == generation)
+                    pipe->data_toggle = t->urb.data_toggle;
+                usb_osal_leave_critical_section(flags);
+                size_t actual = t->urb.actual_length;
+                size_t prefix = endpoint ? 0U : sizeof(t->setup);
+                if (actual < prefix || actual - prefix > length) {
+                    ret = RTCP_EIO;
+                } else {
+                    ret = (int)(actual - prefix);
+                    if (input && ret > 0) memcpy(data, t->data, (size_t)ret);
+                }
+            }
         }
     }
     if (pipe && pipe->generation != generation) ret = RTCP_ESTATE;

@@ -6,6 +6,7 @@
 
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
+#include "rtcp/log.h"
 
 /* mbedTLS may report WANT_READ/WANT_WRITE through a blocking callback only
  * on benign renegotiation or shutdown races; bound the retries so a broken
@@ -227,6 +228,8 @@ int rtcp_lockdown_tls_open(rtcp_lockdown_tls_t **tls,
     return RTCP_OK;
 
 fail_handshake:
+    RTCP_LOGW("lockdown_tls", "handshake failed raw=%d mapped=%d",
+              ret, tls_map_error(ret));
     rtcp_lockdown_tls_close(session);
     return tls_map_error(ret);
 fail:

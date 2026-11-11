@@ -315,6 +315,9 @@ static int start_service(rtcp_lockdown_session_t *session)
     session->service_ssl = ret == RTCP_OK ? enable_ssl : false;
 
     session->stage = RTCP_LOCKDOWN_STAGE_SERVICE;
+    session->operation = "OpenServiceConnection";
+    RTCP_LOGI("lockdown", "service port=%u tls=%u", (unsigned)session->service_port,
+              (unsigned)session->service_ssl);
     ret = config->open_connection(config->connection_user,
                                   session->service_port,
                                   &session->service_raw);
@@ -322,6 +325,7 @@ static int start_service(rtcp_lockdown_session_t *session)
         return ret;
     }
     if (session->service_ssl) {
+        session->operation = "ServiceTLS";
         ret = rtcp_lockdown_tls_open(&session->service_tls,
                                      &session->service_raw, config->record,
                                      config->rng, config->rng_context,

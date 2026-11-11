@@ -616,12 +616,14 @@ static void *connection_thread(void *argument)
 /* ------------------------------------------------------------------ */
 
 static connection_t s_connections[MAX_CONNECTIONS];
+static bool fail_service_open, fail_service_tls_read;
 
 static int connection_read(void *context, void *buffer, size_t length,
                            uint32_t timeout_ms)
 {
     connection_t *connection = context;
 
+    if (connection->port == SERVICE_PORT && fail_service_tls_read) return RTCP_ETIMEDOUT;
     return pipe_read(&connection->server_to_client, buffer, length,
                      timeout_ms);
 }
@@ -641,6 +643,7 @@ static const rtcp_stream_ops_t connection_ops = {
 static int fake_open(void *user, uint16_t port, rtcp_stream_t *stream)
 {
     (void)user;
+    if (port == SERVICE_PORT && fail_service_open) return RTCP_ETIMEDOUT;
     for (size_t i = 0U; i < MAX_CONNECTIONS; ++i) {
         connection_t *connection = &s_connections[i];
         if (connection->used) {
@@ -773,6 +776,42 @@ static void test_full_session(void)
     rtcp_lockdown_session_close(&session);
 }
 
+static void test_service_connect_timeout(void)
+{
+    static rtcp_pair_record_t record;
+    static rtcp_lockdown_session_t session;
+    rtcp_lockdown_session_config_t config;
+    reset_phone(0U, false, true);
+    memset(&record, 0, sizeof(record));
+    make_config(&config, &record);
+    fail_service_open = true;
+    assert(rtcp_lockdown_session_open(&session, &config) == RTCP_ETIMEDOUT);
+    fail_service_open = false;
+    assert(session.paired && session.stage == RTCP_LOCKDOWN_STAGE_SERVICE);
+    assert(!strcmp(session.operation, "OpenServiceConnection"));
+    assert(session.last_exchange_result == RTCP_OK && session.last_reply_length > 0);
+    assert(session.service_port == SERVICE_PORT && session.service_ssl);
+    assert_connections_closed();
+}
+
+static void test_service_tls_timeout(void)
+{
+    static rtcp_pair_record_t record;
+    static rtcp_lockdown_session_t session;
+    rtcp_lockdown_session_config_t config;
+    reset_phone(0U, false, true);
+    memset(&record, 0, sizeof(record));
+    make_config(&config, &record);
+    fail_service_tls_read = true;
+    assert(rtcp_lockdown_session_open(&session, &config) == RTCP_ETIMEDOUT);
+    fail_service_tls_read = false;
+    assert(session.paired && session.stage == RTCP_LOCKDOWN_STAGE_SERVICE);
+    assert(!strcmp(session.operation, "ServiceTLS"));
+    assert(session.last_exchange_result == RTCP_OK && session.last_reply_length > 0);
+    assert(session.service_raw.ops == NULL && session.service_tls == NULL);
+    assert_connections_closed();
+}
+
 static void test_denied_pairing(void)
 {
     static rtcp_pair_record_t record;
@@ -853,6 +892,8 @@ int main(void)
 
     test_full_session();
     test_denied_pairing();
+    test_service_connect_timeout();
+    test_service_tls_timeout();
     test_timeout_diagnostic_survives_cleanup();
 
     pthread_mutex_destroy(&s_phone.lock);

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #define _POSIX_C_SOURCE 200809L
+#define RTCP_USB_TRACE_IN_TIMEOUTS 1
 /* Compile the actual SDK port, including its private DMA submission helpers. */
 #include "../../port/luban-lite/rtcp_usb_lubanlite.c"
 #include <assert.h>
@@ -13,13 +14,18 @@ static struct usb_bulk_state pipe;
 static unsigned peer_toggle[32], delivered[32];
 static int simulate_pid, disconnect_in_submit;
 static unsigned last_pid;
-static int diagnostic_completes;
+static int diagnostic_completes, diagnostic_length, diagnostic_error, diagnostic_disconnect;
+static int kill_completes;
 void usbh_ehci_transfer_snapshot(struct usbh_urb *u, int reason)
 {
     assert(reason == -USB_ERR_TIMEOUT && u == pending);
     if (diagnostic_completes) {
-        u->errorcode = 0; u->actual_length = 0;
-        u->complete(u->arg, 0);
+        u->errorcode = diagnostic_error;
+        u->actual_length = (unsigned)diagnostic_length;
+        if (diagnostic_length) memset(u->transfer_buffer, 0xa6, (size_t)diagnostic_length);
+        u->data_toggle ^= 1U;
+        if (diagnostic_disconnect) { ++pipe.generation; pipe.data_toggle = 0; }
+        u->complete(u->arg, diagnostic_error ? diagnostic_error : diagnostic_length);
     }
 }
 
@@ -87,6 +93,13 @@ int usbh_submit_urb(struct usbh_urb *u)
 int usbh_kill_urb(struct usbh_urb *u)
 {
     assert(u == pending); kills++;
+    if (kill_completes) {
+        u->errorcode = 0; u->actual_length = 3;
+        memset(u->transfer_buffer, 0xa7, 3);
+        u->data_toggle ^= 1U;
+        u->complete(u->arg, 3);
+        return -USB_ERR_INVAL; /* completion already released hcpriv */
+    }
     if (kill_error) return kill_error;
     u->complete(u->arg, -USB_ERR_SHUTDOWN); return 0;
 }
@@ -179,9 +192,34 @@ int main(void)
      * quarantine for an already completed URB. */
     simulate_pid = 0; timeout = 1; diagnostic_completes = 1;
     int previous_kills = kills;
-    assert(submit_bulk(&h, &ep, unaligned, 1, 100, &pipe) == RTCP_ETIMEDOUT);
-    assert(kills == previous_kills); clean();
-    diagnostic_completes = 0; timeout = 0;
+    ep.bEndpointAddress = 0x85;
+    pipe.data_toggle = 0;
+    /* A positive completion in this race must return data, preserve the
+     * next DATA PID and leave a canary intact, rather than discard a TLS
+     * fragment and report an idle timeout. */
+    diagnostic_length = 7;
+    memset(bytes, 0x37, sizeof(bytes));
+    assert(submit_bulk(&h, &ep, unaligned, 9, 100, &pipe) == 7);
+    assert(unaligned[0] == 0xa6 && unaligned[6] == 0xa6 && unaligned[7] == 0x37);
+    assert(pipe.data_toggle == 1 && kills == previous_kills); clean();
+    diagnostic_length = 0;
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, &pipe) == 0);
+    assert(pipe.data_toggle == 0 && kills == previous_kills); clean();
+    diagnostic_length = 7;
+    diagnostic_error = -USB_ERR_IO;
+    assert(submit_bulk(&h, &ep, unaligned, 9, 100, &pipe) == RTCP_EIO);
+    assert(pipe.data_toggle == 0 && kills == previous_kills); clean();
+    diagnostic_error = 0; diagnostic_disconnect = 1;
+    assert(submit_bulk(&h, &ep, unaligned, 9, 100, &pipe) == RTCP_ESTATE);
+    assert(pipe.data_toggle == 0 && kills == previous_kills); clean();
+    diagnostic_disconnect = 0; diagnostic_length = 0;
+    diagnostic_completes = 0;
+    kill_completes = 1;
+    memset(bytes, 0x37, sizeof(bytes));
+    assert(submit_bulk(&h, &ep, unaligned, 9, 100, &pipe) == 3);
+    assert(unaligned[0] == 0xa7 && unaligned[2] == 0xa7 && unaligned[3] == 0x37);
+    assert(pipe.data_toggle == 1); clean();
+    kill_completes = 0; timeout = 0;
     /* Public USBMUX IN operation follows usbmuxd's 16 KiB USB_MRU. */
     s_usb.present = true; s_usb.hport = &h; s_usb.mux_in = 0x85;
     s_usb.mux_in_desc = ep; s_usb.mux_in_desc.bEndpointAddress = 0x85;

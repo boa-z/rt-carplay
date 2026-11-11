@@ -96,6 +96,13 @@ $(SIM): $(SIM_SRCS) $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(SIM_SRCS) $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(LDLIBS)
 
+# This test includes the platform sources to intercept SDK filesystem calls.
+# Track them explicitly so editing a seam cannot reuse a stale test binary.
+$(BUILD)/test_pairing_files: tests/unit/test_pairing_files.c \
+    examples/rtthread_app/pairing_files.c examples/rtthread_app/pairing_files.h \
+    examples/rtthread_app/pairing_manager.c examples/rtthread_app/pairing_manager.h \
+    examples/rtthread_app/usb_pair_cache.c examples/rtthread_app/usb_pair_cache.h
+
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB) $(MBEDTLS_LIB) $(TEST_SUPPORT_OBJ)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LIB) $(TEST_SUPPORT_OBJ) $(MBEDTLS_LIB) $(LDLIBS)
 

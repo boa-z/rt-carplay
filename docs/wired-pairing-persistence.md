@@ -103,3 +103,38 @@ Board checks require no startup commands:
 
 This release repairs persistence and demo management. It retains the earlier
 video cadence diagnostics and does not claim to resolve the remaining stutter.
+
+
+## v23: RT-Thread negative errno regression
+
+The v22 board trace stops at `cannot load pairing store` with stage 7/error -1
+before any phone pairing attempt. Unlike host POSIX, this SDK keeps negative
+filesystem errno values: `dfs_elm.c` maps a missing file to `-ENOENT`,
+`dfs_posix.c:open()` passes that result to `rt_set_errno()`, `kservice.c` stores
+it unchanged and newlib `syscalls.c:__errno()` returns `_rt_errno()` directly.
+V22 checked only `errno == ENOENT`, so even a clean data partition with no
+controller file was treated as an I/O error. The same assumption affected
+backup lookup, first save, missing-backup removal and management deletion.
+
+V23 matches the specific error in either sign at every pairing-file call site.
+Missing primary plus missing backup yields an empty table; missing primary with
+an existing backup loads the backup. Genuine permission/I/O/read/size failures
+remain errors; the fix does not delete trust files, reset device identity or
+silently accept corrupted records. Load failures now log the path and raw errno
+or read/size/close context. No USB configuration or phone setting change is
+needed to address this regression.
+
+The persistence test now runs every scenario with both positive POSIX errno
+and negative SDK errno. Adding those SDK-style wrappers reproduced v22's
+empty-first-boot failure before the fix and passes after it. It also tests
+new-file save, repeated replacement, interrupted backup recovery, trust cache,
+management deletion and preservation of real access/oversize errors in both
+modes. Makefile dependencies now include the platform sources included by this
+test to prevent stale test binaries after a platform-source edit.
+
+Flash v23 with the phone unplugged: the receiver should reach the normal waiting
+page rather than `cannot load pairing store`. Connect once and verify picture
+and touch, then replug the same phone to check trust reuse. Keep existing `/data`
+when possible; deleting the pairing table is not a workaround for v22's errno
+bug because an absent table also triggers that bug. Real-device validation of
+the corrected image remains required.

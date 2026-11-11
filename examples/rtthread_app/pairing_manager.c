@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "pairing_manager.h"
+#include "pairing_files.h"
 #include "rtcp/rtcp.h"
 #include <dirent.h>
 #include <errno.h>
@@ -74,7 +75,7 @@ int carplay_pair_file_forget(const char *directory, const char *name)
         char path[256];
         int n = snprintf(path, sizeof(path), "%s/%s%s", directory, name, suffixes[i]);
         if (n < 0 || n >= (int)sizeof(path)) return RTCP_EINVAL;
-        if (remove(path) != 0 && errno != ENOENT) return RTCP_EIO;
+        if (remove(path) != 0 && !carplay_file_errno_is(errno, ENOENT)) return RTCP_EIO;
     }
     return RTCP_OK;
 }

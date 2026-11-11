@@ -7,26 +7,50 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-static int fail_commit, fail_restore;
+static int fail_commit, fail_restore, negative_errno, denied;
+/* The SDK DFS open/remove return -1 but store -ENOENT in errno. Simulate
+ * this independently of FatFS's no-overwrite rename behavior. */
+static int signed_errno(int code) { return negative_errno ? -code : code; }
+static FILE *sdk_fopen(const char *path, const char *mode) {
+    if (denied) { errno = signed_errno(EACCES); return NULL; }
+    FILE *f = fopen(path, mode);
+    if (!f && negative_errno && errno > 0) errno = -errno;
+    return f;
+}
+static int sdk_remove(const char *path) {
+    if (denied) { errno = signed_errno(EACCES); return -1; }
+    int result = remove(path);
+    if (result && negative_errno && errno > 0) errno = -errno;
+    return result;
+}
 static int fat_rename(const char *old, const char *newpath) {
     struct stat st;
-    if (stat(newpath,&st)==0) {errno=EEXIST; return -1;}
-    if ((fail_commit && strstr(old,".tmp")) || (fail_restore && strstr(old,".bak"))) {errno=EIO; return -1;}
+    if (stat(newpath,&st)==0) {errno=signed_errno(EEXIST); return -1;}
+    if ((fail_commit && strstr(old,".tmp")) || (fail_restore && strstr(old,".bak"))) {errno=signed_errno(EIO); return -1;}
     return rename(old,newpath);
 }
+#define fopen sdk_fopen
+#define remove sdk_remove
 #define rename fat_rename
 #include "../../examples/rtthread_app/pairing_files.c"
 #undef rename
 #include "../../examples/rtthread_app/usb_pair_cache.c"
 #include "../../examples/rtthread_app/pairing_manager.c"
-int main(void) {
+static void test_files(void) {
     char directory[]="/tmp/carplay-persistence-XXXXXX";
     assert(mkdtemp(directory));
     char path[256], backup[256];
     snprintf(path,sizeof(path),"%s/store",directory);
     snprintf(backup,sizeof(backup),"%s/store.bak",directory);
     uint8_t data[32]; size_t n;
+    /* A clean data partition is normal, not a fatal pairing-store error. */
+    assert(carplay_file_load(path,data,sizeof(data),&n)==0 && n==0);
+    denied=1;
+    assert(carplay_file_load(path,data,sizeof(data),&n)==RTCP_EIO);
+    assert(carplay_file_save(path,(const uint8_t *)"denied",6)==RTCP_EIO);
+    denied=0;
     assert(carplay_file_save(path,(const uint8_t *)"old",3)==0);
+    assert(carplay_file_load(path,data,2,&n)==RTCP_EIO); /* not mistaken for absent */
     assert(carplay_file_save(path,(const uint8_t *)"new",3)==0); /* FatFS cannot overwrite */
     assert(carplay_file_load(path,data,sizeof(data),&n)==0 && n==3 && !memcmp(data,"new",3));
     fail_commit=1; fail_restore=1;
@@ -62,6 +86,9 @@ int main(void) {
     assert(count==1 && !more && !strcmp(files[0].name,usb));
     assert(carplay_pair_file_forget(directory,"rt-carplay.seed")==RTCP_EINVAL);
     assert(carplay_pair_file_forget(directory,"../rt-carplay-pairings.bin")==RTCP_EINVAL);
+    denied=1;
+    assert(carplay_pair_file_forget(directory,usb)==RTCP_EIO);
+    denied=0;
     assert(carplay_pair_file_forget(directory,usb)==0);
     assert(carplay_file_load(path,data,sizeof(data),&n)==0 && n==0); /* .bak cannot resurrect */
     assert(carplay_file_load(identity,data,sizeof(data),&n)==0 && n==8);
@@ -71,5 +98,8 @@ int main(void) {
     assert(!strcmp(files[0].name,"rt-carplay-pairings.bin"));
     assert(carplay_pair_file_forget(directory,files[0].name)==0);
     remove(identity); assert(rmdir(directory)==0);
-    puts("FatFS-style replacement, interrupted commit recovery and pair cache bounds/integrity passed");
+}
+int main(void) {
+    for (negative_errno=0; negative_errno<=1; ++negative_errno) test_files();
+    puts("POSIX/RT-Thread errno: empty first boot, real errors, FatFS replacement/recovery, trust cache and record deletion passed");
 }

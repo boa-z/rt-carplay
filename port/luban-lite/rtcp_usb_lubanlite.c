@@ -10,7 +10,7 @@
  * request 0x52, in a configuration that is not index 0 and whose number
  * differs between models.  Therefore this file does two things:
  *
- *   1. It implements the weak usbh_get_configuration_index() hook.  During
+ *   1. It implements the weak usbh_get_hport_active_config_index() hook.  During
  *      enumeration of an Apple device it scans the reported configuration
  *      descriptors, sends the 0x52 request when none of them is a CarPlay
  *      configuration, and returns the descriptor index that carries the
@@ -219,6 +219,12 @@ static int control_transfer_timeout(struct usbh_hubport *hport,
                            ? timeout_ms
                            : CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
     usb_osal_mutex_give(hport->mutex);
+    /* The upstream HCD includes the SETUP stage in URB actual_length;
+     * match usbh_control_transfer(), whose public result is data bytes. */
+    if (ret >= 0) {
+        if (ret < (int)sizeof(setup)) return RTCP_EIO;
+        ret -= (int)sizeof(setup);
+    }
     return ret;
 }
 
@@ -360,7 +366,7 @@ static void request_carplay_configurations(struct usbh_hubport *hport)
  * makes CherryUSB read that descriptor, send SET_CONFIGURATION with its
  * bConfigurationValue and bind class drivers to its interfaces.
  */
-uint8_t usbh_get_configuration_index(struct usbh_hubport *hport)
+uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
 {
     if (!s_usb.enabled || hport == NULL ||
         hport->device_desc.idVendor != APPLE_USB_VENDOR_ID) {
@@ -500,7 +506,7 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
     (void)intf;
     if (!s_usb.enabled || hport == NULL ||
         hport->device_desc.idVendor != APPLE_USB_VENDOR_ID ||
-        hport->raw_config_desc == NULL || hport->raw_config_desc_len == 0U) {
+        hport->raw_config_desc == NULL || hport->config.config_desc.wTotalLength == 0U) {
         return -1;
     }
 
@@ -518,7 +524,7 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
     device.address = hport->dev_addr;
     device.configuration_index = s_usb.last_configuration_index;
     if (rtcp_usb_parse_configuration(&device, hport->raw_config_desc,
-                                     hport->raw_config_desc_len) != RTCP_OK) {
+                                     hport->config.config_desc.wTotalLength) != RTCP_OK) {
         USB_LOG_ERR("CarPlay: cannot parse the selected configuration\r\n");
         return -1;
     }

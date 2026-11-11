@@ -32,7 +32,10 @@
 #define SINK_QUEUE_LENGTH 16U
 #define SINK_MAX_NAL_BYTES (512U * 1024U)
 #define SINK_THREAD_STACK_BYTES (16U * 1024U)
-#define SINK_THREAD_PRIORITY 20U
+/* Consume queued video before the priority-15 network producer can fill the
+ * FIFO. VE completion and vsync block this thread, allowing reception to run.
+ * TCP/IP and USB workers retain their higher system priorities. */
+#define SINK_THREAD_PRIORITY 14U
 #define SINK_THREAD_TICK 20U
 #define SINK_BITSTREAM_BYTES (1024U * 1024U)
 #define SINK_PACKET_COUNT 2
@@ -43,6 +46,7 @@ typedef struct {
     uint8_t *data;
     size_t len;
     uint32_t pts_us;
+    uint32_t queued_ms;
     bool configure;
 } nal_entry_t;
 
@@ -74,10 +78,29 @@ typedef struct {
 
     unsigned nal_count;
     unsigned frame_count;
+    unsigned skipped_frames;
     unsigned dropped_nals;
     unsigned decode_errors;
     unsigned decoder_resets;
+    unsigned queue_peak;
+    unsigned dequeued;
+    uint64_t queue_wait_ms;
+    uint32_t queue_wait_max_ms;
+    unsigned decode_calls;
+    uint64_t decode_ms;
+    uint32_t decode_max_ms;
+    unsigned present_calls;
+    uint64_t present_ms;
+    uint32_t present_max_ms;
+    uint32_t report_ms;
+    unsigned report_frames;
+    unsigned report_nals;
 } video_sink_t;
+
+static uint32_t sink_now_ms(void)
+{
+    return (uint32_t)rt_tick_get_millisecond();
+}
 
 static video_sink_t s_sink;
 
@@ -134,7 +157,10 @@ static void enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
     sink->queue[sink->head].len = len;
     sink->queue[sink->head].pts_us = pts_us;
     sink->queue[sink->head].configure = configure;
+    sink->queue[sink->head].queued_ms = sink_now_ms();
     sink->head = next;
+    unsigned pending = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
+    if (pending > sink->queue_peak) sink->queue_peak = pending;
     (void)rt_mutex_release(sink->lock);
 }
 
@@ -145,6 +171,10 @@ static bool dequeue_nal(video_sink_t *sink, nal_entry_t *out)
     if (available) {
         *out = sink->queue[sink->tail];
         sink->tail = (sink->tail + 1U) % SINK_QUEUE_LENGTH;
+        uint32_t wait = sink_now_ms() - out->queued_ms;
+        ++sink->dequeued;
+        sink->queue_wait_ms += wait;
+        if (wait > sink->queue_wait_max_ms) sink->queue_wait_max_ms = wait;
     }
     (void)rt_mutex_release(sink->lock);
     return available;
@@ -238,8 +268,10 @@ static void present_frame(video_sink_t *sink, const struct mpp_frame *frame)
 
 static unsigned drain_frames(video_sink_t *sink)
 {
-    unsigned presented = 0U;
-    while (presented < 8U && !sink->stop && sink->decoder != NULL) {
+    unsigned drained = 0U;
+    struct mpp_frame newest;
+    bool have_newest = false;
+    while (drained < 8U && !sink->stop && sink->decoder != NULL) {
         struct mpp_frame frame;
         memset(&frame, 0, sizeof(frame));
         int ret = mpp_decoder_get_frame(sink->decoder, &frame);
@@ -250,18 +282,33 @@ static unsigned drain_frames(video_sink_t *sink)
             }
             break;
         }
-        present_frame(sink, &frame);
-        ++presented;
+        /* Catch up using decoded output only: never discard compressed
+         * reference NALs. MPP keeps separate decoder/display references.
+         * The old scanout stays held until the new layer reaches vsync. */
+        if (have_newest) {
+            (void)mpp_decoder_put_frame(sink->decoder, &newest);
+            ++sink->skipped_frames;
+        }
+        newest = frame;
+        have_newest = true;
+        ++drained;
+    }
+    if (have_newest) {
+        uint32_t present_start = sink_now_ms();
+        present_frame(sink, &newest);
+        uint32_t present_elapsed = sink_now_ms() - present_start;
+        ++sink->present_calls;
+        sink->present_ms += present_elapsed;
+        if (present_elapsed > sink->present_max_ms)
+            sink->present_max_ms = present_elapsed;
         ++sink->frame_count;
-        /* Return the frame that was on screen until this one; the DE is
-         * done with it after the vsync wait above. */
         if (sink->have_frame) {
             (void)mpp_decoder_put_frame(sink->decoder, &sink->held);
         }
-        sink->held = frame;
+        sink->held = newest;
         sink->have_frame = true;
     }
-    return presented;
+    return drained;
 }
 
 static void pump_decoder(video_sink_t *sink);
@@ -306,7 +353,17 @@ static void pump_decoder(video_sink_t *sink)
 {
     if (sink->decoder == NULL) return;
     for (int i = 0; i < 32 && !sink->stop; ++i) {
+        uint32_t decode_start = sink_now_ms();
         int ret = mpp_decoder_decode(sink->decoder);
+        uint32_t decode_elapsed = sink_now_ms() - decode_start;
+        /* Exclude empty probes from per-call averages. Values are elapsed
+         * wall time including scheduler/VE waits, not isolated CPU time. */
+        if (ret != DEC_NO_READY_PACKET) {
+            ++sink->decode_calls;
+            sink->decode_ms += decode_elapsed;
+            if (decode_elapsed > sink->decode_max_ms)
+                sink->decode_max_ms = decode_elapsed;
+        }
         if (ret == DEC_NO_READY_PACKET) break;
         if (ret == DEC_OK) continue;
         if (ret == DEC_NO_EMPTY_FRAME) {
@@ -434,6 +491,7 @@ int carplay_video_sink_start(uint16_t display_width, uint16_t display_height)
     memset(sink, 0, sizeof(*sink));
     sink->display_width = display_width;
     sink->display_height = display_height;
+    sink->report_ms = sink_now_ms();
     sink->panel_width = display_width;
     sink->panel_height = display_height;
 
@@ -712,6 +770,25 @@ static int cmd_carplay_video(int argc, char **argv)
                    carplay_video_sink_is_running() ? "running" : "stopped",
                    (unsigned)carplay_video_sink_pending(), nals, frames,
                    dropped, errors);
+        video_sink_t *sink = &s_sink;
+        uint32_t now = sink_now_ms();
+        uint32_t elapsed = now - sink->report_ms;
+        unsigned fps10 = elapsed != 0U ?
+            (unsigned)((uint64_t)(frames - sink->report_frames) * 10000U / elapsed) : 0U;
+        rt_kprintf("[" TAG "] interval=%ums fps=%u.%u packets=%u queue_peak=%u resets=%u skipped=%u\n",
+                   (unsigned)elapsed, fps10 / 10U, fps10 % 10U,
+                   nals - sink->report_nals, sink->queue_peak, sink->decoder_resets,
+                   sink->skipped_frames);
+        rt_kprintf("[" TAG "] elapsed_ms avg/max: queue=%u/%u decode=%u/%u present=%u/%u\n",
+                   sink->dequeued ? (unsigned)(sink->queue_wait_ms / sink->dequeued) : 0U,
+                   (unsigned)sink->queue_wait_max_ms,
+                   sink->decode_calls ? (unsigned)(sink->decode_ms / sink->decode_calls) : 0U,
+                   (unsigned)sink->decode_max_ms,
+                   sink->present_calls ? (unsigned)(sink->present_ms / sink->present_calls) : 0U,
+                   (unsigned)sink->present_max_ms);
+        sink->report_ms = now;
+        sink->report_frames = frames;
+        sink->report_nals = nals;
         return 0;
     }
     if (strcmp(argv[1], "play") == 0) {

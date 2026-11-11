@@ -192,6 +192,10 @@ typedef struct {
     carplay_app_screen_cb_t on_screen;
     void *screen_context;
 
+    airplay_screen_server_stats_t screen_stats;
+    uint32_t screen_sample_ms;
+    uint32_t screen_report_ms;
+    uint32_t screen_report_frames;
     unsigned touch_queued;
     unsigned touch_queue_full;
     unsigned hid_reports_sent;
@@ -730,12 +734,22 @@ static void poll_thread(void *argument)
                 ++app->mdns_errors;
                 APP_LOG("mDNS poll failed rc=%d", mdns_result);
             }
-        } else {
-            /* Wired mode has no responder; still pace the loop. */
-            app->os.sleep_ms(10U);
         }
         carplay_ctrl_tick(app, (uint32_t)app->os.now_ms());
-        (void)airplay_rtsp_server_poll(app->server, 0);
+        /* In wired mode wait for socket readiness, not a fixed sleep before
+         * each recv. Screen headers and bodies need separate readable polls;
+         * pacing every fragment by 10 ms caps throughput and builds latency. */
+        (void)airplay_rtsp_server_poll(app->server,
+                                      app->mdns == NULL ? 10 : 0);
+        /* Snapshot on the owner thread; the shell never dereferences a
+         * screen server that the protocol loop may tear down. */
+        uint32_t sample_ms = (uint32_t)app->os.now_ms();
+        if ((uint32_t)(sample_ms - app->screen_sample_ms) >= 100U &&
+            rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK) {
+            airplay_rtsp_server_get_screen_stats(app->server, &app->screen_stats);
+            app->screen_sample_ms = sample_ms;
+            (void)rt_mutex_release(app->lock);
+        }
         drain_touch(app);
         input_bridge_tick(app->bridge, app->os.now_ms());
     }
@@ -1385,6 +1399,24 @@ static int cmd_carplay_status(int argc, char **argv)
     rt_kprintf("carplay touch: queued=%u queue_full=%u HID_sent=%u HID_failed=%u\n",
                s_app.touch_queued, s_app.touch_queue_full,
                s_app.hid_reports_sent, s_app.hid_reports_failed);
+    airplay_screen_server_stats_t screen = {0};
+    if (s_app.lock != NULL && rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK) {
+        screen = s_app.screen_stats;
+        (void)rt_mutex_release(s_app.lock);
+    }
+    uint32_t now = (uint32_t)rt_tick_get_millisecond();
+    uint32_t interval = now - s_app.screen_report_ms;
+    uint32_t delta = screen.frames >= s_app.screen_report_frames ?
+                         screen.frames - s_app.screen_report_frames : screen.frames;
+    unsigned fps10 = interval != 0U ? (unsigned)((uint64_t)delta * 10000U / interval) : 0U;
+    rt_kprintf("carplay screen RX: frames=%u wire_KiB=%u recv_calls=%u interval=%ums fps=%u.%u\n",
+               (unsigned)screen.frames, (unsigned)(screen.wire_bytes / 1024U),
+               (unsigned)screen.recv_calls, (unsigned)interval, fps10 / 10U, fps10 % 10U);
+    rt_kprintf("carplay screen process_us avg/max=%u/%u (includes callback/scheduling)\n",
+               screen.messages ? (unsigned)(screen.process_us / screen.messages) : 0U,
+               (unsigned)screen.process_max_us);
+    s_app.screen_report_ms = now;
+    s_app.screen_report_frames = screen.frames;
     return 0;
 }
 

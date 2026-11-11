@@ -8,6 +8,7 @@
 #include "airplay_audio.h"
 #include "airplay_rtsp_session.h"
 #include "airplay_screen.h"
+#include "airplay_screen_server.h"
 #include "rtcp/net.h"
 #include "rtcp/os.h"
 
@@ -83,6 +84,9 @@ bool airplay_rtsp_server_get_peer(const airplay_rtsp_server_t *server,
 /* Services the RTSP connection and every media endpoint.  timeout_ms bounds
  * the wait for socket activity; 0 polls and returns immediately. */
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms);
+/* Snapshot on the server thread, like the other server APIs. */
+void airplay_rtsp_server_get_screen_stats(const airplay_rtsp_server_t *server,
+                                         airplay_screen_server_stats_t *stats);
 
 /* Sends one encrypted HID report over the event channel.  Returns false when
  * the controller has not attached or the channel has failed.  Like the rest

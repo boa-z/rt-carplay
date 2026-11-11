@@ -18,6 +18,16 @@
  */
 typedef struct airplay_screen_server airplay_screen_server_t;
 
+/* Monotonic elapsed wall time includes callback execution and preemption. */
+typedef struct {
+    uint32_t recv_calls;
+    uint32_t messages;
+    uint32_t frames;
+    uint64_t wire_bytes;
+    uint64_t process_us;
+    uint32_t process_max_us;
+} airplay_screen_server_stats_t;
+
 typedef void (*airplay_screen_server_exit_cb_t)(void *context);
 
 typedef struct {
@@ -40,6 +50,8 @@ int airplay_screen_server_start(const struct rtcp_os *os,
 uint16_t airplay_screen_server_get_port(const airplay_screen_server_t *server);
 int airplay_screen_server_get_fd(const airplay_screen_server_t *server);
 
+void airplay_screen_server_get_stats(const airplay_screen_server_t *server,
+                                      airplay_screen_server_stats_t *stats);
 void airplay_screen_server_poll(airplay_screen_server_t *server);
 void airplay_screen_server_stop(airplay_screen_server_t *server,
                                 const struct rtcp_net *net);

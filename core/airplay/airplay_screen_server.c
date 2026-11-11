@@ -35,7 +35,14 @@ struct airplay_screen_server {
     size_t body_capacity;
     size_t body_len;
     size_t body_expected;
+    airplay_screen_server_stats_t stats;
 };
+
+static uint64_t screen_now_us(const airplay_screen_server_t *server)
+{
+    return server->os->now_us != NULL ? server->os->now_us()
+                                      : server->os->now_ms() * 1000U;
+}
 
 static uint32_t read_le32(const uint8_t *bytes)
 {
@@ -108,6 +115,8 @@ static void handle_client(airplay_screen_server_t *server)
             fail_server(server, received == 0 ? "peer_closed" : "header_read");
             return;
         }
+        ++server->stats.recv_calls;
+        server->stats.wire_bytes += (size_t)received;
         server->header_len += (size_t)received;
         if (server->header_len < sizeof(server->header)) return;
 
@@ -129,16 +138,22 @@ static void handle_client(airplay_screen_server_t *server)
             fail_server(server, received == 0 ? "peer_closed" : "body_read");
             return;
         }
+        ++server->stats.recv_calls;
+        server->stats.wire_bytes += (size_t)received;
         server->body_len += (size_t)received;
         if (server->body_len < server->body_expected) return;
     }
 
-    uint64_t arrival_us = server->os->now_us != NULL
-                              ? server->os->now_us()
-                              : server->os->now_ms() * 1000U;
+    uint64_t arrival_us = screen_now_us(server);
     int result = airplay_screen_stream_process(
         server->stream, server->header, server->body, server->body_len,
         server->body_capacity, arrival_us);
+    uint64_t process_us = screen_now_us(server) - arrival_us;
+    ++server->stats.messages;
+    server->stats.process_us += process_us;
+    if (process_us > server->stats.process_max_us)
+        server->stats.process_max_us = process_us > UINT32_MAX ? UINT32_MAX : (uint32_t)process_us;
+    if (result == RTCP_OK && server->header[4] == 0U) ++server->stats.frames;
     if (result != RTCP_OK) {
         RTCP_LOGW(TAG, "screen_message=discarded opcode=%u rc=%d",
                   (unsigned)server->header[4], result);
@@ -219,6 +234,14 @@ int airplay_screen_server_get_fd(const airplay_screen_server_t *server)
     if (server == NULL || server->failed) return -1;
     if (server->client_fd >= 0) return server->client_fd;
     return server->listener_fd;
+}
+
+void airplay_screen_server_get_stats(const airplay_screen_server_t *server,
+                                      airplay_screen_server_stats_t *stats)
+{
+    if (stats == NULL) return;
+    if (server == NULL) memset(stats, 0, sizeof(*stats));
+    else *stats = server->stats;
 }
 
 void airplay_screen_server_poll(airplay_screen_server_t *server)

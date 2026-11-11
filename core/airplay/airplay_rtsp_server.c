@@ -879,6 +879,13 @@ bool airplay_rtsp_server_send_hid_report(airplay_rtsp_server_t *server,
                                               report, report_len);
 }
 
+void airplay_rtsp_server_get_screen_stats(const airplay_rtsp_server_t *server,
+                                         airplay_screen_server_stats_t *stats)
+{
+    airplay_screen_server_get_stats(server != NULL ? server->screen_server : NULL,
+                                    stats);
+}
+
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
 {
     if (server == NULL) return RTCP_EINVAL;

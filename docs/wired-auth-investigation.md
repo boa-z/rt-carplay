@@ -288,3 +288,8 @@ counter, so it does not establish a source or decode frame rate. Inbound
 its int millisecond representation in this run; that line alone is not
 proof of a playback scheduling fault. Preserve v17 as the known working
 picture/touch baseline before performance changes.
+
+The first performance follow-up is documented in wired-video-performance.md.
+V18 removes the fixed wired sleep per recv, schedules the decoder ahead of the
+producer, coalesces already decoded output and adds stage statistics. These
+changes preserve the v17 authentication/touch fixes and do not modify IPHETH.

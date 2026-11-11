@@ -11,11 +11,14 @@
 static unsigned slots, decoded, destroyed, delays;
 static unsigned last_config_size;
 static bool pressure;
+static unsigned render_remaining, render_id, returned[16], return_count;
+static unsigned updates, vsyncs, displayed_id;
 static uint8_t packet_data[1024];
 static const uint8_t config[] = {0,0,0,1,0x67,0x42,0x00,0x1f,0x80,
                                 0,0,0,1,0x68,0xce,0x38,0x80};
 static const uint8_t frame[] = {0,0,0,1,0x65,0xb8,0x80};
 
+uint32_t rt_tick_get_millisecond(void) { return 100; }
 int rt_kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 int rt_mutex_take(rt_mutex_t m, int t) { (void)m; (void)t; return 0; }
 int rt_mutex_release(rt_mutex_t m) { (void)m; return 0; }
@@ -27,7 +30,13 @@ int rt_sem_take(rt_sem_t s, int t) {
 }
 void rt_thread_mdelay(int ms) { (void)ms; assert(++delays < 10); }
 int rt_device_control(rt_device_t d, int cmd, void *arg) {
-    (void)d; (void)cmd; (void)arg; return 0;
+    (void)d;
+    if (cmd == AICFB_UPDATE_LAYER_CONFIG) {
+        struct aicfb_layer_data *layer = arg;
+        if (layer->enable) { ++updates; displayed_id = layer->buf.phy_addr[0]; }
+    }
+    if (cmd == AICFB_WAIT_FOR_VSYNC) ++vsyncs;
+    return 0;
 }
 struct mpp_decoder *mpp_decoder_create(enum mpp_codec_type t) {
     (void)t; return (struct mpp_decoder *)(uintptr_t)1;
@@ -62,10 +71,22 @@ int mpp_decoder_decode(struct mpp_decoder *d) {
     return DEC_OK;
 }
 int mpp_decoder_get_frame(struct mpp_decoder *d, struct mpp_frame *f) {
-    (void)d; (void)f; return DEC_NO_RENDER_FRAME;
+    (void)d;
+    if (!render_remaining) return DEC_NO_RENDER_FRAME;
+    --render_remaining;
+    memset(f, 0, sizeof(*f));
+    f->id = (int)render_id++;
+    f->buf.phy_addr[0] = (unsigned)f->id;
+    f->buf.size.width = 1024;
+    f->buf.size.height = 600;
+    return DEC_OK;
 }
 int mpp_decoder_put_frame(struct mpp_decoder *d, struct mpp_frame *f) {
-    (void)d; (void)f; return DEC_OK;
+    (void)d;
+    assert(return_count < 16);
+    if (f->id == 99) assert(vsyncs == 1); /* old scanout held until swap */
+    returned[return_count++] = (unsigned)f->id;
+    return DEC_OK;
 }
 
 /* Lifecycle is not invoked by the worker regression. */
@@ -89,6 +110,8 @@ static void reset(void) {
     s_sink.decoder = (struct mpp_decoder *)(uintptr_t)1;
     slots = decoded = destroyed = delays = last_config_size = 0;
     pressure = false;
+    render_remaining = return_count = updates = vsyncs = displayed_id = 0;
+    render_id = 1;
 }
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "queue") == 0) {
@@ -126,6 +149,14 @@ int main(int argc, char **argv) {
     assert(s_sink.dropped_nals == 1);
     sink_thread(&s_sink);
     assert(destroyed == 0 && decoded == SINK_QUEUE_LENGTH - 1);
+    reset(); /* Coalesce decoded backlog, preserve hardware scanout lifetime. */
+    s_sink.have_frame = true;
+    s_sink.held.id = 99;
+    render_remaining = 3;
+    assert(drain_frames(&s_sink) == 3);
+    assert(updates == 1 && vsyncs == 1 && displayed_id == 3);
+    assert(return_count == 3 && returned[0] == 1 && returned[1] == 2 && returned[2] == 99);
+    assert(s_sink.frame_count == 1 && s_sink.skipped_frames == 2 && s_sink.held.id == 3);
     puts("Luban-Lite actual video sink regression passed");
     return 0;
 }

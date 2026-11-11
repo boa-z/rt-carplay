@@ -106,9 +106,17 @@ void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
             /* Keep sampling each second; UART needs only an occasional
              * successful sample, especially while decoding live video. */
             if (now_us >= port->next_sample_log_us) {
-                RTCP_LOGD(TAG, "clock_sample rtt_ms=%d offset_ms=%d",
-                          (int)(round_trip_seconds * 1000.0),
-                          (int)(offset_seconds * 1000.0));
+                /* Peer uptime offsets can exceed signed-int milliseconds.
+                 * Print seconds plus fractional milliseconds without an
+                 * out-of-range floating-to-int conversion. */
+                double magnitude = offset_seconds < 0.0 ? -offset_seconds : offset_seconds;
+                unsigned seconds = (unsigned)magnitude;
+                unsigned fraction = (unsigned)((magnitude - seconds) * 1000.0);
+                unsigned rtt_ms = round_trip_seconds >= (double)UINT32_MAX / 1000.0 ?
+                    UINT32_MAX : (unsigned)(round_trip_seconds * 1000.0);
+                RTCP_LOGD(TAG, "clock_sample rtt_ms=%u offset_s=%s%u.%03u",
+                          rtt_ms,
+                          offset_seconds < 0.0 ? "-" : "", seconds, fraction);
                 port->next_sample_log_us = now_us + UINT64_C(30000000);
             }
             port->request_pending = false;

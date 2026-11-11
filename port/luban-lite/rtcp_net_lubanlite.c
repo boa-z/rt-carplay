@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * Wired CarPlay network seam: read the IPv6 link-local address that the
- * CherryUSB CDC-NCM host glue ("platform/rtthread/usbh_lwip.c") puts on the
- * RT-Thread netdev "u1".
+ * selected RT-Thread Ethernet device exposes (for example IPHETH "i0").
+ * The application uses only the public lwIP network interface API.
  *
  * No socket code lives here: the AirPlay net seam owns transport.  This file
  * only answers "is the wired netif up, and which link-local address must
@@ -24,8 +24,21 @@
 #include "lwip/netif.h"
 #include "lwip/tcpip.h"
 
-/* Must match eth_device_init(&g_cdc_ncm_dev, "u1") in the CherryUSB glue. */
-#define WIRED_NETIF_NAME "u1"
+/* RT-Thread displays the two-character device name; lwIP netif_find()
+ * additionally interprets a numeric suffix. Iterate the list so the selected
+ * device is found even when Wi-Fi/loopback registered before it. */
+#ifndef RTCARPLAY_WIRED_NETIF
+#define RTCARPLAY_WIRED_NETIF "i0"
+#endif
+static struct netif *wired_netif(void)
+{
+    const char *name = RTCARPLAY_WIRED_NETIF;
+    if (strlen(name) != 2U) return NULL;
+    for (struct netif *n = netif_list; n != NULL; n = n->next) {
+        if (n->name[0] == name[0] && n->name[1] == name[1]) return n;
+    }
+    return NULL;
+}
 
 static bool wired_netif_is_up(struct netif *netif)
 {
@@ -36,7 +49,7 @@ bool rtcp_lubanlite_wired_net_up(void)
 {
     bool up;
     LOCK_TCPIP_CORE();
-    up = wired_netif_is_up(netif_find(WIRED_NETIF_NAME));
+    up = wired_netif_is_up(wired_netif());
     UNLOCK_TCPIP_CORE();
     return up;
 }
@@ -50,7 +63,7 @@ bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid)
     address[0] = '\0';
 
     LOCK_TCPIP_CORE();
-    struct netif *netif = netif_find(WIRED_NETIF_NAME);
+    struct netif *netif = wired_netif();
     if (wired_netif_is_up(netif)) {
         for (u8_t i = 0U; i < LWIP_IPV6_NUM_ADDRESSES; ++i) {
             const ip6_addr_t *entry = netif_ip6_addr(netif, i);

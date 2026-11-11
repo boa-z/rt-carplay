@@ -31,17 +31,12 @@
 extern const rtcp_usb_t rtcp_usb_lubanlite;
 
 /*
- * Wired CarPlay network helpers.  When the phone's CarPlay configuration
- * exposes the CDC-NCM function, CherryUSB's host glue registers the
- * RT-Thread netdev "u1" and lwIP gives it an IPv6 link-local address.  That
- * address is what CarPlayStartSession advertises on the wired link; the
- * references send exactly one IPv6 link-local address there.
- *
- * net_up() is true when the NCM netif exists, is up and its link is up.
- * ipv6() copies the netif's link-local address in presentation form
- * (no zone).  valid reports whether duplicate-address detection has
- * completed; a tentative address is returned but must not be advertised as
- * ready.  Both return false when IPv6 or the NCM netdev is not available.
+ * Wired CarPlay network helpers query the RT-Thread Ethernet device named
+ * by RTCARPLAY_WIRED_NETIF (default i0 for external cherryusb-ipheth; u1 can
+ * select a CDC-NCM device). No private USB Ethernet driver API is used.
+ * net_up() requires administrative and carrier up. ipv6() copies a link-local
+ * address without zone; valid indicates completed duplicate-address detection.
+ * Both return false when IPv6 or the selected device is unavailable.
  */
 bool rtcp_lubanlite_wired_net_up(void);
 bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid);

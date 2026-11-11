@@ -888,8 +888,8 @@ static int cmd_net(void)
         if (apple_ethernet && !ncm_link && !up) {
             rt_kprintf("[carplay_usb] net: the selected configuration has "
                        "Apple Ethernet (ff/fd/01) and no standard CDC-NCM; "
-                       "the existing NCM netif cannot come up until that "
-                       "function is driven\n");
+                       "check external IPHETH registration, trust/carrier and "
+                       "RTCARPLAY_WIRED_NETIF (default i0)\n");
         } else if (ncm_link && !up) {
             rt_kprintf("[carplay_usb] net: the selected configuration has "
                        "CDC-NCM but the NCM netif is down; check "

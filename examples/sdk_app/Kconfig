@@ -23,6 +23,13 @@ config RTCARPLAY_DIR
       absolute.  The default points at the usual package location; a symlink
       is fine.
 
+config RTCARPLAY_WIRED_NETIF
+    string "Wired Ethernet device name (two characters)"
+    default "i0"
+    help
+      RT-Thread Ethernet device used for wired IPv6, e.g. i0 for external
+      cherryusb-ipheth or u1 for CDC-NCM. No private driver API is required.
+
 config RTCARPLAY_SCREEN_WIDTH
     int "AirPlay display width (must match the panel)"
     default 1024
@@ -132,7 +139,8 @@ config RTCARPLAY_USB_HOST
       CONFIG_AIC_USING_USB1_HOST.
 
       This stage only proves enumeration, descriptor identification and the
-      bulk pipe.  CDC-NCM (LPKG_CHERRYUSB_HOST_NCM) and lwIP IPv6 are
+      bulk pipe. An Ethernet host driver (for Apple ff/fd/01 use external
+      cherryusb-ipheth) and lwIP IPv6 are
       required later for the wired AirPlay IP link.
 
 config RTCARPLAY_BT

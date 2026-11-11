@@ -411,3 +411,15 @@ close; those hardware conclusions remain open. No IPHETH framing, USBMUX wire
 sequence, TLS version, MFi response format or RTSP frame-size policy changes
 are included. All 48 host tests, platform boundary, actual-port sanitizer
 regression, and independent peer crypto checks passed.
+
+
+## V14 board result: service succeeds, authentication close repeats
+
+Service TLS opens successfully, iAP2 authenticates, and the phone again closes
+RTSP about 25 ms after the auth response, with no media SETUP. Investigation
+then identifies the SDK's silent no-op native AES-CTR backend, which the prior
+software-AES interop check did not cover. See the
+[backend investigation](wired-auth-investigation.md#v14-hardware-result-and-sdk-aes-ctr-defect)
+for the source chain, deterministic reproduction and separate SDK correction.
+The responder now validates its real AES-CTR backend with a NIST known-answer
+check before replying. No control-channel framing change is part of this fix.

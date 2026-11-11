@@ -387,7 +387,7 @@ static int mfi_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
     }
     if (pos != 0U) challenge_head[pos - 1U] = '\0';
 
-    RTCP_LOGI("mfi", "signature %u bytes (challenge %u bytes head=%s)",
+    RTCP_LOGI("mfi", "signature %u bytes (challenge %u bytes; signature head=%s)",
               (unsigned)*sig_len, (unsigned)len, challenge_head);
     return RTCP_OK;
 }

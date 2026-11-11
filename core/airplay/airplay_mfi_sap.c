@@ -240,6 +240,34 @@ static int encrypt_signature(const uint8_t key[16], const uint8_t iv[16],
     return rc;
 }
 
+/* NIST SP 800-38A F.5.1, first AES-128-CTR block. Check the actual
+ * platform primitive before trusting a successful return code: some ALT
+ * backends expose a native CTR function which silently does no encryption. */
+static bool aes_ctr_known_answer(void)
+{
+    static const uint8_t key[16] = {
+        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
+        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+    };
+    static const uint8_t iv[16] = {
+        0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,
+        0xf8,0xf9,0xfa,0xfb,0xfc,0xfd,0xfe,0xff
+    };
+    static const uint8_t plain[16] = {
+        0x6b,0xc1,0xbe,0xe2,0x2e,0x40,0x9f,0x96,
+        0xe9,0x3d,0x7e,0x11,0x73,0x93,0x17,0x2a
+    };
+    static const uint8_t expected[16] = {
+        0x87,0x4d,0x61,0x91,0xb6,0x20,0xe3,0x26,
+        0x1b,0xef,0x68,0x64,0x99,0x0d,0xb6,0xce
+    };
+    uint8_t output[16];
+    bool valid = encrypt_signature(key, iv, plain, sizeof(plain), output) == 0 &&
+                 memcmp(output, expected, sizeof(output)) == 0;
+    mbedtls_platform_zeroize(output, sizeof(output));
+    return valid;
+}
+
 airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     const uint8_t *request,
     size_t request_len,
@@ -274,6 +302,13 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     if (required > response_capacity) {
         mbedtls_platform_zeroize(certificate, sizeof(certificate));
         return AIRPLAY_MFI_SAP_BUFFER_TOO_SMALL;
+    }
+
+    bool aes_valid = aes_ctr_known_answer();
+    RTCP_LOGI(TAG, "auth_setup=aes_ctr_check verified=%u", (unsigned)aes_valid);
+    if (!aes_valid) {
+        mbedtls_platform_zeroize(certificate, sizeof(certificate));
+        return AIRPLAY_MFI_SAP_CRYPTO_FAILED;
     }
 
     uint8_t accessory_public_key[MFI_SAP_PUBLIC_KEY_BYTES] = {0};

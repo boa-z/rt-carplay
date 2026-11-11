@@ -119,3 +119,51 @@ after the authentication response. The confirmed race is repaired, but it is
 not a proven explanation of that close. Further resolution needs the actual
 post-fix service/TLS boundary or a device/reference trace, rather than another
 round of gateway ping or arbitrary protocol variations.
+
+
+## V14 hardware result and SDK AES-CTR defect
+
+The supplied v14 run successfully opens the service TLS stream, completes iAP2
+MFi authentication/identification, and again exchanges the same six RTSP
+requests. The phone closes at 1508 ms, about 25 ms after the handled auth-setup
+response (1076-byte body, 1166-byte plaintext, 1202-byte wire, two frames).
+IPHETH remains active: RX=187, TX=23, rxerr=1, zero TX/USB errors. No media
+SETUP occurs. Thus the repaired USB timeout race is not an established cause
+of the repeatable auth-response boundary.
+
+Further inspection finds that the real SDK enables MBEDTLS_AES_ALT through
+RT_HWCRYPTO_USING_AES, while native AES-CTR is disabled. Its ALT CTR function
+still selects HWCRYPTO_TYPE_AES_CTR. The CE driver's native CTR case is empty
+and returns RT_EOK. Depending on alignment handling, this silently leaves the
+output untouched or copies unchanged input. This is a concrete failure in the
+actual encryption path, and explains why local pre-encryption RSA verification
+can succeed while the phone cannot verify the encrypted signature. The earlier
+Python/OpenSSL checks used software AES; their success did not cover this
+platform backend. That validation gap is now addressed explicitly.
+
+The separate SDK fix composes CTR from working AES-ECB, following mbedTLS's
+standard counter/keystream mechanism, and rejects raw unsupported CE CTR calls.
+Actual-ALT host regressions reproduce the old silent success and test the
+correction under ASan/UBSan using NIST vectors, signature-sized input, partial
+calls, counter carry/wrap and failure propagation.
+
+The responder now checks NIST SP 800-38A F.5.1's first block with its actual
+runtime backend before producing a response, logging
+`auth_setup=aes_ctr_check verified=1`. On failure it returns a crypto error
+rather than sending a misleading successful auth body. A host regression
+compiles the actual responder with a no-op-success backend and verifies that
+it rejects that backend, emits no response and never requests a signature.
+The MFi port log also now labels the signature prefix as such; its previous
+"challenge ... head" wording actually printed signature bytes on success.
+
+This identifies and fixes an encryption-path defect with direct relevance to
+the observed boundary. Phone acceptance and media setup remain hardware
+validation items, rather than implied by the software reproduction.
+
+
+The corrected SDK and responder were validated together by a complete D213
+firmware build. All 49 application Host tests (including backend rejection)
+and the boundary check passed, as did the independent Python/OpenSSL peer
+checks and both original/patched actual-ALT ASan/UBSan tests. These results
+establish the backend correction and integration; they do not claim a
+successful on-phone media session before the next hardware result.

@@ -76,6 +76,9 @@ typedef struct {
     uint32_t peer_minor;
     uint32_t rx_bytes;
     uint32_t rx_frames;
+    uint32_t control_count;
+    uint8_t control_type;
+    char control_text[65]; /* printable, bounded diagnostic; never TCP data */
     bool started;
     rtcp_usbmux_connection_t connections[RTCP_USBMUX_MAX_CONNECTIONS];
     uint8_t reassembly[RTCP_USBMUX_REASSEMBLY_CAPACITY];
@@ -122,6 +125,14 @@ int rtcp_usbmux_connection_send(rtcp_usbmux_host_t *host,
 int rtcp_usbmux_connection_recv(rtcp_usbmux_host_t *host,
                                 rtcp_usbmux_connection_t *connection,
                                 void *data, size_t capacity);
+
+/* Blocking stream read: unrelated/ACK-only frames do not end the wait.
+ * clock_ms is a monotonic modulo-2^32 millisecond clock. */
+int rtcp_usbmux_connection_read_wait(rtcp_usbmux_host_t *host,
+                                    rtcp_usbmux_connection_t *connection,
+                                    void *data, size_t capacity,
+                                    uint32_t timeout_ms,
+                                    uint32_t (*clock_ms)(void *), void *clock_user);
 
 /* Send FIN and release the slot. */
 void rtcp_usbmux_connection_close(rtcp_usbmux_host_t *host,

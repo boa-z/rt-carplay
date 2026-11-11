@@ -27,6 +27,11 @@ static int send_tcp(rtcp_usbmux_host_t *host,
     }
     host->tx_frame[14] = (uint8_t)(host->rx_index >> 8U);
     host->tx_frame[15] = (uint8_t)host->rx_index;
+    if (host->tx_index <= 4U)
+        RTCP_LOGI(USBMUX_HOST_TAG, "tx mux=%u port=%u flags=%02x seq=%u ack=%u bytes=%u",
+                  (unsigned)host->tx_index, (unsigned)connection->remote_port,
+                  (unsigned)flags, (unsigned)connection->tx_sequence,
+                  (unsigned)connection->tx_acknowledgment, (unsigned)payload_length);
     ++host->tx_index;
     return host->transport.send(host->transport.user, host->tx_frame,
                                 frame_length);
@@ -277,15 +282,26 @@ int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
                           (unsigned)host->rx_index);
             if (proto == RTCP_USBMUX_PROTO_TCP) {
                 if (host->rx_frames < 3U)
-                    RTCP_LOGI(USBMUX_HOST_TAG, "tcp src=%u dst=%u flags=%02x",
+                    RTCP_LOGI(USBMUX_HOST_TAG, "tcp src=%u dst=%u flags=%02x seq=%u ack=%u",
                               (unsigned)((uint16_t)payload[0] << 8U | payload[1]),
                               (unsigned)((uint16_t)payload[2] << 8U | payload[3]),
-                              (unsigned)payload[13]);
+                              (unsigned)payload[13], (unsigned)read_be32(payload + 4U),
+                              (unsigned)read_be32(payload + 8U));
                 handle_tcp(host, payload, payload_length);
             } else if (proto == RTCP_USBMUX_PROTO_CONTROL) {
+                ++host->control_count;
+                host->control_type = payload_length ? payload[0] : 0U;
+                size_t text_length = payload_length ? payload_length - 1U : 0U;
+                if (text_length >= sizeof(host->control_text))
+                    text_length = sizeof(host->control_text) - 1U;
+                for (size_t i = 0; i < text_length; ++i) {
+                    uint8_t c = payload[i + 1U];
+                    host->control_text[i] = c >= 32U && c <= 126U ? (char)c : '.';
+                }
+                host->control_text[text_length] = '\0';
                 RTCP_LOGW(USBMUX_HOST_TAG, "device control type=%u bytes=%u",
-                          payload_length ? (unsigned)payload[0] : 0U,
-                          (unsigned)payload_length);
+                          (unsigned)host->control_type, (unsigned)payload_length);
+                RTCP_LOGW(USBMUX_HOST_TAG, "control text: %s", host->control_text);
             }
         }
         ++host->rx_frames;
@@ -421,6 +437,26 @@ int rtcp_usbmux_connection_recv(rtcp_usbmux_host_t *host,
         return RTCP_ESTATE;
     }
     return 0;
+}
+
+int rtcp_usbmux_connection_read_wait(rtcp_usbmux_host_t *host,
+                                    rtcp_usbmux_connection_t *connection,
+                                    void *data, size_t capacity,
+                                    uint32_t timeout_ms,
+                                    uint32_t (*clock_ms)(void *), void *clock_user)
+{
+    if (!host || !clock_ms) return RTCP_EINVAL;
+    if (capacity == 0U) return 0;
+    uint32_t start = clock_ms(clock_user);
+    for (;;) {
+        int received = rtcp_usbmux_connection_recv(host, connection, data, capacity);
+        if (received != 0) return received;
+        uint32_t now = clock_ms(clock_user);
+        uint32_t elapsed = now - start;
+        if (elapsed >= timeout_ms) return RTCP_ETIMEDOUT;
+        int ret = rtcp_usbmux_pump(host, timeout_ms - elapsed, now);
+        if (ret < 0) return ret;
+    }
 }
 
 void rtcp_usbmux_connection_close(rtcp_usbmux_host_t *host,

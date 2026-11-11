@@ -220,6 +220,50 @@ static int mux_transport_recv(void *user, uint8_t *data, size_t capacity,
         capacity, timeout_ms);
 }
 
+#define LOCKDOWN_CONNECTIONS 2U
+
+typedef struct {
+    bool used;
+    rtcp_usbmux_connection_t *connection;
+} lockdown_connection_t;
+
+static lockdown_connection_t s_lockdown_connections[LOCKDOWN_CONNECTIONS];
+static rtcp_lockdown_session_t s_lockdown_session;
+static rtcp_pair_record_t s_pair_record;
+
+static uint32_t lockdown_now_ms(void)
+{
+    return (uint32_t)rt_tick_get_millisecond();
+}
+
+static uint32_t lockdown_clock_ms(void *user)
+{
+    (void)user;
+    return lockdown_now_ms();
+}
+
+static int lockdown_connection_read(void *context, void *data, size_t length,
+                                    uint32_t timeout_ms)
+{
+    lockdown_connection_t *slot = context;
+    return rtcp_usbmux_connection_read_wait(&s_mux, slot->connection, data,
+                                           length, timeout_ms,
+                                           lockdown_clock_ms, NULL);
+}
+
+static int lockdown_connection_write(void *context, const void *data,
+                                     size_t length)
+{
+    lockdown_connection_t *slot = context;
+
+    return rtcp_usbmux_connection_send(&s_mux, slot->connection, data, length);
+}
+
+static const rtcp_stream_ops_t lockdown_connection_ops = {
+    .read = lockdown_connection_read,
+    .write = lockdown_connection_write,
+};
+
 static int cmd_mux(void)
 {
     static rtcp_usb_device_t device;
@@ -286,45 +330,18 @@ static int cmd_mux(void)
         rtcp_usbmux_connection_close(&s_mux, connection);
         return 0;
     }
-    ret = rtcp_usbmux_connection_send(&s_mux, connection, request,
-                                      request_length);
-    rt_kprintf("[carplay_usb] mux: GetValue sent ret=%d bytes=%u\n", ret,
-               (unsigned)request_length);
-    if (ret < 0) {
-        rtcp_usbmux_connection_close(&s_mux, connection);
-        return 0;
-    }
-
+    /* Use the same four-byte big-endian plist framing as pairing. Sending
+     * bare XML directly to a Lockdown stream is not a valid request. */
+    lockdown_connection_t slot = {.used = true, .connection = connection};
+    rtcp_stream_t stream = {.ops = &lockdown_connection_ops, .context = &slot};
     size_t reply_length = 0U;
-    bool complete = false;
-    for (unsigned elapsed = 0U; elapsed < 5000U; elapsed += 200U) {
-        ret = rtcp_usbmux_pump(&s_mux, 200U, elapsed);
-        if (ret < 0) {
-            rt_kprintf("[carplay_usb] mux: pump ret=%d\n", ret);
-            break;
-        }
-        int received;
-        do {
-            size_t space = sizeof(s_mux_reply) - 1U - reply_length;
-            if (space == 0U) {
-                break;
-            }
-            received = rtcp_usbmux_connection_recv(
-                &s_mux, connection, s_mux_reply + reply_length, space);
-            if (received > 0) {
-                reply_length += (size_t)received;
-            }
-        } while (received > 0 && reply_length < sizeof(s_mux_reply) - 1U);
-        s_mux_reply[reply_length] = '\0';
-        if (reply_length != 0U &&
-            strstr((const char *)s_mux_reply, "</plist>") != NULL) {
-            complete = true;
-            break;
-        }
-    }
-
+    ret = rtcp_lockdown_exchange(&stream, request, request_length, s_mux_reply,
+                                  sizeof(s_mux_reply) - 1U, &reply_length, 5000U);
+    s_mux_reply[reply_length] = '\0';
+    rt_kprintf("[carplay_usb] mux: GetValue exchange ret=%d bytes=%u\n",
+               ret, (unsigned)request_length);
     rt_kprintf("[carplay_usb] mux: reply bytes=%u complete=%u\n",
-               (unsigned)reply_length, complete ? 1U : 0U);
+               (unsigned)reply_length, ret == RTCP_OK ? 1U : 0U);
     if (reply_length != 0U) {
         char version[32];
         if (rtcp_lockdown_extract_string(s_mux_reply, reply_length, "Value",
@@ -340,57 +357,6 @@ static int cmd_mux(void)
 /* ------------------------------------------------------------------ */
 /* Wired lockdown pairing and carkit service                           */
 /* ------------------------------------------------------------------ */
-
-#define LOCKDOWN_CONNECTIONS 2U
-
-typedef struct {
-    bool used;
-    rtcp_usbmux_connection_t *connection;
-} lockdown_connection_t;
-
-static lockdown_connection_t s_lockdown_connections[LOCKDOWN_CONNECTIONS];
-static rtcp_lockdown_session_t s_lockdown_session;
-static rtcp_pair_record_t s_pair_record;
-
-static uint32_t lockdown_now_ms(void)
-{
-    return (uint32_t)rt_tick_get_millisecond();
-}
-
-static int lockdown_connection_read(void *context, void *data, size_t length,
-                                    uint32_t timeout_ms)
-{
-    lockdown_connection_t *slot = context;
-    int received = rtcp_usbmux_connection_recv(&s_mux, slot->connection, data,
-                                               length);
-
-    if (received != 0) {
-        return received;
-    }
-    int ret = rtcp_usbmux_pump(&s_mux, timeout_ms, lockdown_now_ms());
-    if (ret < 0) {
-        return ret;
-    }
-    received = rtcp_usbmux_connection_recv(&s_mux, slot->connection, data,
-                                           length);
-    if (received != 0) {
-        return received;
-    }
-    return RTCP_ETIMEDOUT;
-}
-
-static int lockdown_connection_write(void *context, const void *data,
-                                     size_t length)
-{
-    lockdown_connection_t *slot = context;
-
-    return rtcp_usbmux_connection_send(&s_mux, slot->connection, data, length);
-}
-
-static const rtcp_stream_ops_t lockdown_connection_ops = {
-    .read = lockdown_connection_read,
-    .write = lockdown_connection_write,
-};
 
 static int lockdown_open_connection(void *user, uint16_t port,
                                     rtcp_stream_t *stream)

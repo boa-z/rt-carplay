@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "usbmux_host.h"
+#include "lockdown.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -22,6 +23,7 @@ typedef struct {
     fake_packet_t received[FAKE_RX_MAX];
     unsigned received_count;
     unsigned received_read;
+    uint32_t now_ms;
 } fake_transport_t;
 
 static int fake_send(void *user, const uint8_t *data, size_t length)
@@ -38,11 +40,12 @@ static int fake_send(void *user, const uint8_t *data, size_t length)
 static int fake_recv(void *user, uint8_t *data, size_t capacity,
                      uint32_t timeout_ms)
 {
-    (void)timeout_ms;
     fake_transport_t *fake = user;
     if (fake->received_read >= fake->received_count) {
+        fake->now_ms += timeout_ms;
         return RTCP_ETIMEDOUT;
     }
+    ++fake->now_ms;
     const fake_packet_t *packet = &fake->received[fake->received_read++];
     assert(packet->length <= capacity);
     memcpy(data, packet->data, packet->length);
@@ -490,6 +493,94 @@ static void test_peer_header_fields(void)
     assert(host.rx_frames == 2); /* control is not delivered as TCP */
 }
 
+static uint32_t fake_clock(void *user)
+{
+    return ((fake_transport_t *)user)->now_ms;
+}
+
+struct stream_bridge {
+    rtcp_usbmux_host_t *host;
+    rtcp_usbmux_connection_t *connection;
+    fake_transport_t *fake;
+};
+static int bridge_read(void *context, void *data, size_t n, uint32_t timeout_ms)
+{
+    struct stream_bridge *b = context;
+    return rtcp_usbmux_connection_read_wait(b->host, b->connection, data, n,
+                                           timeout_ms, fake_clock, b->fake);
+}
+static int bridge_write(void *context, const void *data, size_t n)
+{
+    struct stream_bridge *b = context;
+    return rtcp_usbmux_connection_send(b->host, b->connection, data, n);
+}
+
+static void test_framed_exchange_and_stream_wait(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    start_host(&host, &fake);
+    queue_device_frame(&fake, 62078, 1, 0, 1,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0);
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, 62078, 0, 100, &connection) == RTCP_OK);
+    struct stream_bridge bridge = {&host, connection, &fake};
+    static const rtcp_stream_ops_t ops = {bridge_read, bridge_write};
+    rtcp_stream_t stream = {&ops, &bridge};
+    /* ACK-only traffic and a warning precede a split length-prefixed reply. */
+    queue_device_frame(&fake, 62078, 1, 1, 1, RTCP_USBMUX_TH_ACK, NULL, 0);
+    static const uint8_t control[] = {
+        0,0,0,1, 0,0,0,19, 0xfa,0xce,0xfa,0xce, 0,1,0,1, 5,'o','k'
+    };
+    fake_packet_t *p = &fake.received[fake.received_count++];
+    memcpy(p->data, control, sizeof(control)); p->length = sizeof(control);
+    static const char xml[] = "<plist><dict><key>Value</key><string>test</string></dict></plist>";
+    uint8_t framed[4 + sizeof(xml) - 1] = {0,0,0,sizeof(xml)-1};
+    memcpy(framed + 4, xml, sizeof(xml) - 1);
+    queue_device_frame(&fake, 62078, 1, 1, 1, RTCP_USBMUX_TH_ACK, framed, 2);
+    queue_device_frame(&fake, 62078, 1, 3, 1, RTCP_USBMUX_TH_ACK,
+                       framed + 2, sizeof(framed) - 2);
+    uint8_t request[1024], reply[256]; size_t reply_length = 0;
+    size_t n = rtcp_lockdown_build_get_value(request, sizeof(request), "rt-carplay", "ProductVersion");
+    assert(n && n < 65536);
+    unsigned first = fake.sent_count;
+    assert(rtcp_lockdown_exchange(&stream, request, n, reply, sizeof(reply),
+                                   &reply_length, 100) == RTCP_OK);
+    assert(reply_length == sizeof(xml)-1 && !memcmp(reply, xml, reply_length));
+    rtcp_usbmux_tcp_packet_t prefix = sent_tcp(&fake, first);
+    assert(prefix.payload_length == 4 && prefix.payload[0] == 0 && prefix.payload[1] == 0);
+    assert(((size_t)prefix.payload[2] << 8 | prefix.payload[3]) == n);
+    rtcp_usbmux_tcp_packet_t body = sent_tcp(&fake, first + 1);
+    assert(body.payload_length == n && !memcmp(body.payload, request, n));
+    assert(body.sequence == prefix.sequence + 4);
+    assert(host.control_type == 5 && !strcmp(host.control_text, "ok"));
+    /* No-data wait respects the clock, including unsigned tick wrap. */
+    fake.now_ms = UINT32_MAX - 20U;
+    assert(bridge_read(&bridge, reply, sizeof(reply), 50) == RTCP_ETIMEDOUT);
+    assert(fake.now_ms == 29U);
+    rtcp_usbmux_connection_close(&host, connection);
+}
+
+static void test_control_diagnostic_bounds(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    start_host(&host, &fake);
+    fake_packet_t *p = &fake.received[fake.received_count++];
+    memset(p->data, 'x', 117);
+    static const uint8_t header[17] = {0,0,0,1, 0,0,0,117, 0,0,0,0, 0,0,0,0, 3};
+    memcpy(p->data, header, sizeof(header)); p->data[18] = '\n';
+    p->length = 117;
+    assert(rtcp_usbmux_pump(&host, 100, 0) == 1);
+    assert(host.control_count == 1 && host.control_type == 3);
+    assert(strlen(host.control_text) == 64 && host.control_text[1] == '.');
+    /* An empty CONTROL clears stale diagnostic text without dereferencing it. */
+    p = &fake.received[fake.received_count++];
+    memcpy(p->data, header, 16); p->data[7] = 16; p->length = 16;
+    assert(rtcp_usbmux_pump(&host, 100, 0) == 1);
+    assert(host.control_type == 0 && host.control_text[0] == 0);
+}
+
 static void test_optional_reply_padding(void)
 {
     static rtcp_usbmux_host_t host;
@@ -534,6 +625,8 @@ int main(void)
     test_version_negotiation();
     test_mux_sequence_echo();
     test_peer_header_fields();
+    test_framed_exchange_and_stream_wait();
+    test_control_diagnostic_bounds();
     puts("usbmux host test passed");
     return 0;
 }

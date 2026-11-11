@@ -176,3 +176,46 @@ bytes/two frames. Separate tests retain rejection of unknown protocols and
 undersized TCP headers and acceptance of CONTROL without TCP dispatch. These
 are constructed regression vectors, not bytes captured from this iPhone.
 The source-backed RX correction still requires board confirmation.
+
+## V10 result and framed GetValue exchange
+
+The supplied v10 reply is now identified: protocol 6, length 36, peer third
+word `faceface`, source port 62078, destination port 1, flags 12 (SYN|ACK).
+Lockdown stream establishment returns 0. This confirms that the earlier
+symmetric 0xfeedface RX requirement rejected a valid peer header.
+
+After `GetValue sent ... bytes=317`, the phone emits CONTROL type 3 with
+46 payload bytes, and no XML reply. Type 3 is a mux-level error in usbmuxd's
+`device_control_input`, not a Lockdown plist `Error` or proof of trust refusal.
+The old diagnostic omitted its 45 bytes of text, so its actual reason remains
+unknown. V11 retains the type/count and up to 64 sanitized printable text bytes,
+printing that diagnostic on a separate bounded line. It does not dump TCP,
+TLS, certificate or pair-record payloads. Like usbmuxd, it does not assume that
+one CONTROL packet means all connections must be reset.
+
+A definite smoke-command defect was found independently of the missing error
+text: `cmd_mux` sent the XML document directly over the stream. Lockdown
+requires a four-byte big-endian length before the document. The reference is
+libimobiledevice `src/property_list_service.c`, `internal_plist_send`, at
+fa0f79190142bc309307967c058f89c1b36eb6b8: it writes `htobe32(length)` and then
+the content. Our pairing path already uses `rtcp_lockdown_exchange` with that
+framing, but the smoke command bypassed it. V11 reuses that same function for
+GetValue, including bounded length-prefixed reply reading. The bad request is
+corrected; without the actual CONTROL text it is not yet proven to be the
+cause of the observed type-3 error.
+
+The shared stream reader also previously returned a timeout if one successful
+pump delivered only an ACK or unrelated frame. The portable
+`rtcp_usbmux_connection_read_wait` now waits for this connection's bytes up to
+an injected monotonic clock deadline; the command and pairing both use it.
+Initial TCP diagnostics include seq/ack on RX and the first few TX headers so
+an actual mux/TCP error can be distinguished from plist framing failure.
+
+The regression combines the actual mux host and Lockdown exchange with a fake
+peer: an ACK-only packet and CONTROL warning precede a reply whose four-byte
+prefix is split across TCP frames. It verifies the outgoing prefix/document,
+stream sequence advance, correct reply extraction, no false timeout and clock
+wrap. Separate tests bound/sanitize/truncate CONTROL text and clear stale
+text on an empty CONTROL. Plain and logging-enabled ASan/UBSan builds exercise
+these paths. Real device error text and successful GetValue still require the
+v11 board run. The independent Ethernet driver remains unchanged.

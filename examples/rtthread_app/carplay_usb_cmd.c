@@ -886,10 +886,8 @@ static int cmd_net(void)
     } else {
         rt_kprintf("[carplay_usb] net: ipv6=unavailable\n");
         if (apple_ethernet && !ncm_link && !up) {
-            rt_kprintf("[carplay_usb] net: the selected configuration has "
-                       "Apple Ethernet (ff/fd/01) and no standard CDC-NCM; "
-                       "check external IPHETH registration, trust/carrier and "
-                       "RTCARPLAY_WIRED_NETIF (default i0)\n");
+            rt_kprintf("[carplay_usb] net: Apple Ethernet selected; "
+                       "run ipheth_status for RX readiness and carrier\n");
         } else if (ncm_link && !up) {
             rt_kprintf("[carplay_usb] net: the selected configuration has "
                        "CDC-NCM but the NCM netif is down; check "

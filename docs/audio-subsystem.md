@@ -27,14 +27,14 @@ No Apple private SDK or authentication material is introduced.
 ## Downlink currently implemented
 
 `RTSP SETUP -> ChaCha20-Poly1305 RTP authentication/replay filter -> bounded
-per-type jitter queue -> audio worker -> AAC-LC/Opus/LPCM decode -> resample
+per-role jitter queue -> audio worker -> AAC-LC/Opus/LPCM decode -> resample
 and mix -> sound0`.
 
 * Exactly one negotiated format bit. LPCM 8/16/24/32/44.1/48 kHz mono/stereo.
 * Optional fixed-point FAAD2 AAC-LC raw access units, stereo 44.1/48 kHz.
 * Optional fixed-point Opus mono decoded at 48 kHz; RTP clock kept separately
   (16/24/48 kHz). No unsupported codec is advertised.
-* 100/101/102 queues are independent (16 x <=4096 bytes each), sorted by
+* Eight semantic 100/101/102 queues are independent (16 x <=4096 bytes each), sorted by
   authenticated RTP timestamp with wrap handling and a 20 ms reorder wait.
 * One audio worker decodes and writes the device; the network uses try-lock
   enqueue and never waits on codec or playback. Contention is a counted drop.
@@ -64,10 +64,14 @@ failed thread startup and repeated cleanup. SDK `scons -j8` also passes with
 These results establish Host behavior and SDK buildability, not iPhone route
 selection, loudspeaker output, microphone wiring or D213 real-time headroom.
 
-Further protocol/resource/uplink work is ongoing; this document is updated
-alongside implementation. The current slot model remains one instance per
-stream type and must not be described as arbitrary same-type multi-session
-support.
+The bounded slot mapping is: 100/default, 101, 102, 100/telephony,
+100/speechRecognition, 100/alert, 100/compatibility, 100/media. A ninth lane
+is reserved for local audio. Multiple roles of type 100 coexist; 101 roles
+share one slot, as do 102 roles. This is a single-controller receiver, not
+arbitrary multi-controller mixing. Extended start/stop callbacks carry the
+role; legacy callbacks remain usable with one stream per type. Selective
+TEARDOWN matches connection ID/role, so stale teardown does not close a new
+stream. A type-only teardown closes every role of that type.
 
 ## Uplink and control implementation progress
 
@@ -98,3 +102,146 @@ and real loopback UDP, decrypt its packets and test PCM/Opus clocking plus
 stop/restart. Synthetic aligned echo attenuation is tested independently;
 this is not measured echo performance on D213. The SDK microphone/AEC build
 is also checked separately from the default configuration.
+
+
+## Feature and verification matrix
+
+| Feature | Implementation | Evidence / boundary |
+| --- | --- | --- |
+| 100/101 LPCM output | Enabled | Host encrypted UDP, endian conversion, actual sink worker model |
+| 102/media AAC-LC output | Enabled with codec dependency | Raw AAC 44.1/48 kHz tests; real iPhone routing awaits board |
+| Mono Opus output/input | Fixed-point decode/encode | 16/24/48 kHz RTP clocks, 48 kHz codec, authenticated loopback input test |
+| Main/alternate/media mixing | Independent queues/decoders, resampling, gain ramps | Numerical and worker tests; nine bounded lanes |
+| Local HMI / critical alerts | Public local PCM enqueue, safety gain priority | Local lane bypasses remote mute/volume; HMI must use this API instead of concurrently writing sound0 |
+| Call/Siri/navigation focus | modesChanged, active-role policy, duck/unduck | State/command tests; no invented remote ownership grant |
+| Microphone | Opt-in dmic0 capture, mono conversion, RTP uplink | Actual worker tested with virtual source; board capture path compile-checked |
+| Siri trigger | carplay_siri -> requestSiri actions 2/3 | Encrypted command, CSeq and binary plist tests |
+| NS/AGC | Speex fixed-point NS, bounded RMS AGC | Host signal tests; acoustic tuning pending |
+| AEC | Optional Speex echo cancellation + mixed output reference | Synthetic aligned echo attenuation test; actual device delay/double-talk not validated |
+| Input mute | Silence encoded at continuous RTP clock | Host sender and worker tests |
+| Reconnect / cleanup | Per-slot generations, consumed key IDs, bounded worker shutdown | Reconnect, startup failure, selective teardown tests; blocked drivers quarantine live resources |
+| Occupancy clock servo | Core API, slew-limited +/-300 ppm | Simulated +/-100 ppm source drift over 120 s; not enabled automatically on sound0 |
+| AAC-ELD | Unavailable, not advertised | Selected FAAD LC-only decoder has no ELD support; LPCM/Opus voice fallback |
+| Main Buffered / Auxiliary / Enhanced Siri | Not advertised | Different buffering/feedback/capability semantics need verified wire evidence |
+| Full take/borrow resource protocol | Not implemented | Incoming state tracked; available references disagree on routing effect of accessory Take |
+| RTCP resend / DAC presentation feedback | Not implemented | Control datagrams drained; no proven resend or hardware presentation-clock contract |
+
+The uplink follows the authenticated AirPlay SETUP peer/dataPort and independent
+Input Encryption Key. It is not Bluetooth HFP. Only one capture worker owns
+dmic0. A competing input SETUP returns 503 without stopping the live input;
+TEARDOWN of the owning stream requests asynchronous stop. A replacement while
+the old worker is still exiting can return 503 and requires a fresh connection
+ID on retry (IDs that could have transmitted are never reused). This is a
+bounded safe fallback, not seamless Siri/call microphone arbitration.
+
+## Reproducible Host checks
+
+Run from the rt-carplay checkout:
+
+```sh
+make -j8 check
+make BUILD=build-pcm AUDIO_CODECS=0 -j8 check
+cmake -S . -B build-cmake -DRTCP_SANITIZE=ON
+cmake --build build-cmake -j8
+ctest --test-dir build-cmake --output-on-failure
+make check-lubanlite-demo check-lubanlite-handoff SDK_ROOT=../luban-lite-jc-carplay-oss
+./check-boundary.sh
+```
+
+CMake and Make each cover 54 test programs. CMake sanitizer mode instruments
+core, tests and the audio dependency libraries with AddressSanitizer; core and
+tests also use UndefinedBehaviorSanitizer. Vendored fixed-point codec/Ed25519
+arithmetic retains intentional signed wrapping/shifts and is excluded from UB
+instrumentation, not from address checking. mbedTLS uses its separate Host
+library build. These tests are not a protocol conformance certification.
+
+Codec-disabled builds advertise only PCM and retain the RMS AGC fallback;
+NS/AEC and AAC/Opus requests do not silently succeed without their dependency.
+
+## Measured Host cost and bounded memory
+
+```sh
+cmake -S . -B build-bench -DRTCP_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+cmake --build build-bench -j8 --target audio_bench
+./build-bench/audio_bench
+```
+
+The benchmark retains assertions even in Release and wraps malloc/calloc/
+realloc/free from linked project/codec objects. Reported heap excludes libc
+internals, thread stacks, RTOS allocations and DMA. The sample run is recorded
+in [audio-host-benchmark.txt](audio-host-benchmark.txt): x86_64 AMD EPYC 7402,
+GCC, optimized generic fixed-point implementations, 300 iterations. AAC-LC
+stereo decode p95 169 us per 1024 frames, Opus mono encode p95 761 us per
+20 ms, NS+AGC+AEC p95 290 us per 10 ms. These are observed Host timings,
+not D213 CPU estimates. Benchmarks have no timing pass/fail threshold.
+
+Measured allocations: AAC decoder peak 27,992 bytes; simultaneous Opus encoder
+and decoder 42,512; NS+AGC 51,720; NS+AGC+AEC 181,342; nine-lane mixer plus
+all jitter queues 840,640. Codec states are additional to mixer/queues.
+Board output and input workers each reserve a 64 KiB stack. Experimental
+AEC reference history reserves about 31 KiB. Network buffers, application,
+video, RTOS device buffers and DMA are additional. Allocation failures reject synchronous startup/negotiation or are logged by
+the asynchronous input worker. A successful SETUP is not proof that physical
+capture subsequently opened; inspect the microphone worker status/logs.
+
+Configured packet reorder delay is 20 ms; output chunks are 10 ms; decoder
+ahead limit is about 60 ms at 48 kHz (source frame count at other rates).
+The mixer capacity is 8192 source frames/lane. sound0 initially waits 200 ms
+for the amplifier, following the SDK aplay behavior. These are configured
+software buffering values, not measured end-to-end or DAC latency.
+`audioLatencies` values remain negotiation hints and must be calibrated.
+
+## Board validation checklist and commands
+
+Use SDK [build instructions](../../luban-lite-jc-carplay-oss/doc/rt-carplay-build.md)
+and a matched app/SDK feat/carplay-audio checkout. Default enables downlink
+AAC/Opus and leaves microphone/AEC disabled. Enable RTCARPLAY_MICROPHONE
+(and optionally RTCARPLAY_MIC_AEC) in menuconfig only for capture tests.
+
+```text
+list_device
+carplay_status
+carplay_iap2 status
+carplay_bt status
+carplay_mic
+carplay_mic mute
+carplay_mic unmute
+carplay_siri
+list_thread
+free
+```
+
+Start Wireless from the existing LVGL demo, pair normally, play music and
+capture from startup. Expect `audio_setup=ready type=102` for AAC media (or
+100/101 for a negotiated PCM/voice path), `writer running: independent
+streams, 48kHz stereo mixer`, increasing `carplay audio` packet counts and no
+write errors. Check actual sound rather than treating SETUP as audible output.
+The microphone command exists only in a microphone-enabled build; expect
+`[carplay-mic] started dmic0=48000/stereo ...` after an input-capable SETUP.
+Do not infer microphone availability from registration of dmic0 alone.
+
+Verify these on D213: music route and sound0 channel ordering/gain; actual
+dmic pins/channel/gain; simultaneous 48 kHz capture/replay; Siri and telephone
+round trips; input mute; navigation duck/recovery; local critical alert while
+remote muted; rapid USB/Wireless switching and reconnect; CPU/thread stack
+high-water and sustained heap; acoustic echo delay/double-talk/noise quality;
+video smoothness during AAC plus capture/AEC. Use at least 30 minutes of
+playback to assess drift before selecting a sound0 occupancy servo target.
+Do not replace real DAC feedback with received RTP sample counts.
+
+## Remaining external dependencies
+
+Hardware is required for the board-only checks above, not for Host development.
+Full resource borrowing/return semantics, enhanced stream framing and accurate
+presentation feedback need corroborated protocol traces or public contracts.
+AAC-ELD requires the negotiated profile/ASC and a complete decoder test
+vector; FAAD LC-only cannot be extended by declaring an ELD bit. FFmpeg
+7.1.5 is a possible LGPL route and was inspected: it parses ER AAC-ELD, but
+`libavcodec/aac/aacdec.c:decode_eld_specific_config` explicitly rejects
+Low Delay SBR and data-resilience flags. Without an actual CarPlay ELD
+profile/vector this partial support cannot justify advertising full ELD.
+Source: https://github.com/FFmpeg/FFmpeg/blob/n7.1.5/libavcodec/aac/aacdec.c .
+FDK-AAC is not bundled: its
+additional license terms require compatibility/distribution review for this
+GPL project. There is no private Apple SDK, key, or authentication material in
+this branch. LPCM/Opus voice and AAC-LC media are the implemented paths.

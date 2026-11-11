@@ -61,9 +61,9 @@ this repo yet.
   (SoftAP + vendor IE + DHCP + mDNS + RTSP server + HID touch, fed by the
   GT911 panel reader or the `carplay_touch` command), with an
   on-board MPP H.264 -> DE video sink (`video_sink_lubanlite.c`), an
-  AirPlay PCM -> `sound0` audio sink (`audio_sink_lubanlite.c`: ring buffer
-  plus writer thread, lazy codec configure, SET_PARAMETER volume -> codec
-  mixer), the
+  AirPlay AAC-LC/Opus/LPCM -> `sound0` audio worker (independent jitter
+  queues, resampling/mixing, software volume/ducking, protected local alerts),
+  opt-in `dmic0` microphone/DSP/encrypted RTP uplink, the
   `carplay_bt` RFCOMM bring-up command, the `carplay_iap2` wireless iAP2
   session pump (`iap2_link_lubanlite.c`: identification, Wi-Fi config,
   CarPlay invite over the same transport) and its MSH commands;
@@ -73,7 +73,7 @@ this repo yet.
   ASan/UBSan.  The end-to-end test runs a real controller implementation
   against `airplay_rtsp_server` on loopback: SRP-6a Pair-Setup, X25519
   Pair-Verify, the ControlCipher transition, SETUP/RECORD, encrypted Screen
-  DataStream frames and an encrypted audio DataStream packet (HKDF output
+  DataStream frames and concurrent encrypted audio DataStream packets (HKDF output
   key, ChaCha20-Poly1305 RTP, PCM verified by the sink callback).
 - `check-boundary.sh` — fails if platform APIs leak into `core/`.
 
@@ -125,14 +125,21 @@ process stays in the foreground until Ctrl-C.
 
 Verified on the host: mDNS discovery (`PTR`/`SRV`/`TXT`/`A` for
 `_airplay._tcp.local`) and `GET /info` returning the binary plist.  With
-audio enabled the served document is 4153 bytes, feature mask
-`0x615653aee2`, with 8 `audioFormats` and 9 `audioLatencies` entries (checked
-by decoding the socket response with Python plistlib).  The socket-level test
+audio enabled the document includes role-specific `audioFormats` and
+`audioLatencies`. Optional codec/capture capabilities change its size and
+format masks; unsupported codecs are not advertised.  The socket-level test
 suite also streams an encrypted audio RTP packet through the real server and
 checks the decrypted PCM, forwards a SET_PARAMETER volume to the receiver
 callback, and drops a session on a tampered frame and then reconnects with
 Pair-Verify against the stored pairing.  Pairing with a physical controller
 still needs the hardware.
+
+## CarPlay audio
+
+See [audio subsystem](docs/audio-subsystem.md) for the implemented format/stream
+matrix, microphone and AEC configuration, measured Host costs, sanitizer tests,
+SDK build procedure and D213 validation commands. Audio changes have Host and
+SDK build evidence; iPhone routing and acoustic quality await board validation.
 
 ## USBMUX board diagnostics
 

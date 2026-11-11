@@ -84,10 +84,10 @@ config RTCARPLAY_AUDIO
     depends on RT_USING_AUDIO
     help
       Decrypt the AirPlay audio DataStream (ChaCha20-Poly1305), advertise the
-      PCM output capability in /info and feed the samples to the RT-Thread
-      "sound0" device (AIC internal codec) through its replay interface.
-      The codec is configured from the format the SETUP negotiates; the sink
-      only touches it when the first packet arrives.
+      available LPCM/AAC-LC/Opus output capabilities in /info and feed a
+      dedicated jitter/decode/mix worker to RT-Thread sound0. Output uses
+      48 kHz stereo with resampling and software gain/ducking. Compressed
+      formats require LPKG_RT_CARPLAY_AUDIO_CODECS.
 
       Requires CONFIG_AIC_USING_AUDIO (which selects RT_USING_AUDIO) and the
       board's PA/speaker wiring.  Without this option the receiver is

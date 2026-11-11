@@ -412,8 +412,13 @@ static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
                 (unsigned)format->channels, (unsigned)len);
     }
     ++app->audio_packets;
-    return carplay_audio_sink_pcm(format->sample_rate, format->channels, data,
-                                  len);
+    return carplay_audio_sink_packet(stream_type, format, data, len, rtp_timestamp, arrival_us);
+}
+
+static void on_audio_stop(uint16_t type, void *context)
+{
+    (void)context;
+    carplay_audio_sink_stream_stop(type);
 }
 
 static void on_volume(float volume_db, void *context)
@@ -934,6 +939,7 @@ static int build_announcement_data(app_state_t *app)
         /* Publish the PCM capability arrays only when a sink can play them,
          * so a controller never negotiates an undecodable audio format. */
         info.audio_output = true;
+        info.audio_compressed = true;
         info.audio_sample_rate = CARPLAY_APP_AUDIO_SAMPLE_RATE;
     }
 #endif
@@ -1086,6 +1092,7 @@ int carplay_app_start(const carplay_app_config_t *config)
 #if defined(RTCARPLAY_AUDIO)
     if (app->audio_started) {
         server_config.on_audio_pcm = on_audio_pcm;
+        server_config.on_audio_stop = on_audio_stop;
         server_config.audio_pcm_context = app;
         server_config.on_volume = on_volume;
         server_config.volume_context = app;

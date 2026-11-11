@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+cmake_minimum_required(VERSION 3.16)
+project(rtcp_audio_dependencies C)
+set(CMAKE_C_STANDARD 99)
+file(GLOB FAAD_SOURCES faad2/libfaad/*.c)
+add_library(rtcp_faad STATIC ${FAAD_SOURCES})
+target_include_directories(rtcp_faad PUBLIC faad2/include PRIVATE faad2/libfaad)
+target_compile_definitions(rtcp_faad PRIVATE FIXED_POINT LC_ONLY_DECODER HAVE_INTTYPES_H=1 HAVE_MEMCPY=1 HAVE_STRING_H=1 HAVE_STRINGS_H=1 HAVE_SYS_STAT_H=1 HAVE_SYS_TYPES_H=1 PACKAGE_VERSION="2.11.2")
+# Opus's generic fixed point source set, without CPU-specific files.
+file(GLOB OPUS_SOURCES opus/src/*.c opus/celt/*.c opus/silk/*.c opus/silk/fixed/*.c)
+add_library(rtcp_opus STATIC ${OPUS_SOURCES})
+target_include_directories(rtcp_opus PUBLIC opus/include PRIVATE opus opus/celt opus/silk opus/silk/fixed)
+target_compile_definitions(rtcp_opus PRIVATE OPUS_BUILD FIXED_POINT DISABLE_FLOAT_API VAR_ARRAYS OPUS_DISABLE_INTRINSICS DISABLE_DEBUG_FLOAT)
+foreach(t rtcp_faad rtcp_opus)
+  target_compile_options(${t} PRIVATE -O2 -fwrapv -fno-strict-aliasing)
+endforeach()

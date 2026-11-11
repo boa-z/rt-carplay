@@ -53,3 +53,9 @@ files.  In particular:
   "Based on LIVI by Lasse Heitgres".
 - Realtek Wi-Fi/BT binaries, Realtek firmware blobs, and Apple MFi identity
   material are not part of this repository and must not be added.
+
+Portable CarPlay audio codecs:
+FAAD2 2.11.2, GPL-2.0-or-later, upstream knik0/faad2.
+Code from FAAD2 is copyright (c) Nero AG, www.nero.com.
+Opus 1.5.2, BSD-3-Clause, upstream xiph/opus.
+See third_party/audio/README.md and the retained COPYING/file notices.

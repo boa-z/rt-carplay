@@ -120,6 +120,11 @@ config LPKG_RT_CARPLAY_LOG
     bool
     default y
 
+config LPKG_RT_CARPLAY_AUDIO_CODECS
+    bool "AAC-LC and Opus audio (vendored fixed point sources)"
+    default y if RTCARPLAY_AUDIO
+    depends on RTCARPLAY_AUDIO
+
 config LPKG_RT_CARPLAY_ED25519
     bool
     default y

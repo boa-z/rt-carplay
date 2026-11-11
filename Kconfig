@@ -75,4 +75,12 @@ config LPKG_RT_CARPLAY_LUBANLITE_USB
         host class (LPKG_CHERRYUSB_HOST_NCM) and is needed for the wired
         AirPlay IP link, not for this stage.
 
+config LPKG_RT_CARPLAY_AUDIO_CODECS
+    bool "Fixed-point AAC-LC and Opus audio codecs"
+    default y
+    help
+        Build vendored FAAD2 (GPL-2.0-or-later, LC only) and Opus
+        (BSD-3-Clause) sources. Does not use the SDK binary codec archives.
+        Disable for a PCM-only receiver; compressed formats are then refused.
+
 endif

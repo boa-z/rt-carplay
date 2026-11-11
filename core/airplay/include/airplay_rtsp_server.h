@@ -53,10 +53,12 @@ typedef struct {
     airplay_screen_message_cb_t on_screen_message;
     void *screen_message_context;
 
-    /* Decrypted LPCM audio (little-endian int16, borrowed until return).
+    /* Decrypted payload (format identifies LPCM/AAC/Opus, borrowed until return).
      * NULL disables audio: audio SETUPs are then refused. */
     airplay_audio_pcm_cb_t on_audio_pcm;
     void *audio_pcm_context;
+    /* Flush only this stream from the sink on selective TEARDOWN/replacement. */
+    void (*on_audio_stop)(uint16_t stream_type, void *context);
 
     /* SET_PARAMETER "volume: <dB>" from the sender (0 = full scale).
      * NULL acknowledges the request without changing anything. */

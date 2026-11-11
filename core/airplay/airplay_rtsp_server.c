@@ -397,6 +397,8 @@ static void server_stop_audio(uint16_t stream_type, void *context)
     airplay_audio_stream_t *stream = server->audio[slot];
     server->audio[slot] = NULL;
     airplay_audio_stream_stop(stream, server->net);
+    if (server->config.on_audio_stop)
+        server->config.on_audio_stop(stream_type, server->config.audio_pcm_context);
 }
 
 static void server_volume(float volume_db, void *context)

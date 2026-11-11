@@ -1435,7 +1435,10 @@ static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
     assert(audio_packets == packets_before + 1U);
     assert(audio_packets_stream_type == 100U);
     assert(audio_pcm_len == sizeof(pcm));
-    assert(memcmp(audio_pcm, pcm, sizeof(pcm)) == 0);
+    for (size_t i = 0; i < sizeof(pcm); i += 2) {
+        assert(audio_pcm[i] == pcm[i + 1]);
+        assert(audio_pcm[i + 1] == pcm[i]);
+    }
     assert(audio_packet_format.sample_rate == 44100U);
     assert(audio_packet_format.channels == 2U);
     assert(audio_packet_timestamp == 4800U);

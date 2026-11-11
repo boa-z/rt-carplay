@@ -220,6 +220,18 @@ int main(void)
     expect_uint(&doc, entry, "type", 102U);
     expect_uint(&doc, entry, "outputLatencyMicros", 0U);
 
+#ifdef RTCP_AUDIO_CODECS
+    audio.audio_compressed = true;
+    assert(airplay_info_plist_build(&audio, plist, sizeof(plist), &plist_len));
+    assert(airplay_bplist_open(plist, plist_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "audioFormats", &object) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, object, 8, &entry) == AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, entry, "type", 102);
+    expect_string(&doc, entry, "audioType", "media");
+    expect_uint(&doc, entry, "audioOutputFormats", 0x800000);
+    audio.audio_compressed = false;
+#endif
     audio.audio_sample_rate = 44100;
     assert(airplay_info_plist_build(&audio, plist, sizeof(plist), &plist_len));
     assert(airplay_bplist_open(plist, plist_len, &doc) == AIRPLAY_BPLIST_OK);

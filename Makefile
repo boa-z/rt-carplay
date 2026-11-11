@@ -5,8 +5,14 @@ CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
 CPPFLAGS += -Iinclude -Icore -Icore/mfi \
             -Icore/iap2/include -Icore/airplay/include -Icore/crypto/include \
             -Icore/media/include -Icore/input/include -Icore/discovery/include \
-            -Icore/usb/include \
+            -Icore/usb/include -Icore/audio/include \
             -Ithird_party/ed25519 -Iport/linux/include -Itests/support
+AUDIO_CODECS ?= 1
+ifeq ($(AUDIO_CODECS),1)
+CPPFLAGS += -DRTCP_AUDIO_CODECS -Ithird_party/audio/faad2/include -Ithird_party/audio/opus/include
+AUDIO_LIBS = $(BUILD)/audio-deps/librtcp_faad.a $(BUILD)/audio-deps/librtcp_opus.a
+LDLIBS += $(AUDIO_LIBS)
+endif
 LDLIBS   += -lm
 BUILD    := build
 
@@ -31,7 +37,7 @@ PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
 PORT_LINUX_OBJS := $(PORT_LINUX_SRCS:%.c=$(BUILD)/%.o)
 PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
 
-TESTS := test_mfi2c test_pairing_files \
+TESTS := test_audio_sink test_audio_engine test_mfi2c test_pairing_files \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session test_iap2_stream \
          test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
@@ -63,6 +69,12 @@ SIM := $(BUILD)/rt-carplay-sim
 SIM_SRCS := $(wildcard examples/linux_sim/*.c)
 
 all: $(BINS) $(SIM)
+
+$(BUILD)/audio-deps/librtcp_faad.a $(BUILD)/audio-deps/librtcp_opus.a &: third_party/audio/CMakeLists.txt
+	cmake -S third_party/audio -B $(BUILD)/audio-deps
+	cmake --build $(BUILD)/audio-deps -j8
+
+$(BINS) $(SIM): $(AUDIO_LIBS)
 
 $(MBEDTLS_LIB):
 	@if [ ! -f "$(MBEDTLS_HDR)" ]; then \
@@ -208,3 +220,7 @@ check-rtthread-multicast:
 .PHONY: check-lubanlite-handoff
 check-lubanlite-handoff:
 	python3 tests/run_lubanlite_handoff.py
+
+# Actual board sink with a pthread-backed RT-Thread/device seam.
+$(BUILD)/test_audio_sink: tests/unit/test_audio_sink.c examples/rtthread_app/audio_sink_lubanlite.c $(LIB) $(MBEDTLS_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_audio -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread

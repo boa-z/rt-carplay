@@ -1,24 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/*
- * Luban-Lite audio sink: AirPlay PCM -> RT-Thread "sound0" playback.
- *
- * The AirPlay poll thread delivers decrypted PCM (signed 16-bit little
- * endian, interleaved) from the audio DataStream callback.  This sink copies
- * it into a ring buffer and a dedicated thread feeds the audio device, so a
- * busy network poll never blocks on the replay queue.  The device is
- * configured lazily from the negotiated stream format on the first packet and
- * reconfigured if a later SETUP changes it.
- *
- * The sink needs CONFIG_AIC_USING_AUDIO and the "sound0" device registered by
- * the SDK audio driver (see bsp/examples/test-audio/aplay.c).
- */
+/* Luban-Lite sound0 output. Packet callbacks enqueue into independent bounded
+ * jitter buffers. One worker owns all decoders, the mixer and audio device.
+ * Compressed payloads must use carplay_audio_sink_packet(), with the format
+ * negotiated by RTSP. The PCM function remains a compatibility entry. */
 #pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* Creates the ring buffer, wake semaphore and writer thread.  The audio
+/* Creates the per-stream queues, mixer, wake semaphore and writer thread.  The audio
  * device is not touched until the first PCM packet arrives.  Returns 0 on
  * success, a negative RTCP error otherwise. */
 int carplay_audio_sink_start(void);
@@ -28,12 +19,10 @@ void carplay_audio_sink_stop(void);
 
 bool carplay_audio_sink_is_running(void);
 
-/* Bytes waiting for the audio device. */
+/* Encoded packets waiting for the audio worker (all streams). */
 size_t carplay_audio_sink_pending(void);
 
-/* Enqueue one decrypted PCM packet.  Called from the AirPlay poll thread and
- * never blocks on the device; when the ring is full the packet is dropped
- * whole (counted).  sample_rate/channels describe the PCM layout. */
+/* Compatibility: enqueue local little-endian PCM on the main lane. */
 int carplay_audio_sink_pcm(uint32_t sample_rate, uint8_t channels,
                            const uint8_t *data, size_t len);
 
@@ -43,7 +32,7 @@ void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
                               unsigned *write_errors, unsigned *replays);
 
 /* Queues the sender's SET_PARAMETER volume (dB; 0 = full scale, the AirPlay
- * range is [-144, 0]).  The writer thread applies it through the codec mixer;
+ * range is [-144, 0]).  The writer thread applies it through the software master gain;
  * a value that arrives before playback starts is kept until then.  The scale
  * is mapped linearly over [-45, 0] dB to the codec's 0..100 range. */
 void carplay_audio_sink_set_volume_db(float volume_db);
@@ -51,3 +40,7 @@ void carplay_audio_sink_set_volume_db(float volume_db);
 /* Last requested volume in codec percent, or -1 when the sender never set
  * one (the codec keeps its default). */
 int carplay_audio_sink_volume_percent(void);
+
+#include "audio_codec.h"
+int carplay_audio_sink_packet(uint16_t type, const rtcp_audio_format_t *, const uint8_t *, size_t, uint32_t timestamp, uint64_t arrival_us);
+void carplay_audio_sink_stream_stop(uint16_t type);

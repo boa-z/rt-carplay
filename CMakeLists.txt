@@ -5,6 +5,7 @@ project(rt_carplay C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+option(RTCP_AUDIO_CODECS "Build fixed point AAC-LC and Opus" ON)
 option(RTCP_BUILD_TESTS "Build host-side unit tests" ON)
 
 # mbedTLS source tree (2.28.x).  Defaults to third_party/mbedtls populated
@@ -37,6 +38,7 @@ target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/airplay/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/crypto/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ed25519
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/audio/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/media/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/input/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/discovery/include
@@ -49,6 +51,11 @@ target_compile_definitions(rtcp_core PUBLIC
     MBEDTLS_CONFIG_FILE="mbedtls_rtcp_host.h")
 target_compile_options(rtcp_core PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(rtcp_core PUBLIC rtcp_mbedcrypto m)
+if(RTCP_AUDIO_CODECS)
+    add_subdirectory(third_party/audio)
+    target_compile_definitions(rtcp_core PUBLIC RTCP_AUDIO_CODECS)
+    target_link_libraries(rtcp_core PUBLIC rtcp_faad rtcp_opus)
+endif()
 
 file(GLOB_RECURSE RTCP_PORT_LINUX_SOURCES CONFIGURE_DEPENDS port/linux/*.c)
 add_library(rtcp_port_linux STATIC ${RTCP_PORT_LINUX_SOURCES})
@@ -76,6 +83,7 @@ if(RTCP_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
     set(RTCP_TESTS
+        test_audio_engine
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
         test_iap2_parameter test_iap2_session test_iap2_stream
@@ -128,4 +136,8 @@ if(RTCP_BUILD_TESTS)
         target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
         add_test(NAME ${name} COMMAND ${name})
     endforeach()
+endif()
+
+if(RTCP_BUILD_TESTS)
+    set_tests_properties(test_audio_engine PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

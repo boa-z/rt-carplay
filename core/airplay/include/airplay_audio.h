@@ -21,6 +21,7 @@
 
 #include "rtcp/net.h"
 #include "rtcp/os.h"
+#include "../../audio/include/audio_codec.h"
 
 #define AIRPLAY_AUDIO_KEY_BYTES 32U
 #define AIRPLAY_AUDIO_TAG_BYTES 16U
@@ -37,12 +38,10 @@
 
 typedef struct airplay_audio_stream airplay_audio_stream_t;
 
-typedef struct {
-    uint32_t sample_rate;
-    uint8_t channels; /* 1 or 2 */
-} airplay_audio_format_t;
+typedef rtcp_audio_format_t airplay_audio_format_t;
 
-/* Delivers decrypted little-endian int16 PCM.  data is borrowed until the
+/* Delivers decrypted payload; LPCM is little-endian int16, compressed
+ * access units are identified by format->codec.  data is borrowed until the
  * callback returns.  rtp_timestamp is the sender's 32-bit RTP timestamp;
  * arrival_us is the local monotonic receive time. */
 typedef int (*airplay_audio_pcm_cb_t)(uint16_t stream_type,
@@ -64,8 +63,7 @@ typedef struct {
     void *context;
 } airplay_audio_stream_config_t;
 
-/* Maps the sender's audioFormat bit to a PCM layout.  Returns false for
- * formats this receiver does not decode (Opus, AAC-LC, unknown bits). */
+/* Maps exactly one negotiated format to a compiled codec layout. */
 bool airplay_audio_format_from_bits(uint64_t bits, airplay_audio_format_t *format);
 
 bool airplay_audio_stream_type_is_supported(uint64_t stream_type);

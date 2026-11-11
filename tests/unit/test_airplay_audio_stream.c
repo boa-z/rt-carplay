@@ -115,8 +115,15 @@ static void test_format_mapping(void)
     assert(!airplay_audio_format_from_bits(0x3fcU | 0xc00U, &format));
     assert(!airplay_audio_format_from_bits(0x100000000ULL, &format));
     /* Encoded formats and zero are refused. */
+#ifdef RTCP_AUDIO_CODECS
+    assert(airplay_audio_format_from_bits(0x400000U, &format));
+    assert(format.codec == RTCP_AUDIO_AAC_LC && format.sample_rate == 44100);
+    assert(airplay_audio_format_from_bits(0x20000000U, &format));
+    assert(format.codec == RTCP_AUDIO_OPUS && format.clock_rate == 24000);
+#else
     assert(!airplay_audio_format_from_bits(0x400000U, &format));
     assert(!airplay_audio_format_from_bits(0x800000U, &format));
+#endif
     assert(!airplay_audio_format_from_bits(0x70000000U, &format));
     assert(!airplay_audio_format_from_bits(0U, &format));
     assert(airplay_audio_stream_type_is_supported(100U));
@@ -143,7 +150,7 @@ static void test_start_validation(void)
                                       &stream) == RTCP_EINVAL);
     assert(stream == NULL);
     config.stream_type = AIRPLAY_AUDIO_STREAM_MAIN;
-    config.audio_format_bits = 0x400000U; /* AAC-LC is not decoded here. */
+    config.audio_format_bits = 0x1000000U; /* AAC-LC is not decoded here. */
     assert(airplay_audio_stream_start(&rtcp_os_linux, &rtcp_net_linux, &config,
                                       &stream) == RTCP_ENOTSUP);
     assert(stream == NULL);

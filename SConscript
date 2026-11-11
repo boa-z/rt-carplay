@@ -26,7 +26,7 @@ if GetDepend('LPKG_RT_CARPLAY_LOG'):
         cwd, 'port/rtthread/include/rtcp_log_rtthread.h')
 
 # Protocol core: hardware and OS independent.
-for sub in ('airplay', 'iap2', 'discovery', 'input', 'media', 'mfi', 'usb'):
+for sub in ('audio', 'airplay', 'iap2', 'discovery', 'input', 'media', 'mfi', 'usb'):
     src += Glob('core/%s/*.c' % sub)
     inc = os.path.join(cwd, 'core', sub, 'include')
     if os.path.isdir(inc):
@@ -40,6 +40,11 @@ if GetDepend('LPKG_RT_CARPLAY_ED25519'):
     src += Glob('third_party/ed25519/*.c')
     cpppath.append(cwd + '/core/crypto/include')
     cpppath.append(cwd + '/third_party/ed25519')
+
+if GetDepend('LPKG_RT_CARPLAY_AUDIO_CODECS'):
+    cpppath += [cwd + '/third_party/audio/faad2/include', cwd + '/third_party/audio/opus/include']
+    # Group-local definition: do not change the SDK's unrelated audio packages.
+    ccflags = (ccflags or '') + ' -DRTCP_AUDIO_CODECS'
 
 # RT-Thread OS and socket seams.
 src += Glob('port/rtthread/*.c')
@@ -112,5 +117,8 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB'):
 
 group = DefineGroup('rt-carplay', src, depend=['LPKG_USING_RT_CARPLAY'],
                     CPPPATH=cpppath, LOCAL_CCFLAGS=ccflags)
+
+if GetDepend('LPKG_RT_CARPLAY_AUDIO_CODECS'):
+    group = group + SConscript(os.path.join(cwd, 'third_party', 'audio', 'SConscript'))
 
 Return('group')

@@ -9,6 +9,7 @@
  * document order (the format only requires the trailer to name the top object).
  */
 #include "airplay_info_plist.h"
+#include "../audio/include/audio_codec.h"
 
 #include <string.h>
 
@@ -454,16 +455,21 @@ static uint32_t emit_audio_formats(ip_writer_t *w,
     const uint64_t pcm = 0x3fcULL | (is48 ? 0xc000ULL : 0xc00ULL);
     const uint64_t pcm_mono = 0x154ULL | (is48 ? 0x4000ULL : 0x400ULL);
 
-    uint32_t refs[8];
+    uint64_t compiled = rtcp_audio_output_formats();
+    uint64_t opus = config->audio_compressed ? compiled & 0x70000000ULL : 0;
+    uint64_t aac = config->audio_compressed ? compiled & (is48 ? 0x800000ULL : 0x400000ULL) : 0;
+    uint32_t refs[9];
     refs[0] = emit_audio_format(w, 100, "compatibility", pcm);
     refs[1] = emit_audio_format(w, 101, "compatibility", pcm);
-    refs[2] = emit_audio_format(w, 100, "default", pcm);
-    refs[3] = emit_audio_format(w, 100, "alert", pcm);
+    refs[2] = emit_audio_format(w, 100, "default", pcm | opus);
+    refs[3] = emit_audio_format(w, 100, "alert", pcm | opus);
     refs[4] = emit_audio_format(w, 100, "media", pcm);
-    refs[5] = emit_audio_format(w, 100, "telephony", pcm_mono);
-    refs[6] = emit_audio_format(w, 100, "speechRecognition", pcm_mono);
-    refs[7] = emit_audio_format(w, 101, "default", pcm);
-    return ip_emit_array(w, refs, 8U);
+    refs[5] = emit_audio_format(w, 100, "telephony", pcm_mono | opus);
+    refs[6] = emit_audio_format(w, 100, "speechRecognition", pcm_mono | opus);
+    refs[7] = emit_audio_format(w, 101, "default", pcm | opus);
+    size_t count = 8;
+    if (aac) refs[count++] = emit_audio_format(w, 102, "media", aac);
+    return ip_emit_array(w, refs, count);
 }
 
 static uint32_t emit_safe_area(ip_writer_t *w, uint16_t width, uint16_t height)

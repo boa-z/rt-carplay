@@ -48,45 +48,9 @@ struct airplay_audio_stream {
     uint64_t nonce_window;
 };
 
-typedef struct {
-    uint64_t bits;
-    uint32_t sample_rate;
-    uint8_t channels;
-} pcm_format_entry_t;
-
-static const pcm_format_entry_t k_pcm_formats[] = {
-    {0x4ULL, 8000U, 1U},
-    {0x8ULL, 8000U, 2U},
-    {0x10ULL, 16000U, 1U},
-    {0x20ULL, 16000U, 2U},
-    {0x40ULL, 24000U, 1U},
-    {0x80ULL, 24000U, 2U},
-    {0x100ULL, 32000U, 1U},
-    {0x200ULL, 32000U, 2U},
-    {0x400ULL, 44100U, 1U},
-    {0x800ULL, 44100U, 2U},
-    {0x4000ULL, 48000U, 1U},
-    {0x8000ULL, 48000U, 2U},
-};
-
-/* AAC-LC 44.1/48 kHz stereo and every Opus bit: advertised by other
- * receivers but not decodable here, so they must never be mistaken for PCM. */
-#define AUDIO_FORMAT_AAC 0xc00000ULL
-#define AUDIO_FORMAT_OPUS 0x70000000ULL
-
 bool airplay_audio_format_from_bits(uint64_t bits, airplay_audio_format_t *format)
 {
-    if (format == NULL || bits == 0U) return false;
-    if ((bits & (AUDIO_FORMAT_AAC | AUDIO_FORMAT_OPUS)) != 0U) return false;
-    for (size_t i = 0U; i < sizeof(k_pcm_formats) / sizeof(k_pcm_formats[0]); ++i) {
-        if (bits == k_pcm_formats[i].bits) {
-            format->sample_rate = k_pcm_formats[i].sample_rate;
-            format->channels = k_pcm_formats[i].channels;
-            return true;
-        }
-    }
-    /* SETUP selects one format, unlike the /info capability mask. */
-    return false;
+    return rtcp_audio_format_parse(bits, format);
 }
 
 bool airplay_audio_stream_type_is_supported(uint64_t stream_type)
@@ -303,10 +267,12 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
         if (delta >= 64 || (stream->nonce_window & (UINT64_C(1) << delta))) return RTCP_EINVAL;
         stream->nonce_window |= UINT64_C(1) << delta;
     }
+    if (stream->format.codec == RTCP_AUDIO_LPCM) {
     if (cipher_len % (2U * stream->format.channels) != 0U) return RTCP_EINVAL;
     /* RTP L16 is big endian. The sink contract is little endian. */
     for (size_t i = 0; i < cipher_len; i += 2) {
         uint8_t byte = payload[i]; payload[i] = payload[i + 1]; payload[i + 1] = byte;
+    }
     }
     ++stream->decrypted;
     const uint32_t timestamp = read_be32(wire + 4U);

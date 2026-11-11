@@ -1,5 +1,71 @@
 # v25：有线视频停顿的代码级验证
 
+## v25 板端结果与 v26 后续验证
+
+用户回传的默认 Carrier ON 日志把候选进一步收窄：
+
+| 候选 | 板端结果 | 当前判定 |
+| --- | --- | --- |
+| USBMUX 共锁→Carrier→RX 延迟 | IN 持锁常见 201ms；EP0 wait 约 86–153ms，hold 0–1ms；Carrier/rearm 最大约 144–199ms | 阻塞机制已在板上出现，仍需 off/on 验证其对帧率的贡献 |
+| 同步 TX 阻塞 | tx_urb 最大通常 1ms，tx_lock 最大约 1ms | 此次运行不支持它是主要瓶颈 |
+| Screen owner 未读数据 | owner 最大间隔约 17ms，recv 最大约 1ms；partial gap 可到 690ms，未完成 body 可存留超过 1 秒 | 等待主要在 socket 数据就绪之前，不能单凭此区分手机/USB/lwIP |
+| USBMUX 发送缺口 | failed=0、controls=0，没有重现 Expected110 | 此次不能归因为自动 ACK 发送失败 |
+| IPHETH 接收错误 | 活跃窗口每 5 秒约 12–32 次 RX error，USB/TX error 为 0 | 提升为优先调查对象；原日志未区分格式校验与网络交付失败 |
+
+RX error 是失败的 USB 完成块处理次数，不是丢失 Ethernet 帧数，也不能除以
+rx_frames 当作丢包率。代码存在两条完全不同的路径：
+
+1. `worker → ipheth_receive → ncm` 拒绝格式、长度、DPE 等；整块不交付。
+2. `ncm → frame → usbh_ipheth_net_receive` 的 pbuf 分配、复制、netif input
+   失败；此前帧可能已交付，但当前及后续帧不交付。潜在地丢失 TCP 段，导致
+   重传和 Screen body 等待，尚未由抓包确认该链在此运行中发生。
+
+复核 Linux `ipheth_rcvbulk_callback_ncm` 后发现本实现还检查 wHeaderLength、
+wBlockLength、NDP wLength/next、1514 帧上限、重叠等；Linux 快照没有完全相同的
+检查。这个差异提供具体调查方向，不足以证明手机发送了被误拒的合法格式。
+不能仅为追求帧率而取消边界检查。缓存/HCD 损坏也可能导致格式校验失败。
+
+v26 保留全部解析约束与原返回值，增加 `ipheth_receive_diagnose` 分类：
+size、signature、header、block、table、range、frame、overlap、terminator、callback；
+原 `ipheth_receive` API 仍可用。5 秒窗口仅在失败时打印非零原因和最后失败的
+20 字节 NTH/NDP 头字段、DPE 索引/偏移/长度、已验证和已交付数量。
+oversize 单独计数；callback_remaining 是回调失败时当前及后续未成功交付的
+已验证帧数，不含格式失败块中无法可靠计数的帧。
+RT-Thread adapter 另报 alloc/copy/input 失败，保留最后 input 返回码。
+不记录 Ethernet/TLS 内容，不在 RX worker/ISR 打印，不新增 DMA/URB。
+
+这版同时按用户要求整理调试输出：RT-Thread debug 默认关闭，逐条 iAP2 与 RTSP
+收发降为 debug；USB 自动枚举保留配置选择而不再渲染完整描述符。可显式定义
+`RTCP_LOG_DEBUG` 或手动 `carplay_usb desc` 取得细节。主机回归不编入固件，保留
+边界、取消、拔插与 DMA 覆盖，不删除有独立保护作用的测试。
+
+**先用现有 v25 做 Carrier off/on 即可，不要求为此重刷。** 如需判定 RX 错误，
+使用 v26，保持同一版本内 on/off/on 和持续动态场景，跳过切换后的混合窗口：
+
+* off 后 rearm 长尾消失且 RX error 同步下降、帧率恢复，再 on 可复现：支持
+  Carrier 阻塞是主要诱因；尚需解释格式/交付错误如何产生，不能仅凭相关性定案。
+* off 后 rearm 改善但错误/卡顿仍在：锁是已确认问题，另有接收损失/供应问题。
+* block/table/header/frame 类错误：用打印字段与该手机的实际 USB 捕获核对格式；
+  构造相同头的回归后单独修解析器，归属 cherryusb-ipheth。
+* callback 且 alloc/input 非零：调查 pbuf 生命周期/内存或 lwIP input 返回路径，
+  不先改 TCP window。不同计数器快照略有先后，跨窗可差一项，应跨多个窗比较。
+* signature/range 错误：核对线上包与 DMA 内存；线上正常、内存异常才进一步支持
+  HCD/cache 问题。不能仅凭失败原因认定 DATA PID 或缓存就是根因。
+* off 后重挂快、RX 无错误但 body 仍长等：进一步观察 TCP 序号/ACK/窗口和 USB
+  传输完成，区分手机暂停与 socket 之前的交付问题。
+
+另有独立问题：首轮 carkit `rc=-1` 后自动重建收到 67 字节却没有 version frame，
+物理重连后 Trust cache reuse 正常。这提示同一次附件连接内的 USBMUX 服务恢复
+需要单独审查，不能据此删除配对记录；尚未确认该 67 字节的内容或断流原因。
+
+v26 已通过协议 ASan/UBSan 与边界检查、USB DMA/取消回归、demo worker 回归、
+IPHETH 解析原因与 callback 中途失败/剩余帧统计回归、实际 worker 分类快照/窗口
+清零与原生命周期测试、CMake upstream EP0 回归，以及 D213 完整编译打包。
+没有对 v25 未修改的 HCD 再次改动。v26 的板端分类日志和 Carrier OFF 结果仍待回传，
+不能把构建成功或主机注入测试写成卡顿已修复。
+
+以下保留 v25 初始代码审查与实验设计，候选可信度以上述板端结果为准。
+
 目标是定位第一个长等待，保持v24的分辨率、公告30 FPS、VE/DE线程、TCP参数、单RX
 URB、超时和取消规则不变。本版提供统计和Carrier单变量开关，不宣称已修复板端卡顿。
 

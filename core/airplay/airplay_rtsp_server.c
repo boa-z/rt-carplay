@@ -566,13 +566,13 @@ static bool process_stream(airplay_rtsp_server_t *server,
         connection->tx_bytes += (uint32_t)wire_len;
         connection->tx_frames += frames;
         consume_stream(connection, consumed);
-        RTCP_LOGI(TAG, "rtsp_request=handled id=%u ms=%u method=%s path=%s "
+        RTCP_LOGD(TAG, "rtsp_request=handled id=%u ms=%u method=%s path=%s "
                   "cseq=%s bytes=%u",
                   connection->id,
                   (unsigned)(server_now_ms(server) - connection->opened_ms),
                   connection->request.method, connection->request.path,
                   connection->request.cseq, (unsigned)consumed);
-        RTCP_LOGI(TAG, "rtsp_response id=%u cseq=%s status=%u plain=%u "
+        RTCP_LOGD(TAG, "rtsp_response id=%u cseq=%s status=%u plain=%u "
                   "wire=%u frames=%u",
                   connection->id, connection->request.cseq, status,
                   (unsigned)response_len, (unsigned)wire_len, frames);

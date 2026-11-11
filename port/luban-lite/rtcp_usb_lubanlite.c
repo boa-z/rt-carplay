@@ -545,11 +545,9 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
 
     uint8_t selected = 0U;
     uint8_t count = hport->device_desc.bNumConfigurations;
-    rt_kprintf("[usb-desc] Apple device %04x:%04x reports %u "
-               "configuration(s); dumping all before selection\n",
-               hport->device_desc.idVendor, hport->device_desc.idProduct,
-               count);
-    if (find_carplay_configuration(hport, count, &selected, true)) {
+    /* Enumeration still reads all candidates; full descriptor rendering is
+     * available through 'carplay_usb desc' instead of every reconnect. */
+    if (find_carplay_configuration(hport, count, &selected, false)) {
         USB_LOG_INFO("CarPlay configuration already present: index %u\r\n",
                      selected);
         s_usb.last_configuration_index = selected;

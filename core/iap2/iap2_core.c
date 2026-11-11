@@ -16,8 +16,8 @@
  * The link core follows the original ESP-IDF logging call sites, but routes
  * them through the portable rtcp/log.h seam instead of a fixed no-op: a
  * platform build with RTCP_LOG_CUSTOM (the RT-Thread port) then gets the
- * message trace (csm_rx/csm_tx ids, sync limits, link state) needed to
- * diagnose a live pairing, while a silent build costs nothing.
+ * link state needed to diagnose pairing. Per-message tracing is debug-level;
+ * the RT-Thread port enables it only in an explicit RTCP_LOG_DEBUG build.
  */
 #include "rtcp/log.h"
 
@@ -299,7 +299,7 @@ static void csm_consume(iap2_core_t *core, const uint8_t *bytes, size_t len)
             }
             uint16_t message_id = read_be16(core->csm_rx + 4);
             ++core->rx_frames;
-            ESP_LOGI(TAG, "csm_rx id=0x%04x bytes=%u", message_id, (unsigned)(frame_len - 6U));
+            ESP_LOGD(TAG, "csm_rx id=0x%04x bytes=%u", message_id, (unsigned)(frame_len - 6U));
             if (core->message_cb != NULL) {
                 core->message_cb(message_id, core->csm_rx + 6, frame_len - 6U, core->context);
             }
@@ -660,7 +660,7 @@ bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
     core->waiting_ack = true;
     core->retries = 0;
     core->tx_deadline_ms = now_ms + IAP2_RETRANSMIT_MS;
-    ESP_LOGI(TAG, "csm_tx id=0x%04x bytes=%u sequence=%u",
+    ESP_LOGD(TAG, "csm_tx id=0x%04x bytes=%u sequence=%u",
              message_id, (unsigned)body_len, core->sent_sequence);
     return true;
 }

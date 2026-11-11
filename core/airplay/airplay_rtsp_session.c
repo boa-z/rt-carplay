@@ -55,6 +55,7 @@ struct airplay_rtsp_session {
     bool record_active;
     bool control_cipher_active;
     bool state_in_psram;
+    unsigned unsupported_commands;
 };
 
 static airplay_rtsp_session_t *session_calloc(bool *allocated_in_psram)
@@ -1045,6 +1046,30 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
                               session->config.info_plist,
                               session->config.info_plist_len,
                               response, response_capacity, response_len);
+    }
+
+    if (strcmp(request->method, "POST") == 0 &&
+        path_has_suffix(request->path, "/command")) {
+        ++session->unsupported_commands;
+        if (session->unsupported_commands <= 8U || session->unsupported_commands % 64U == 0U) {
+            airplay_bplist_doc_t doc;
+            airplay_bplist_object_t root, object;
+            char type[64] = "unparsed";
+            size_t length = 0U;
+            if (airplay_bplist_open(request->body, request->body_len, &doc) == AIRPLAY_BPLIST_OK &&
+                airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK &&
+                airplay_bplist_dict_get(&doc, root, "type", &object) == AIRPLAY_BPLIST_OK &&
+                airplay_bplist_get_string(&doc, object, type, sizeof(type), &length) == AIRPLAY_BPLIST_OK) {
+                for (size_t i = 0; i < length; ++i)
+                    if ((unsigned char)type[i] < 32U || (unsigned char)type[i] > 126U) type[i] = '?';
+            } else {
+                memcpy(type, "unparsed", sizeof("unparsed"));
+            }
+            RTCP_LOGI(TAG, "unsupported_command type=%s bytes=%u count=%u", type,
+                      (unsigned)request->body_len, session->unsupported_commands);
+        }
+        return status_response(request, AIRPLAY_RTSP_STATUS_METHOD_NOT_ALLOWED,
+                               "Method Not Allowed", response, response_capacity, response_len);
     }
 
     if (strcmp(request->method, "SETUP") == 0) {

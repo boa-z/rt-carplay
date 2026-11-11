@@ -169,3 +169,73 @@ Expected: no reference-error cascade, identical second config does not increment
 resets, waiting_idr clears after IDR, and no sustained drops/errors. Compare
 RX FPS, presentation FPS and queue/decode/present elapsed times in the second
 interval before deciding the next performance change.
+
+
+## V19 board result and V20 interactive TCP experiment
+
+The v19 board run receives and presents 78 pictures (79 MPP packets including
+configuration), with zero input drops, decode errors, resets, skipped outputs
+and waiting-IDR NALs. HID writes succeed 70/70 with no full touch queue. This
+run receives only one configuration; it validates a healthy run but does not
+exercise duplicate-configuration recovery on the device. The user still
+reports very poor smoothness.
+
+RX reports 2.0 FPS over 38.813 seconds, whereas the first presentation report
+covers 88.062 seconds and reports 0.8 FPS. These intervals have different
+start times and include startup/static time, so neither is a motion-only rate
+and they must not be divided to infer a throughput ratio. At the snapshot the
+FIFO is empty (peak nine), queue delay averages 16 ms with max 136 ms, decode
+9/15 ms and present 8/16 ms. Screen processing averages 1.429 ms with max 12 ms
+(including callback/scheduler preemption). These values do not show a sustained
+decoder backlog; they also do not rule out transient stalls or input/network
+latency. Sender cadence, TCP delay and motion-only rates remain unmeasured.
+
+V20 makes one behavioral experiment: enable TCP_NODELAY on the RT-Thread TCP
+listeners, accepted sockets and outgoing connections, including event/HID and
+RTSP. The event channel sends small encrypted HID messages and previously left
+Nagle enabled; a subsequent small write can wait for an outstanding segment's
+ACK. Disabling Nagle removes that local send delay. It does not disable remote
+Nagle, change the receive-side delayed-ACK policy, or prove this delay is the
+reported stutter. Socket configuration success/failure is logged once per
+socket, never per report. Decode, receive polling, display and USB algorithms
+are unchanged in this experiment.
+
+Additional cumulative diagnostics in carplay_status:
+
+* receive gap: intervals between complete, accepted screen frames, excluding
+  the first frame; includes static periods and stream/network/scheduler delays.
+* sender gap: positive differences in the sender timestamps of consecutive
+  frames, in the sender clock domain; zero/backward differences are excluded.
+  Timestamp precision/meaning is sender-dependent; this is not measured latency
+  and clocks are not subtracted across hosts.
+* assembly: first received header bytes through complete body, before screen
+  processing; includes packet delivery gaps and scheduling. It excludes any
+  wait before the first received header byte.
+* receive-gap buckets: <=40 ms, (40,100] ms, >100 ms. These are cumulative counts,
+  so compare two status snapshots around continuous motion.
+
+POST /command now parses and logs the bounded binary-plist type for the first
+eight commands per session, then every 64th, sanitizing control characters.
+Unsupported commands retain 405; no unimplemented UI/audio operation is reported
+as successful. DiPlay handles requestUI/duckAudio/unduckAudio, but the v19 log
+only contains request lengths. Observing the actual types is required before
+assigning these errors a role in the stutter. Feedback behavior is unchanged.
+
+Validation: all 49 host tests and boundary check pass. The real screen-server
+socket test uses independent receive and sender clocks, verifies all three gap
+buckets and delayed header/body assembly under ASan/UBSan. The actual RT-Thread
+TCP seam is also compiled against host BSD sockets with SAL header adapters:
+IPv4/IPv6 blocking/bounded/accepted sockets have NODELAY=1 via getsockopt and
+transfer data. This checks socket policy, not lwIP timing or a performance gain.
+The full D213 build passes. Test logs are under /tmp/ipheth-reference with v20
+in their filenames.
+
+Board comparison: flash v20, verify tcp_nodelay=enabled and picture/touch. Run
+carplay_status plus carplay_video status, continuously drag/scroll the same
+view for ten seconds, then repeat both commands immediately. Retain startup
+unsupported_command type logs as well as the complete second status. If HID
+feels faster but frame cadence remains low, the local TCP send experiment only
+addresses part of the problem. Similar sender/receive gaps point toward source
+cadence or upstream flow control; short sender gaps with bursty receive gaps
+point toward delivery/scheduling. Large assembly gaps warrant TCP/USB traces.
+None of these observations alone establishes a root cause.

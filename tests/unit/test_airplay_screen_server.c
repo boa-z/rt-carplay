@@ -21,6 +21,9 @@ typedef struct {
 } capture_t;
 
 static unsigned exit_count;
+static uint64_t fake_now_us = 10000U;
+static uint64_t sender_ntp = (UINT64_C(2) << 32) | UINT64_C(0x80000000);
+static uint64_t fake_clock_us(void) { return fake_now_us; }
 
 static int capture_message(airplay_screen_message_type_t type,
                            uint8_t *annex_b,
@@ -79,7 +82,7 @@ static size_t seal_frame(const uint8_t key[AIRPLAY_SCREEN_KEY_BYTES],
     memset(header, 0, AIRPLAY_SCREEN_HEADER_BYTES);
     put_le32(header, (uint32_t)body_len);
     header[4] = 0U;
-    put_le64(header + 8U, (UINT64_C(2) << 32) | UINT64_C(0x80000000));
+    put_le64(header + 8U, sender_ntp);
     uint8_t nonce[12];
     make_nonce(counter, nonce);
     mbedtls_chachapoly_context cipher;
@@ -147,8 +150,10 @@ int main(void)
     config.message_context = &capture;
     config.on_unexpected_exit = on_unexpected_exit;
 
+    struct rtcp_os os = rtcp_os_linux;
+    os.now_us = fake_clock_us;
     airplay_screen_server_t *server = NULL;
-    assert(airplay_screen_server_start(&rtcp_os_linux, &rtcp_net_linux, key,
+    assert(airplay_screen_server_start(&os, &rtcp_net_linux, key,
                                        &config, &server) == RTCP_OK);
     uint16_t port = airplay_screen_server_get_port(server);
     assert(port != 0U);
@@ -178,8 +183,36 @@ int main(void)
            0);
     assert(capture.sender_time_ns == UINT64_C(2500000000));
 
+    /* Arrival gaps and sender timestamps must be measured independently.
+     * The last two-byte/body handoff also exercises assembly-time accounting. */
+    const uint64_t arrivals[] = {45000U, 125000U, 375000U};
+    for (unsigned sample = 0; sample < 3; ++sample) {
+        sender_ntp += (UINT64_C(1) << 32) / 30U;
+        body_len = seal_frame(key, sample + 1U, plaintext, sizeof(plaintext), header, body);
+        fake_now_us = arrivals[sample] - 2000U;
+        assert(send_all(client, header, sizeof(header)));
+        assert(wait_event(airplay_screen_server_get_fd(server)));
+        airplay_screen_server_poll(server); /* header, no body yet */
+        assert(capture.calls == sample + 1U);
+        fake_now_us = arrivals[sample];
+        assert(send_all(client, body, body_len));
+        for (unsigned retry = 0; retry < 16U && capture.calls < sample + 2U; ++retry) {
+            assert(wait_event(airplay_screen_server_get_fd(server)));
+            airplay_screen_server_poll(server);
+        }
+        assert(capture.calls == sample + 2U);
+    }
+    airplay_screen_server_stats_t stats;
+    airplay_screen_server_get_stats(server, &stats);
+    assert(stats.frames == 4U && stats.messages == 4U);
+    assert(stats.frame_gap_count == 3U && stats.frame_gap_us == 365000U);
+    assert(stats.frame_gap_max_us == 250000U);
+    assert(stats.frame_gap_le40ms == 1U && stats.frame_gap_le100ms == 1U && stats.frame_gap_gt100ms == 1U);
+    assert(stats.sender_gap_count == 3U && stats.sender_gap_max_us == 33333U);
+    assert(stats.assembly_us == 6000U && stats.assembly_max_us == 2000U);
+
     /* A frame that fails authentication kills the one-peer data stream. */
-    body_len = seal_frame(key, 1U, plaintext, sizeof(plaintext), header, body);
+    body_len = seal_frame(key, 4U, plaintext, sizeof(plaintext), header, body);
     body[body_len - 1U] ^= 0x80U;
     send_frame(client, header, body, body_len);
 

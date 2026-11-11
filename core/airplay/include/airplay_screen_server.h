@@ -26,6 +26,15 @@ typedef struct {
     uint64_t wire_bytes;
     uint64_t process_us;
     uint32_t process_max_us;
+    uint64_t assembly_us; /* first received header bytes -> complete body */
+    uint32_t assembly_max_us;
+    uint32_t frame_gap_count;
+    uint64_t frame_gap_us;
+    uint32_t frame_gap_max_us;
+    uint32_t frame_gap_le40ms, frame_gap_le100ms, frame_gap_gt100ms;
+    uint32_t sender_gap_count;
+    uint64_t sender_gap_us;
+    uint32_t sender_gap_max_us;
 } airplay_screen_server_stats_t;
 
 typedef void (*airplay_screen_server_exit_cb_t)(void *context);

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "airplay_screen_server.h"
+#include "airplay_screen_codec.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,9 @@ struct airplay_screen_server {
     size_t body_len;
     size_t body_expected;
     airplay_screen_server_stats_t stats;
+    uint64_t assembly_start_us;
+    uint64_t last_frame_us;
+    uint64_t last_sender_ns;
 };
 
 static uint64_t screen_now_us(const airplay_screen_server_t *server)
@@ -115,6 +119,7 @@ static void handle_client(airplay_screen_server_t *server)
             fail_server(server, received == 0 ? "peer_closed" : "header_read");
             return;
         }
+        if (server->header_len == 0U) server->assembly_start_us = screen_now_us(server);
         ++server->stats.recv_calls;
         server->stats.wire_bytes += (size_t)received;
         server->header_len += (size_t)received;
@@ -149,11 +154,39 @@ static void handle_client(airplay_screen_server_t *server)
         server->stream, server->header, server->body, server->body_len,
         server->body_capacity, arrival_us);
     uint64_t process_us = screen_now_us(server) - arrival_us;
+    uint64_t assembly_us = arrival_us - server->assembly_start_us;
+    server->stats.assembly_us += assembly_us;
+    if (assembly_us > server->stats.assembly_max_us)
+        server->stats.assembly_max_us = assembly_us > UINT32_MAX ? UINT32_MAX : (uint32_t)assembly_us;
     ++server->stats.messages;
     server->stats.process_us += process_us;
     if (process_us > server->stats.process_max_us)
         server->stats.process_max_us = process_us > UINT32_MAX ? UINT32_MAX : (uint32_t)process_us;
-    if (result == RTCP_OK && server->header[4] == 0U) ++server->stats.frames;
+    if (result == RTCP_OK && server->header[4] == 0U) {
+        if (server->stats.frames != 0U) {
+            uint64_t gap = arrival_us - server->last_frame_us;
+            ++server->stats.frame_gap_count;
+            server->stats.frame_gap_us += gap;
+            if (gap > server->stats.frame_gap_max_us)
+                server->stats.frame_gap_max_us = gap > UINT32_MAX ? UINT32_MAX : (uint32_t)gap;
+            if (gap <= 40000U) ++server->stats.frame_gap_le40ms;
+            else if (gap <= 100000U) ++server->stats.frame_gap_le100ms;
+            else ++server->stats.frame_gap_gt100ms;
+        }
+        airplay_screen_header_info_t info;
+        if (airplay_screen_parse_header(server->header, server->body_len, &info)) {
+            if (server->stats.frames != 0U && info.sender_time_ns > server->last_sender_ns) {
+                uint64_t gap = (info.sender_time_ns - server->last_sender_ns) / 1000U;
+                ++server->stats.sender_gap_count;
+                server->stats.sender_gap_us += gap;
+                if (gap > server->stats.sender_gap_max_us)
+                    server->stats.sender_gap_max_us = gap > UINT32_MAX ? UINT32_MAX : (uint32_t)gap;
+            }
+            server->last_sender_ns = info.sender_time_ns;
+        }
+        server->last_frame_us = arrival_us;
+        ++server->stats.frames;
+    }
     if (result != RTCP_OK) {
         RTCP_LOGW(TAG, "screen_message=discarded opcode=%u rc=%d",
                   (unsigned)server->header[4], result);

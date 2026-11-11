@@ -8,11 +8,13 @@
 #include "rtcp_rtthread.h"
 
 #include <string.h>
+#include "rtcp/log.h"
 #include <rtthread.h>
 
 #ifdef RT_USING_SAL
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/errno.h>
 #include <sys/socket.h>
@@ -37,6 +39,7 @@
 #endif
 
 static int poll_fds(struct rtcp_pollfd *fds, int n, int timeout_ms);
+static void configure_tcp(int fd);
 
 static int fill_sockaddr(const rtcp_addr_t *addr,
                          struct sockaddr_storage *storage, socklen_t *length)
@@ -102,6 +105,7 @@ static int listen_socket(uint8_t family, uint16_t port)
 
     int fd = socket(domain, SOCK_STREAM, 0);
     if (fd < 0) return RTCP_EIO;
+    configure_tcp(fd);
 
     int one = 1;
     (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -133,12 +137,24 @@ static int listen_socket(uint8_t family, uint16_t port)
     return fd;
 }
 
+/* HID/RTSP writes are small and interactive: do not hold a later write
+ * behind an unacknowledged segment (Nagle + peer delayed ACK). This affects
+ * our sends only; it does not disable delayed ACKs or remote Nagle. */
+static void configure_tcp(int fd)
+{
+    int one = 1;
+    int rc = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    if (rc != 0) RTCP_LOGW("net_rtthread", "tcp_nodelay=failed fd=%d", fd);
+    else RTCP_LOGI("net_rtthread", "tcp_nodelay=enabled fd=%d", fd);
+}
+
 static int accept_socket(int lfd, rtcp_addr_t *peer)
 {
     struct sockaddr_storage storage;
     socklen_t len = sizeof(storage);
     int fd = accept(lfd, (struct sockaddr *)&storage, &len);
     if (fd < 0) return RTCP_EIO;
+    configure_tcp(fd);
     if (peer != NULL) read_sockaddr(&storage, peer);
     return fd;
 }
@@ -165,6 +181,7 @@ static int connect_socket(const rtcp_addr_t *addr)
 
     int fd = socket(domain, SOCK_STREAM, 0);
     if (fd < 0) return RTCP_EIO;
+    configure_tcp(fd);
     if (connect(fd, (struct sockaddr *)&storage, length) != 0) {
         closesocket(fd);
         return RTCP_EIO;
@@ -198,6 +215,7 @@ static int connect_timeout_socket(const rtcp_addr_t *addr, int timeout_ms)
 
     int fd = socket(domain, SOCK_STREAM, 0);
     if (fd < 0) return RTCP_EIO;
+    configure_tcp(fd);
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {

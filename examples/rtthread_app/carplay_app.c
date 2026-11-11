@@ -1415,6 +1415,15 @@ static int cmd_carplay_status(int argc, char **argv)
     rt_kprintf("carplay screen process_us avg/max=%u/%u (includes callback/scheduling)\n",
                screen.messages ? (unsigned)(screen.process_us / screen.messages) : 0U,
                (unsigned)screen.process_max_us);
+    rt_kprintf("carplay screen gaps_ms avg/max: receive=%u/%u sender=%u/%u assembly=%u/%u\n",
+               screen.frame_gap_count ? (unsigned)(screen.frame_gap_us / screen.frame_gap_count / 1000U) : 0U,
+               screen.frame_gap_max_us / 1000U,
+               screen.sender_gap_count ? (unsigned)(screen.sender_gap_us / screen.sender_gap_count / 1000U) : 0U,
+               screen.sender_gap_max_us / 1000U,
+               screen.messages ? (unsigned)(screen.assembly_us / screen.messages / 1000U) : 0U,
+               screen.assembly_max_us / 1000U);
+    rt_kprintf("carplay screen gap counts: <=40ms=%u 40..100ms=%u >100ms=%u\n",
+               screen.frame_gap_le40ms, screen.frame_gap_le100ms, screen.frame_gap_gt100ms);
     s_app.screen_report_ms = now;
     s_app.screen_report_frames = screen.frames;
     return 0;

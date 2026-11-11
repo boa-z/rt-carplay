@@ -9,6 +9,14 @@ static int allocations, semaphores, locked, fail_alloc, fail_sem;
 static int submit_error, timeout, kill_error, short_by, extra, kills;
 static struct usbh_urb *pending;
 static struct usb_dma_transfer *allocation;
+static struct usb_bulk_state pipe;
+static unsigned peer_toggle[32], delivered[32];
+static int simulate_pid, disconnect_in_submit;
+static unsigned last_pid;
+
+static int critical;
+size_t usb_osal_enter_critical_section(void) { assert(!critical); critical = 1; return 0; }
+void usb_osal_leave_critical_section(size_t flags) { (void)flags; assert(critical); critical = 0; }
 void *rt_malloc_align(size_t n, size_t align)
 {
     if (fail_alloc) return NULL;
@@ -40,6 +48,24 @@ int usbh_submit_urb(struct usbh_urb *u)
     if (submit_error) return submit_error;
     pending = u;
     if (timeout) return 0;
+    if (simulate_pid && !u->setup) {
+        unsigned index = (u->ep->bEndpointAddress & 15U) +
+                         ((u->ep->bEndpointAddress & 0x80U) ? 16U : 0U);
+        unsigned mps = u->ep->wMaxPacketSize;
+        assert(mps);
+        last_pid = u->data_toggle;
+        /* One successful short packet, full packets, and a ZLP all advance
+         * the receiver's expected DATA PID. Duplicate OUT is ACKed but not
+         * delivered to its consumer, exactly why USB success isn't enough. */
+        unsigned packets = (u->transfer_buffer_length + mps - 1U) / mps;
+        if (!packets) packets = 1;
+        if (peer_toggle[index] == u->data_toggle) {
+            ++delivered[index];
+            peer_toggle[index] ^= packets & 1U;
+        }
+        u->data_toggle ^= packets & 1U;
+    }
+    if (disconnect_in_submit) { ++pipe.generation; pipe.data_toggle = 0; }
     int len = (int)u->transfer_buffer_length;
     bool input = u->setup ? (u->setup->bmRequestType & 0x80) != 0
                          : (u->ep->bEndpointAddress & 0x80) != 0;
@@ -67,27 +93,27 @@ int main(void)
     assert(control_transfer_timeout(&h, 0x40, 4, 0, 0, NULL, 0, 100) == 0); clean();
     short_by = 3;
     memset(bytes, 0x37, sizeof(bytes));
-    assert(submit_bulk(&h, &ep, unaligned, 65, 100) == 62);
+    assert(submit_bulk(&h, &ep, unaligned, 65, 100, NULL) == 62);
     assert(unaligned[61] == 0xa5 && unaligned[62] == 0x37); clean();
     short_by = 0; ep.bEndpointAddress = 4;
     memset(bytes, 0x37, sizeof(bytes));
-    assert(submit_bulk(&h, &ep, unaligned, 129, 100) == 129); clean();
-    assert(submit_bulk(&h, &ep, NULL, 0, 100) == 0); clean();
+    assert(submit_bulk(&h, &ep, unaligned, 129, 100, NULL) == 129); clean();
+    assert(submit_bulk(&h, &ep, NULL, 0, 100, NULL) == 0); clean();
     extra = 1;
     assert(control_transfer_timeout(&h, 0x80, 6, 0, 0, unaligned, 9, 100) == RTCP_EIO); clean();
     extra = 0; short_by = 10;
     assert(control_transfer_timeout(&h, 0x80, 6, 0, 0, unaligned, 9, 100) == RTCP_EIO); clean();
     short_by = 0;
-    assert(submit_bulk(&h, &ep, NULL, 1, 100) == RTCP_EINVAL); clean();
-    assert(submit_bulk(&h, &ep, unaligned, SIZE_MAX, 100) == RTCP_EINVAL); clean();
+    assert(submit_bulk(&h, &ep, NULL, 1, 100, NULL) == RTCP_EINVAL); clean();
+    assert(submit_bulk(&h, &ep, unaligned, SIZE_MAX, 100, NULL) == RTCP_EINVAL); clean();
     fail_alloc = 1;
-    assert(submit_bulk(&h, &ep, unaligned, 1, 100) == RTCP_ENOMEM); clean();
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, NULL) == RTCP_ENOMEM); clean();
     fail_alloc = 0; fail_sem = 1;
-    assert(submit_bulk(&h, &ep, unaligned, 1, 100) == RTCP_ENOMEM); clean();
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, NULL) == RTCP_ENOMEM); clean();
     fail_sem = 0; submit_error = -USB_ERR_STALL;
-    assert(submit_bulk(&h, &ep, unaligned, 1, 100) == RTCP_EIO); clean();
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, NULL) == RTCP_EIO); clean();
     submit_error = 0; timeout = 1;
-    assert(submit_bulk(&h, &ep, unaligned, 1, 100) == RTCP_ETIMEDOUT); clean();
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, NULL) == RTCP_ETIMEDOUT); clean();
     assert(kills == 1); kill_error = -USB_ERR_TIMEOUT;
     assert(control_transfer_timeout(&h, 0x80, 6, 0, 0, unaligned, 9, 100) == RTCP_ETIMEDOUT);
     assert(allocations == 1 && semaphores == 1 && !locked);
@@ -95,5 +121,50 @@ int main(void)
     pending->transfer_buffer[0] = 0xff;
     pending->complete(pending->arg, 1);
     usb_osal_sem_delete(allocation->done); rt_free_align(allocation); clean();
+    /* Real owned-URB path: model VERSION, SETUP and SYN as three short OUT
+     * transfers. A fresh zeroed URB each time must still use DATA0/1/0. */
+    timeout = 0; kill_error = 0;
+    simulate_pid = 1;
+    ep.bEndpointAddress = 4; ep.wMaxPacketSize = 512;
+    memset(bytes, 0x37, sizeof(bytes));
+    const size_t lengths[] = {20, 17, 36};
+    for (unsigned i = 0; i < 3; ++i) {
+        assert(submit_bulk(&h, &ep, unaligned, lengths[i], 100, &pipe) == (int)lengths[i]);
+        assert(last_pid == (i & 1U));
+        assert(delivered[4] == i + 1U); clean();
+    }
+    /* IN and OUT maintain separate state. Repeated IN short replies carry
+     * the HCD's returned toggle into the next allocated URB too. */
+    struct usb_bulk_state in_pipe = {0};
+    ep.bEndpointAddress = 0x85;
+    for (unsigned i = 0; i < 2; ++i) {
+        assert(submit_bulk(&h, &ep, unaligned, 20, 100, &in_pipe) == 20);
+        assert(last_pid == (i & 1U)); clean();
+    }
+    assert(pipe.data_toggle == 1 && in_pipe.data_toggle == 0);
+    ep.bEndpointAddress = 4;
+    memset(bytes, 0x37, sizeof(bytes));
+    /* A full packet and its terminating ZLP each consume one DATA PID. */
+    static uint8_t full[512]; memset(full, 0x37, sizeof(full));
+    assert(submit_bulk(&h, &ep, full, sizeof(full), 100, &pipe) == 512);
+    assert(last_pid == 1 && pipe.data_toggle == 0); clean();
+    assert(submit_bulk(&h, &ep, NULL, 0, 100, &pipe) == 0);
+    assert(last_pid == 0 && pipe.data_toggle == 1); clean();
+    /* Failed submissions and timeouts without progress must not reset PID. */
+    submit_error = -USB_ERR_IO;
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, &pipe) == RTCP_EIO);
+    assert(pipe.data_toggle == 1); clean(); submit_error = 0;
+    timeout = 1; kill_error = 0;
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, &pipe) == RTCP_ETIMEDOUT);
+    assert(pipe.data_toggle == 1); clean(); timeout = 0;
+    /* Late completion of an old generation cannot overwrite reset state. */
+    disconnect_in_submit = 1;
+    assert(submit_bulk(&h, &ep, unaligned, 1, 100, &pipe) == RTCP_ESTATE);
+    assert(pipe.data_toggle == 0); clean(); disconnect_in_submit = 0;
+    s_usb.mux_out_state.data_toggle = s_usb.mux_in_state.data_toggle = 1;
+    uint32_t previous = s_usb.mux_out_state.generation;
+    reset_bulk_states();
+    assert(!s_usb.mux_out_state.data_toggle && !s_usb.mux_in_state.data_toggle);
+    assert(s_usb.mux_out_state.generation == previous + 1);
     puts("Luban-Lite DMA alignment, copy bounds and cancellation tests passed");
 }

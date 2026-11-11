@@ -82,3 +82,61 @@ attributing the failure to trust. If VERSION succeeds but Lockdown SYN has no
 reply, compare the v2 stream handshake and endpoint traffic. A remote plist
 error or a later service-start error is a different failure stage. Actual
 network traffic and reconnect stability still require hardware validation.
+
+
+## V8 result and DATA PID lifetime correction
+
+The v8 board logs now establish a complete VERSION 2.0 reply: 20 bytes, one
+parsed frame. Both fresh-attachment `mux` and `pair` tests then time out opening
+the Lockdown stream (62078), with RX still at exactly 20 bytes/one frame and no
+pending reassembly. No Pair request/remote plist error is demonstrated. IPHETH
+still has one pending first RX and no frames; this is not evidence of a trust
+rejection. One unplug/replug rebinds USBMUX and IPHETH and reuses i0, but does
+not validate reconnect under active traffic.
+
+A separate application USB-port defect was then found by checking official
+CherryUSB at a0054795c44037ace8a2b77b6e610adbff2257ea:
+
+- `core/usbh_core.h`, `usbh_bulk_urb_fill`: fills transfer fields while retaining
+  `urb.data_toggle` for reuse.
+- `port/ehci/usb_hc_ehci.c`, `ehci_bulk_urb_init`: seeds the QH overlay DATA toggle
+  from `urb.data_toggle`.
+- The EHCI completion path writes the next DATA toggle back into the URB.
+- Upstream host classes such as `class/cdc/usbh_cdc_ecm.c` keep their IN/OUT URBs
+  across calls, retaining that state. Linux/libusb/usbmuxd instead rely on their
+  USB stack to preserve endpoint state underneath each userspace transfer.
+
+Our port allocates and zeroes a private DMA URB on every transfer, so it lost the
+completed toggle. After a short VERSION OUT at DATA0, the next SETUP must use
+DATA1. Resending DATA0 can be ACKed as a duplicate without delivering SETUP to
+the device's consumer. That is compatible with transport send success followed
+by absent stream responses. This is a concrete software defect and a plausible
+explanation of the observed sequence; no bus capture yet confirms that it was
+the hardware failure mechanism.
+
+V9 stores IN and OUT toggles independently across owned DMA URBs, reading and
+writing them while holding the port mutex. State resets only at USB attachment
+or detachment, not at each mux frame or shell command. Generation checks and
+critical sections prevent a detected stale completion from overwriting the
+reset state. Control transfers retain their independent Setup/DATA rules.
+No independent IPHETH driver or official HCD source is changed by this fix.
+
+The actual port regression models receiver duplicate-PID handling and verifies
+DATA0/1/0 across 20/17/36-byte OUT transfers, independent short IN transfers,
+a full packet followed by ZLP, failed submit, a no-progress timeout, state reset
+and an old-generation completion. Restoring only the old per-transfer DATA0
+behavior makes this regression fail at the second transfer; the fixed path
+passes ASan/UBSan with official CherryUSB headers. Existing alignment, bounds,
+allocation-failure and failed-cancel/late-callback cases remain enabled.
+This is a host-side model, not electrical/HCD hardware validation.
+
+On a timeout after partial USB progress, the HCD cancellation path may not
+report the final toggle; this change does not claim transparent recovery from
+that case. Use a fresh attachment for these diagnostic runs rather than
+assuming that a partially cancelled stream can resume safely.
+
+Use the board procedure above with v9: collect VERSION, Lockdown connect and
+GetValue first, then perform a fresh-attachment pairing attempt. Only after a
+successful external session/readiness transition should Ethernet traffic be
+assessed. If the stream opens but a later Pair/SSL/service error appears,
+record its exact stage; that is new evidence rather than the same SYN timeout.

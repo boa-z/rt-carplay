@@ -61,6 +61,13 @@
 #define MUX_CLASS RTCP_USB_CLASS_VENDOR
 #define MUX_SUBCLASS RTCP_USB_APPLE_SUBCLASS_USBMUX
 
+/* CherryUSB carries the next DATA PID in urb.data_toggle, not in the
+ * endpoint descriptor. This state outlives each owned DMA transaction. */
+struct usb_bulk_state {
+    uint8_t data_toggle;
+    uint32_t generation;
+};
+
 typedef struct {
     volatile bool enabled;
     volatile bool present;
@@ -75,6 +82,8 @@ typedef struct {
     uint16_t mux_in_packet_size;
     struct usb_endpoint_descriptor mux_out_desc;
     struct usb_endpoint_descriptor mux_in_desc;
+    struct usb_bulk_state mux_out_state;
+    struct usb_bulk_state mux_in_state;
 
     /* Configuration descriptor index returned by the enumeration hook. */
     uint8_t last_configuration_index;
@@ -87,6 +96,16 @@ typedef struct {
 } carplay_usb_state_t;
 
 static carplay_usb_state_t s_usb;
+
+static void reset_bulk_states(void)
+{
+    size_t flags = usb_osal_enter_critical_section();
+    s_usb.mux_out_state.data_toggle = 0U;
+    s_usb.mux_in_state.data_toggle = 0U;
+    ++s_usb.mux_out_state.generation;
+    ++s_usb.mux_in_state.generation;
+    usb_osal_leave_critical_section(flags);
+}
 
 /* One configuration descriptor buffer per host controller: the hook is
  * called from each controller's own hub thread. */
@@ -169,13 +188,15 @@ static int map_urb_error(int error)
 static int dma_transfer(struct usbh_hubport *hport,
                         const struct usb_endpoint_descriptor *endpoint,
                         const struct usb_setup_packet *setup, void *data,
-                        size_t length, uint32_t timeout_ms)
+                        size_t length, uint32_t timeout_ms,
+                        struct usb_bulk_state *pipe)
 {
     if (!hport || (!endpoint && !setup) || (length && !data))
         return RTCP_EINVAL;
     if (length > INT32_MAX ||
         length > SIZE_MAX - sizeof(struct usb_dma_transfer) -
                      (CONFIG_USB_ALIGN_SIZE - 1U)) return RTCP_EINVAL;
+    uint32_t generation = pipe ? pipe->generation : 0U;
     size_t padded = (length + CONFIG_USB_ALIGN_SIZE - 1U) &
                     ~(size_t)(CONFIG_USB_ALIGN_SIZE - 1U);
     struct usb_dma_transfer *t = rt_malloc_align(sizeof(*t) + padded,
@@ -201,7 +222,13 @@ static int dma_transfer(struct usbh_hubport *hport,
         t->urb.ep = &t->endpoint;
     }
     usb_osal_mutex_take(hport->mutex);
-    int ret = usbh_submit_urb(&t->urb);
+    /* Serialize read/submit/write of the endpoint toggle. Reject detected
+     * generation changes and suppress stale toggle updates after reconnect. */
+    size_t flags = usb_osal_enter_critical_section();
+    bool current = !pipe || pipe->generation == generation;
+    if (pipe) t->urb.data_toggle = pipe->data_toggle;
+    usb_osal_leave_critical_section(flags);
+    int ret = current ? usbh_submit_urb(&t->urb) : -USB_ERR_NOTCONN;
     bool reclaim = true;
     if (ret < 0) {
         ret = map_urb_error(ret);
@@ -213,6 +240,10 @@ static int dma_transfer(struct usbh_hubport *hport,
     } else if (t->urb.errorcode < 0) {
         ret = map_urb_error(t->urb.errorcode);
     } else {
+        flags = usb_osal_enter_critical_section();
+        if (pipe && pipe->generation == generation)
+            pipe->data_toggle = t->urb.data_toggle;
+        usb_osal_leave_critical_section(flags);
         size_t actual = t->urb.actual_length;
         size_t prefix = endpoint ? 0U : sizeof(t->setup);
         if (actual < prefix || actual - prefix > length) {
@@ -222,6 +253,7 @@ static int dma_transfer(struct usbh_hubport *hport,
             if (input && ret > 0) memcpy(data, t->data, (size_t)ret);
         }
     }
+    if (pipe && pipe->generation != generation) ret = RTCP_ESTATE;
     usb_osal_mutex_give(hport->mutex);
     if (reclaim) {
         usb_osal_sem_delete(t->done);
@@ -243,7 +275,7 @@ static int control_transfer_timeout(struct usbh_hubport *hport,
     };
     return dma_transfer(hport, NULL, &setup, data, length,
                          timeout_ms ? timeout_ms :
-                         CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
+                         CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT, NULL);
 }
 
 static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
@@ -597,6 +629,7 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
     s_usb.mux_in_packet_size = in_packet;
     s_usb.mux_out_desc = out_desc;
     s_usb.mux_in_desc = in_desc;
+    reset_bulk_states();
     s_usb.present = true;
     snapshot_write_end();
 
@@ -622,6 +655,7 @@ static int carplay_usbmux_disconnect(struct usbh_hubport *hport, uint8_t intf)
     snapshot_write_begin();
     memset(&s_usb.device, 0, sizeof(s_usb.device));
     s_usb.present = false;
+    reset_bulk_states();
     s_usb.hport = NULL;
     s_usb.mux_out = 0U;
     s_usb.mux_in = 0U;
@@ -703,10 +737,11 @@ static int lubanlite_control_transfer(void *context, uint8_t request_type,
 
 static int submit_bulk(struct usbh_hubport *hport,
                        struct usb_endpoint_descriptor *endpoint, void *data,
-                       size_t length, uint32_t timeout_ms)
+                       size_t length, uint32_t timeout_ms,
+                       struct usb_bulk_state *pipe)
 {
     return dma_transfer(hport, endpoint, NULL, data, length,
-                         timeout_ms ? timeout_ms : 1000U);
+                         timeout_ms ? timeout_ms : 1000U, pipe);
 }
 
 static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,
@@ -719,14 +754,14 @@ static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,
 
     if (endpoint == s_usb.mux_in) {
         return submit_bulk(s_usb.hport, &s_usb.mux_in_desc, data, length,
-                           timeout_ms);
+                           timeout_ms, &s_usb.mux_in_state);
     }
     if (endpoint != s_usb.mux_out) {
         return RTCP_ENOTSUP;
     }
 
     int ret = submit_bulk(s_usb.hport, &s_usb.mux_out_desc, data, length,
-                          timeout_ms);
+                          timeout_ms, &s_usb.mux_out_state);
     if (ret < 0) {
         return ret;
     }
@@ -736,7 +771,7 @@ static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,
     if (length != 0U && s_usb.mux_out_packet_size != 0U &&
         (length % s_usb.mux_out_packet_size) == 0U) {
         int zlp = submit_bulk(s_usb.hport, &s_usb.mux_out_desc, NULL, 0U,
-                              timeout_ms);
+                              timeout_ms, &s_usb.mux_out_state);
         if (zlp < 0) {
             return zlp;
         }

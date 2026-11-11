@@ -13,7 +13,7 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 src=${1:-${RTCP_MBEDTLS_DIR:-$repo_root/third_party/mbedtls}}
-out=$repo_root/build/mbedtls
+out=${2:-$repo_root/build/mbedtls}
 cc=${CC:-cc}
 
 if [ ! -f "$src/include/mbedtls/chachapoly.h" ] || [ ! -d "$src/library" ]; then

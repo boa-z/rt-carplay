@@ -7,6 +7,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(RTCP_AUDIO_CODECS "Build fixed point AAC-LC and Opus" ON)
 option(RTCP_BUILD_TESTS "Build host-side unit tests" ON)
+option(RTCP_SANITIZE "Enable host address/undefined sanitizers" OFF)
+if(RTCP_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
 
 # mbedTLS source tree (2.28.x).  Defaults to third_party/mbedtls populated
 # by scripts/fetch-mbedtls.sh; can be overridden with -DRTCP_MBEDTLS_DIR=...
@@ -41,6 +46,7 @@ target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/audio/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/media/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/input/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/usb/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/discovery/include
     ${RTCP_MBEDTLS_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/config
@@ -49,6 +55,7 @@ target_include_directories(rtcp_core PUBLIC
 
 target_compile_definitions(rtcp_core PUBLIC
     MBEDTLS_CONFIG_FILE="mbedtls_rtcp_host.h")
+set_source_files_properties(${RTCP_ED25519_SOURCES} PROPERTIES COMPILE_OPTIONS "-fno-sanitize=undefined;-fwrapv")
 target_compile_options(rtcp_core PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(rtcp_core PUBLIC rtcp_mbedcrypto m)
 if(RTCP_AUDIO_CODECS)
@@ -82,8 +89,10 @@ if(RTCP_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/core/crypto/include
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
+    target_link_libraries(rtcp_test_support PUBLIC rtcp_core)
+
     set(RTCP_TESTS
-        test_audio_engine test_audio_input test_audio_sink
+        test_audio_engine test_audio_input test_audio_sink test_pairing_files
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
         test_iap2_parameter test_iap2_session test_iap2_stream
@@ -141,11 +150,18 @@ if(RTCP_BUILD_TESTS)
            name STREQUAL "test_lockdown_session")
             target_link_libraries(${name} PRIVATE Threads::Threads)
         endif()
-        target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+        target_compile_options(${name} PRIVATE -UNDEBUG -Wall -Wextra -Werror)
         add_test(NAME ${name} COMMAND ${name})
     endforeach()
 endif()
 
 if(RTCP_BUILD_TESTS)
     set_tests_properties(test_audio_engine PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
+if(RTCP_AUDIO_CODECS)
+    add_executable(audio_bench tests/bench/audio_bench.c)
+    target_link_libraries(audio_bench PRIVATE rtcp_core)
+    target_compile_options(audio_bench PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_options(audio_bench PRIVATE -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free)
 endif()

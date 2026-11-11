@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 CC       ?= cc
 AR       ?= ar
-CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined
+CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -MMD -MP
 CPPFLAGS += -Iinclude -Icore -Icore/mfi \
             -Icore/iap2/include -Icore/airplay/include -Icore/crypto/include \
             -Icore/media/include -Icore/input/include -Icore/discovery/include \
@@ -14,7 +14,7 @@ AUDIO_LIBS = $(BUILD)/audio-deps/librtcp_faad.a $(BUILD)/audio-deps/librtcp_opus
 LDLIBS += $(AUDIO_LIBS)
 endif
 LDLIBS   += -lm
-BUILD    := build
+BUILD    ?= build
 
 # mbedTLS provides ChaCha20-Poly1305, HKDF, bignum and the pairing
 # primitives.  Point RTCP_MBEDTLS_DIR at an mbedTLS 2.28 checkout (the
@@ -70,9 +70,10 @@ SIM_SRCS := $(wildcard examples/linux_sim/*.c)
 
 all: $(BINS) $(SIM)
 
-$(BUILD)/audio-deps/librtcp_faad.a $(BUILD)/audio-deps/librtcp_opus.a $(BUILD)/audio-deps/librtcp_speexdsp.a &: third_party/audio/CMakeLists.txt
+$(BUILD)/audio-deps/librtcp_faad.a $(BUILD)/audio-deps/librtcp_opus.a $(BUILD)/audio-deps/librtcp_speexdsp.a &: third_party/audio/CMakeLists.txt $(wildcard third_party/audio/faad2/libfaad/*.[ch] third_party/audio/opus/*/*.[ch] third_party/audio/opus/*/*/*.[ch] third_party/audio/speexdsp/libspeexdsp/*.[ch])
 	cmake -S third_party/audio -B $(BUILD)/audio-deps
 	cmake --build $(BUILD)/audio-deps -j8
+	touch $(AUDIO_LIBS)
 
 $(BINS) $(SIM): $(AUDIO_LIBS)
 
@@ -82,7 +83,7 @@ $(MBEDTLS_LIB):
 	    echo "  run scripts/fetch-mbedtls.sh or set RTCP_MBEDTLS_DIR." >&2; \
 	    exit 2; \
 	fi
-	./scripts/build-mbedtls-host.sh $(MBEDTLS_DIR)
+	./scripts/build-mbedtls-host.sh $(MBEDTLS_DIR) $(abspath $(BUILD)/mbedtls)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -227,3 +228,6 @@ $(BUILD)/test_audio_sink: tests/unit/test_audio_sink.c examples/rtthread_app/aud
 
 $(BUILD)/test_audio_input: tests/unit/test_audio_input.c examples/rtthread_app/audio_input_lubanlite.c tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_audio -Iport/luban-lite/include -o $@ $< tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
+
+# Track header and included platform-source dependencies for incremental tests.
+-include $(wildcard $(BUILD)/core/*/*.d $(BUILD)/port/*/*.d $(BUILD)/tests/support/*.d $(BUILD)/*.d)

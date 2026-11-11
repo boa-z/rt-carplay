@@ -154,7 +154,10 @@ static mdns_browser_endpoint_t *endpoint_get(mdns_browser_t *browser,
 
     mdns_browser_endpoint_t *endpoint = free_slot != NULL ? free_slot : oldest;
     memset(endpoint, 0, sizeof(*endpoint));
-    strncpy(endpoint->instance, instance, sizeof(endpoint->instance) - 1U);
+    size_t copy_len = strlen(instance);
+    if (copy_len >= sizeof(endpoint->instance)) copy_len = sizeof(endpoint->instance) - 1U;
+    memcpy(endpoint->instance, instance, copy_len);
+    endpoint->instance[copy_len] = '\0';
     endpoint->last_seen_ms = now_ms;
     return endpoint;
 }
@@ -182,7 +185,10 @@ static void host_put(mdns_browser_t *browser, const char *name,
     }
     mdns_browser_host_t *host = free_slot != NULL ? free_slot : oldest;
     memset(host, 0, sizeof(*host));
-    strncpy(host->name, name, sizeof(host->name) - 1U);
+    size_t copy_len = strlen(name);
+    if (copy_len >= sizeof(host->name)) copy_len = sizeof(host->name) - 1U;
+    memcpy(host->name, name, copy_len);
+    host->name[copy_len] = '\0';
     memcpy(host->ipv4, ipv4, 4U);
     host->valid = true;
     host->last_seen_ms = now_ms;
@@ -364,7 +370,10 @@ int mdns_browser_handle_packet(mdns_browser_t *browser, const uint8_t *packet,
             }
             mdns_browser_endpoint_t *endpoint =
                 endpoint_get(browser, owner, now_ms);
-            strncpy(endpoint->target, target, sizeof(endpoint->target) - 1U);
+            size_t target_len = strlen(target);
+            if (target_len >= sizeof(endpoint->target)) target_len = sizeof(endpoint->target) - 1U;
+            memcpy(endpoint->target, target, target_len);
+            endpoint->target[target_len] = '\0';
             endpoint->port = port;
             endpoint->has_port = port != 0U;
             endpoint->last_seen_ms = now_ms;

@@ -20,3 +20,9 @@ add_library(rtcp_speexdsp STATIC ${SPEEX_SOURCES})
 target_include_directories(rtcp_speexdsp PUBLIC speexdsp/include PRIVATE speexdsp/libspeexdsp)
 target_compile_definitions(rtcp_speexdsp PRIVATE FIXED_POINT USE_KISS_FFT VAR_ARRAYS EXPORT=)
 target_compile_options(rtcp_speexdsp PRIVATE -O2 -fwrapv -fno-strict-aliasing)
+
+# Fixed-point reference algorithms use intentional signed shifts/wrap. Keep
+# address instrumentation when the host enables it; exclude UB instrumentation.
+foreach(t rtcp_faad rtcp_opus rtcp_speexdsp)
+  target_compile_options(${t} PRIVATE -fno-sanitize=undefined)
+endforeach()

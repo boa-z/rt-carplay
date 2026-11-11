@@ -89,6 +89,9 @@ static void start_host(rtcp_usbmux_host_t *host, fake_transport_t *fake)
         .user = fake,
     };
     rtcp_usbmux_init(host, &transport);
+    fake->received[0].length = rtcp_usbmux_build_version(
+        fake->received[0].data, sizeof(fake->received[0].data));
+    fake->received_count = 1U;
     assert(rtcp_usbmux_start(host, 0U) == RTCP_OK);
     /* Version packet, then setup. */
     assert(fake->sent_count == 2U);
@@ -96,6 +99,8 @@ static void start_host(rtcp_usbmux_host_t *host, fake_transport_t *fake)
     assert(fake->sent[0].data[8] == 0U && fake->sent[0].data[11] == 2U);
     assert(fake->sent[1].length == 17U);
     assert(fake->sent[1].data[16] == 0x07U);
+    assert(fake->sent[1].data[12] == 0U && fake->sent[1].data[13] == 0U);
+    assert(fake->sent[1].data[14] == 0xffU && fake->sent[1].data[15] == 0xffU);
 }
 
 static void test_connect_and_stream(void)
@@ -118,6 +123,8 @@ static void test_connect_and_stream(void)
     /* The SYN was sent before the SYN|ACK, and the handshake acknowledged
      * it with our new sequence number. */
     rtcp_usbmux_tcp_packet_t syn = sent_tcp(&fake, 2U);
+    assert(fake.sent[2].data[12] == 0U && fake.sent[2].data[13] == 1U);
+    assert(fake.sent[2].data[14] == 0xffU && fake.sent[2].data[15] == 0xffU);
     assert(syn.source_port == 1U);
     assert(syn.destination_port == RTCP_USBMUX_LOCKDOWN_PORT);
     assert(syn.sequence == 0U);
@@ -386,6 +393,71 @@ static void test_overflow_resets_and_reconnect(void)
     rtcp_usbmux_connection_close(&host, connection);
 }
 
+/* Fixed source-derived VERSION vectors: 8-byte mux header + 12-byte body. */
+static void test_version_negotiation(void)
+{
+    static const uint8_t version[] = {
+        0,0,0,0, 0,0,0,20, 0,0,0,2, 0,0,0,0, 0,0,0,0
+    };
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    rtcp_usbmux_transport_t transport = {fake_send, fake_recv, &fake};
+    for (unsigned scenario = 0; scenario < 5; ++scenario) {
+        memset(&fake, 0, sizeof(fake));
+        rtcp_usbmux_init(&host, &transport);
+        if (scenario != 0) {
+            memcpy(fake.received[0].data, version, sizeof(version));
+            fake.received[0].length = sizeof(version);
+            fake.received_count = 1;
+        }
+        if (scenario == 1) { /* fragmented VERSION */
+            fake.received[0].length = 7;
+            memcpy(fake.received[1].data, version + 7, sizeof(version) - 7);
+            fake.received[1].length = sizeof(version) - 7;
+            fake.received_count = 2;
+        } else if (scenario == 2) { /* v1 is explicitly unsupported */
+            fake.received[0].data[11] = 1;
+        } else if (scenario == 3) { /* missing last byte must not succeed */
+            fake.received[0].length--;
+        } else if (scenario == 4) { /* malformed declared size */
+            fake.received[0].data[7] = 16;
+        }
+        int ret = rtcp_usbmux_start(&host, 0);
+        if (scenario == 1) {
+            assert(ret == RTCP_OK && host.started);
+            assert(host.peer_major == 2 && host.peer_minor == 0);
+            assert(host.rx_bytes == 20 && host.rx_frames == 1);
+            assert(fake.sent_count == 2);
+            unsigned sent = fake.sent_count;
+            assert(rtcp_usbmux_start(&host, 0) == RTCP_OK);
+            assert(fake.sent_count == sent);
+        } else {
+            assert(ret == (scenario == 2 || scenario == 4 ? RTCP_EIO : RTCP_ETIMEDOUT));
+            assert(!host.started && fake.sent_count == 1); /* no SETUP */
+            rtcp_usbmux_connection_t *connection = NULL;
+            assert(rtcp_usbmux_connect(&host, 62078, 0, 100, &connection) == RTCP_ESTATE);
+        }
+    }
+}
+
+static void test_mux_sequence_echo(void)
+{
+    static rtcp_usbmux_host_t host;
+    static fake_transport_t fake;
+    start_host(&host, &fake);
+    queue_device_frame(&fake, 62078, 1, 100, 1,
+                       RTCP_USBMUX_TH_SYN | RTCP_USBMUX_TH_ACK, NULL, 0);
+    /* Different tx/rx sentinels ensure we echo rx_seq, as usbmuxd does. */
+    uint8_t *header = fake.received[fake.received_count - 1].data;
+    header[12] = 0xab; header[13] = 0xcd;
+    header[14] = 0x12; header[15] = 0x34;
+    rtcp_usbmux_connection_t *connection = NULL;
+    assert(rtcp_usbmux_connect(&host, 62078, 0, 100, &connection) == RTCP_OK);
+    assert(fake.sent[3].data[13] == 2); /* SETUP=0, SYN=1, ACK=2 */
+    assert(fake.sent[3].data[14] == 0x12 && fake.sent[3].data[15] == 0x34);
+    rtcp_usbmux_connection_close(&host, connection);
+}
+
 static void test_optional_reply_padding(void)
 {
     static rtcp_usbmux_host_t host;
@@ -427,6 +499,8 @@ int main(void)
     test_partial_frame();
     test_overflow_resets_and_reconnect();
     test_optional_reply_padding();
+    test_version_negotiation();
+    test_mux_sequence_echo();
     puts("usbmux host test passed");
     return 0;
 }

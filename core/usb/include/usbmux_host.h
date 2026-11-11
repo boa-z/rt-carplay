@@ -70,6 +70,12 @@ typedef struct {
     rtcp_usbmux_transport_t transport;
     uint16_t next_local_port;
     uint16_t tx_index;
+    uint16_t rx_index;
+    bool version_received;
+    uint32_t peer_major;
+    uint32_t peer_minor;
+    uint32_t rx_bytes;
+    uint32_t rx_frames;
     bool started;
     rtcp_usbmux_connection_t connections[RTCP_USBMUX_MAX_CONNECTIONS];
     uint8_t reassembly[RTCP_USBMUX_REASSEMBLY_CAPACITY];
@@ -85,10 +91,8 @@ typedef struct {
 void rtcp_usbmux_init(rtcp_usbmux_host_t *host,
                       const rtcp_usbmux_transport_t *transport);
 
-/* Send the 20-byte version packet, wait briefly for the device's answer (as
- * the reference does) and send the setup packet.  Returns RTCP_OK or the
- * transport error.  A timeout while waiting for the version answer is not an
- * error: some devices answer only after setup. */
+/* Negotiate version 2 before sending SETUP. Timeout or malformed/unsupported
+ * version replies fail startup; transport send success is not negotiation. */
 int rtcp_usbmux_start(rtcp_usbmux_host_t *host, uint32_t now_ms);
 
 /* Open a stream to remote_port: send SYN and pump until the device answers

@@ -25,6 +25,8 @@ static int send_tcp(rtcp_usbmux_host_t *host,
     if (frame_length == 0U) {
         return RTCP_EINVAL;
     }
+    host->tx_frame[14] = (uint8_t)(host->rx_index >> 8U);
+    host->tx_frame[15] = (uint8_t)host->rx_index;
     ++host->tx_index;
     return host->transport.send(host->transport.user, host->tx_frame,
                                 frame_length);
@@ -113,12 +115,13 @@ void rtcp_usbmux_init(rtcp_usbmux_host_t *host,
 
 int rtcp_usbmux_start(rtcp_usbmux_host_t *host, uint32_t now_ms)
 {
-    (void)now_ms;
     if (host == NULL || host->transport.send == NULL ||
         host->transport.recv == NULL) {
         return RTCP_EINVAL;
     }
 
+    if (host->started) return RTCP_OK;
+    host->version_received = false;
     size_t length = rtcp_usbmux_build_version(host->tx_frame,
                                               sizeof(host->tx_frame));
     if (length == 0U) {
@@ -129,11 +132,23 @@ int rtcp_usbmux_start(rtcp_usbmux_host_t *host, uint32_t now_ms)
     if (ret < 0) {
         return ret;
     }
-    ++host->tx_index;
-
-    /* The iPhone may answer the version packet, but the reference only reads
-     * once with a short timeout and ignores the result. */
-    (void)rtcp_usbmux_pump(host, USBMUX_VERSION_REPLY_MS, now_ms);
+    /* usbmuxd sends SETUP only after a valid VERSION response. Pump in
+     * bounded slices so fragmented replies are assembled within the budget. */
+    for (uint32_t elapsed = 0; elapsed < USBMUX_VERSION_REPLY_MS;
+         elapsed += USBMUX_CONNECT_PUMP_MS) {
+        ret = rtcp_usbmux_pump(host, USBMUX_CONNECT_PUMP_MS, now_ms + elapsed);
+        if (ret < 0) return ret;
+        if (host->version_received) break;
+    }
+    RTCP_LOGI(USBMUX_HOST_TAG, "version reply=%u peer=%u.%u bytes=%u frames=%u",
+              (unsigned)host->version_received, (unsigned)host->peer_major,
+              (unsigned)host->peer_minor, (unsigned)host->rx_bytes,
+              (unsigned)host->rx_frames);
+    if (!host->version_received) return RTCP_ETIMEDOUT;
+    /* Protocol v1 needs different framing throughout; reject explicitly. */
+    if (host->peer_major != RTCP_USBMUX_VERSION) return RTCP_EIO;
+    host->tx_index = 0U;
+    host->rx_index = 0xffffU;
 
     length = rtcp_usbmux_build_setup(host->tx_frame, sizeof(host->tx_frame),
                                      0x07U, host->tx_index);
@@ -201,6 +216,9 @@ int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
     if (received < 0) {
         return received;
     }
+    if ((size_t)received > sizeof(host->reassembly) - host->reassembly_length)
+        return RTCP_EIO;
+    host->rx_bytes += (uint32_t)received;
     host->reassembly_length += (size_t)received;
 
     int frames = 0;
@@ -231,9 +249,22 @@ int rtcp_usbmux_pump(rtcp_usbmux_host_t *host, uint32_t timeout_ms,
             host->reassembly_length = 0U;
             return RTCP_EIO;
         }
-        if (proto == RTCP_USBMUX_PROTO_TCP) {
-            handle_tcp(host, payload, payload_length);
+        if (proto == RTCP_USBMUX_PROTO_VERSION) {
+            if (host->started || host->version_received || payload_length != 12U)
+                return RTCP_EIO;
+            host->peer_major = read_be32(payload);
+            host->peer_minor = read_be32(payload + 4U);
+            host->version_received = true;
+        } else {
+            if (!host->version_received) return RTCP_EIO;
+            /* Echo the peer's rx_seq as usbmuxd device_data_input does;
+             * this is distinct from the TCP stream acknowledgment. */
+            const uint8_t *header = host->reassembly + offset;
+            host->rx_index = (uint16_t)((uint16_t)header[14] << 8U | header[15]);
+            if (proto == RTCP_USBMUX_PROTO_TCP)
+                handle_tcp(host, payload, payload_length);
         }
+        ++host->rx_frames;
         offset += frame_length;
         ++frames;
     }
@@ -271,6 +302,7 @@ int rtcp_usbmux_connect(rtcp_usbmux_host_t *host, uint16_t remote_port,
         return RTCP_EINVAL;
     }
     *connection = NULL;
+    if (!host->started) return RTCP_ESTATE;
     rtcp_usbmux_connection_t *candidate = allocate_connection(host);
     if (candidate == NULL) {
         return RTCP_ENOMEM;
@@ -302,6 +334,11 @@ int rtcp_usbmux_connect(rtcp_usbmux_host_t *host, uint16_t remote_port,
         }
     }
 
+    RTCP_LOGW(USBMUX_HOST_TAG,
+              "connect timeout local=%u remote=%u rxbytes=%u frames=%u pending=%u",
+              candidate->local_port, candidate->remote_port,
+              (unsigned)host->rx_bytes, (unsigned)host->rx_frames,
+              (unsigned)host->reassembly_length);
     candidate->used = false;
     return RTCP_ETIMEDOUT;
 }

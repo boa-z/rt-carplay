@@ -134,6 +134,12 @@ callback, and drops a session on a tampered frame and then reconnects with
 Pair-Verify against the stored pairing.  Pairing with a physical controller
 still needs the hardware.
 
+## USBMUX board diagnostics
+
+See [USBMUX negotiation audit and validation](docs/usbmux-validation.md) for
+source-backed version/sequence behavior, the limits of older `version/setup`
+messages, and the D213 test procedure.
+
 ## License
 
 **GPL-3.0-or-later** (architecture decision A1, confirmed 2026-11-08).  See

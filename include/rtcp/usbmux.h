@@ -6,11 +6,12 @@
  * USBMUX is not iAP2 and not NCM.  It is a small framing protocol that
  * carries several TCP-like streams over one bulk pipe:
  *
- *   frame  = proto:u32be | length:u32be | magic:u32be | tx:u16be | 0:u16
+ *   frame  = proto:u32be | length:u32be | magic:u32be | tx:u16be | rx:u16be
  *            | payload
  *
  * The first frame sent by the host is the 20-byte version packet; it is the
- * one packet whose third word is the mux version (2), not the magic.  The
+ * initial packet uses an eight-byte header and three u32be words for
+ * major (2), minor and padding, rather than the v2 header/magic.  The
  * host then sends a setup packet (proto 2, payload 0x07) and may open TCP
  * streams (proto 6) whose payload starts with a 20-byte TCP header in the
  * same layout Apple's usbmuxd uses.

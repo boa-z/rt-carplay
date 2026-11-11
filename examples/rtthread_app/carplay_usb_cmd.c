@@ -259,6 +259,10 @@ static int cmd_mux(void)
     rtcp_usbmux_init(&s_mux, &transport);
     ret = rtcp_usbmux_start(&s_mux, 0U);
     rt_kprintf("[carplay_usb] mux: version/setup ret=%d\n", ret);
+    rt_kprintf("[carplay_usb] mux: version_rx=%u peer=%u.%u rxbytes=%u frames=%u\n",
+               (unsigned)s_mux.version_received, (unsigned)s_mux.peer_major,
+               (unsigned)s_mux.peer_minor, (unsigned)s_mux.rx_bytes,
+               (unsigned)s_mux.rx_frames);
     if (ret < 0) {
         return 0;
     }
@@ -267,6 +271,9 @@ static int cmd_mux(void)
     ret = rtcp_usbmux_connect(&s_mux, RTCP_USBMUX_LOCKDOWN_PORT, 0U, 5000U,
                               &connection);
     rt_kprintf("[carplay_usb] mux: lockdown connect ret=%d\n", ret);
+    rt_kprintf("[carplay_usb] mux: rxbytes=%u frames=%u pending=%u\n",
+               (unsigned)s_mux.rx_bytes, (unsigned)s_mux.rx_frames,
+               (unsigned)s_mux.reassembly_length);
     if (ret < 0) {
         return 0;
     }
@@ -482,6 +489,10 @@ static int cmd_pair(void)
     rtcp_usbmux_init(&s_mux, &transport);
     ret = rtcp_usbmux_start(&s_mux, lockdown_now_ms());
     rt_kprintf("[carplay_usb] pair: mux version/setup ret=%d\n", ret);
+    rt_kprintf("[carplay_usb] pair: version_rx=%u peer=%u.%u rxbytes=%u frames=%u\n",
+               (unsigned)s_mux.version_received, (unsigned)s_mux.peer_major,
+               (unsigned)s_mux.peer_minor, (unsigned)s_mux.rx_bytes,
+               (unsigned)s_mux.rx_frames);
     if (ret < 0) {
         return 0;
     }
@@ -508,6 +519,9 @@ static int cmd_pair(void)
         rt_kprintf("[carplay_usb] pair: failed ret=%d stage=%s error='%s'\n",
                    ret, rtcp_lockdown_stage_name(s_lockdown_session.stage),
                    s_lockdown_session.remote_error);
+        rt_kprintf("[carplay_usb] pair: rxbytes=%u frames=%u pending=%u\n",
+                   (unsigned)s_mux.rx_bytes, (unsigned)s_mux.rx_frames,
+                   (unsigned)s_mux.reassembly_length);
         return 0;
     }
     rt_kprintf("[carplay_usb] pair: host=%s system=%s wifi=%s\n",

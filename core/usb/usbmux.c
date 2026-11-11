@@ -48,12 +48,12 @@ size_t rtcp_usbmux_build_version(uint8_t *output, size_t capacity)
     if (output == NULL || capacity < RTCP_USBMUX_VERSION_PACKET_SIZE) {
         return 0U;
     }
-    /* The version packet is special: the third word is the protocol
-     * version, not 0xfeedface.  The remaining payload is zero. */
-    write_header(output, RTCP_USBMUX_PROTO_VERSION,
-                 RTCP_USBMUX_VERSION_PACKET_SIZE, RTCP_USBMUX_VERSION, 0U);
-    memset(output + RTCP_USBMUX_HEADER_SIZE, 0,
-           RTCP_USBMUX_VERSION_PACKET_SIZE - RTCP_USBMUX_HEADER_SIZE);
+    /* usbmuxd starts with the v1 8-byte header plus version_header. */
+    write_be32(output, RTCP_USBMUX_PROTO_VERSION);
+    write_be32(output + 4U, RTCP_USBMUX_VERSION_PACKET_SIZE);
+    write_be32(output + 8U, RTCP_USBMUX_VERSION);
+    write_be32(output + 12U, 0U); /* minor */
+    write_be32(output + 16U, 0U); /* padding */
     return RTCP_USBMUX_VERSION_PACKET_SIZE;
 }
 
@@ -66,6 +66,7 @@ size_t rtcp_usbmux_build_setup(uint8_t *output, size_t capacity, uint8_t flags,
     }
     write_header(output, RTCP_USBMUX_PROTO_SETUP, (uint32_t)frame_length,
                  RTCP_USBMUX_MAGIC, tx_index);
+    write_be16(output + 14U, 0xffffU); /* initial peer rx sequence */
     output[RTCP_USBMUX_HEADER_SIZE] = flags;
     return frame_length;
 }
@@ -124,20 +125,23 @@ int rtcp_usbmux_parse_frame(const uint8_t *data, size_t length,
     if (length < frame_size) {
         return 0;
     }
-    if (frame_size < RTCP_USBMUX_HEADER_SIZE) {
-        /* The version packet is the only frame that may be shorter than the
-         * full mux header (8 bytes proto+length is not valid on its own). */
-        return RTCP_EIO;
-    }
-    if (frame_proto != RTCP_USBMUX_PROTO_VERSION &&
-        read_be32(data + 8U) != RTCP_USBMUX_MAGIC) {
+    /* Initial VERSION uses the v1 eight-byte mux header followed by
+     * major/minor/padding, even when negotiating v2. usbmuxd device.c uses
+     * dev->version=0 until that reply has been accepted. */
+    size_t header_size = frame_proto == RTCP_USBMUX_PROTO_VERSION
+                             ? 8U : RTCP_USBMUX_HEADER_SIZE;
+    if (frame_size < header_size ||
+        (frame_proto == RTCP_USBMUX_PROTO_VERSION &&
+         frame_size != RTCP_USBMUX_VERSION_PACKET_SIZE) ||
+        (frame_proto != RTCP_USBMUX_PROTO_VERSION &&
+         read_be32(data + 8U) != RTCP_USBMUX_MAGIC)) {
         return RTCP_EIO;
     }
 
     *frame_length = frame_size;
     *proto = frame_proto;
-    *payload = data + RTCP_USBMUX_HEADER_SIZE;
-    *payload_length = frame_size - RTCP_USBMUX_HEADER_SIZE;
+    *payload = data + header_size;
+    *payload_length = frame_size - header_size;
     return 1;
 }
 

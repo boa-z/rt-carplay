@@ -31,7 +31,7 @@ static void test_setup_packet(void)
         0x00, 0x00, 0x00, 0x11, /* 17 bytes */
         0xfe, 0xed, 0xfa, 0xce, /* magic */
         0x00, 0x00,             /* tx index 0 */
-        0x00, 0x00,             /* reserved */
+        0xff, 0xff,             /* initial rx sequence */
         0x07,                   /* flags */
     };
     uint8_t packet[32];
@@ -118,7 +118,7 @@ static void test_parse_frame(void)
                                    &proto, &payload,
                                    &payload_length) == 1);
     assert(proto == RTCP_USBMUX_PROTO_VERSION);
-    assert(frame_length == 20U && payload_length == 4U);
+    assert(frame_length == 20U && payload_length == 12U);
 }
 
 static void test_parse_frame_errors(void)

@@ -8,15 +8,17 @@
 menu "rt-carplay application"
 
 config RTCARPLAY_DEMO_LAUNCHER
-    bool "LVGL wired demonstration launch page and automatic connection"
+    bool "LVGL USB/wireless demonstration launch page"
     default n
     depends on LPKG_USING_LVGL && LVGL_V_9 && RTCARPLAY_USB_HOST && RTCARPLAY_VIDEO
     depends on !RT_USING_MODULE && !LPKG_USING_LVGL_SQUARELINE
     help
-      Display an informational launch page, start the wired receiver and
-      automatically pair/start iAP2 when an iPhone is attached. No console
-      commands are needed. Unlock/trust/CarPlay consent on the phone remain
-      required. Unplugging closes the session and returns to the page.
+      Display a USB/wireless selector with connection diagnostics and
+      pairing record management. USB starts automatically by default.
+      Wireless requires the Wi-Fi and Bluetooth iAP2 options; the UI starts
+      SoftAP/mDNS and RFCOMM and handles numeric pairing confirmation.
+      No console commands are needed. Phone consent remains required.
+      Mode switches quiesce the old session before restarting the receiver.
       Requires the SDK lv_user_gui_init hook. LVGL never opens the panel;
       CarPlay owns touch exclusively. Do not mix manual start/stop commands
       with this automatic owner. Disable for manual bring-up.
@@ -168,6 +170,22 @@ config RTCARPLAY_BT
       the iAP2 RFCOMM service with an SDP record, accept a phone connection
       and echo bytes.  This is the board bring-up path for the wireless iAP2
       transport; it does not start iAP2 or CarPlay by itself.
+
+config SETTINGS
+    bool
+    help
+      Zephyr settings API provided by the CarPlay DFS backend.
+
+config RTCARPLAY_BT_PERSISTENCE
+    bool "Save Bluetooth bonds in /data"
+    depends on RTCARPLAY_BT && RT_USING_DFS
+    default y
+    select SETTINGS
+    select LPKG_BT_SETTINGS
+    help
+      Restore Bluetooth link keys before publishing the iAP2 service.
+      Uses rt-carplay/port/luban-lite/rtcp_bt_settings.c and the SDK
+      settings-handler linker section. A full firmware flash erases /data.
 
 config RTCARPLAY_IAP2
     bool "Wireless iAP2 session command"

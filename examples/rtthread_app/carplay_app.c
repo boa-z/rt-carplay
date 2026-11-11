@@ -548,6 +548,7 @@ static void shutdown_stack(app_state_t *app)
         mdns_browser_destroy(app->browser);
         app->browser = NULL;
     }
+    rtcp_net_rtthread_multicast_interface(NULL);
     if (app->server != NULL) {
         airplay_rtsp_server_stop(app->server);
         app->server = NULL;
@@ -866,6 +867,18 @@ static int start_wifi(app_state_t *app)
     }
     app->ap_started = true;
 
+    /* This SDK's dhcpd_start changes the AP address to DHCPD_SERVER_IP.
+     * Read/announce the final address only after that operation. */
+    result = RTCP_ESTATE;
+    for (unsigned attempt = 0; attempt < IP_WAIT_TRIES && result == RTCP_ESTATE; ++attempt) {
+        result = rtcp_wifi_lubanlite_start_dhcpd();
+        if (result == RTCP_ESTATE) rt_thread_mdelay(IP_WAIT_STEP_MS);
+    }
+    if (result != RTCP_OK) {
+        APP_LOG("DHCP server unavailable rc=%d", result);
+        return result;
+    }
+
     size_t ie_len = 0U;
     const uint8_t *ie = airplay_vendor_ie(&ie_len);
     result = rtcp_wifi_lubanlite.set_vendor_ie(ie, ie_len);
@@ -893,10 +906,6 @@ static int start_wifi(app_state_t *app)
         APP_LOG("cannot read the Wi-Fi MAC; keeping the seed-derived device id");
     }
 
-    result = rtcp_wifi_lubanlite_start_dhcpd();
-    if (result != RTCP_OK && result != RTCP_ENOTSUP) {
-        APP_LOG("DHCP server start rc=%d", result);
-    }
     return RTCP_OK;
 }
 #endif /* LPKG_RT_CARPLAY_LUBANLITE_WIFI */
@@ -1088,6 +1097,9 @@ int carplay_app_start(const carplay_app_config_t *config)
          * the phone on.  The response arrives over the NCM netif. */
         APP_LOG("wired mode: mDNS/Control browse disabled");
     } else {
+        /* IPHETH may still be attached. Join/send mDNS on this AP rather
+         * than whichever interface currently owns lwIP's default route. */
+        rtcp_net_rtthread_multicast_interface(app->ipv4);
         app->mdns = mdns_responder_create(&mdns_config);
         result = app->mdns == NULL ? RTCP_ENOMEM
                                    : mdns_responder_open(app->mdns,
@@ -1180,14 +1192,15 @@ int carplay_app_start(const carplay_app_config_t *config)
 int carplay_app_stop(void)
 {
     if (!s_app.running) return RTCP_OK;
-    s_app.stop = true;
 #if defined(RTCARPLAY_IAP2)
     /* The iAP2 session borrows the receiver state, so retire it before the
      * poll thread clears the stack.  The iAP2 thread owns its teardown. */
-    if (carplay_bt_owner() == CARPLAY_BT_OWNER_IAP2) {
-        carplay_iap2_request_stop();
+    if (carplay_iap2_is_running()) {
+        int result = carplay_iap2_stop();
+        if (result != RTCP_OK) return result;
     }
 #endif
+    s_app.stop = true;
     /* The poll thread tears the stack down before clearing running. */
     while (s_app.running) {
         rt_thread_mdelay(10);
@@ -1215,7 +1228,7 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *info)
 {
     if (info == NULL) return RTCP_EINVAL;
     app_state_t *app = &s_app;
-    if (!app->running || app->stop) return RTCP_ESTATE;
+    if (!app->running || app->stop || app->wired) return RTCP_ESTATE;
 
     memset(info, 0, sizeof(*info));
     info->name = app->name;
@@ -1329,7 +1342,7 @@ static int cmd_carplay_start(int argc, char **argv)
 {
 #ifdef RTCARPLAY_DEMO_LAUNCHER
     (void)argc; (void)argv;
-    rt_kprintf("automatic wired demo is active; connect an unlocked iPhone\n");
+    rt_kprintf("LVGL demo is active; select USB or Wireless on the display\n");
     return 0;
 #endif
     bool wired = argc > 1 && strcmp(argv[1], "wired") == 0;
@@ -1358,7 +1371,7 @@ static int cmd_carplay_stop(int argc, char **argv)
     (void)argc;
     (void)argv;
 #ifdef RTCARPLAY_DEMO_LAUNCHER
-    rt_kprintf("automatic wired demo owns the receiver; unplug to end the session\n");
+    rt_kprintf("LVGL demo owns the receiver; use the connection selector\n");
     return 0;
 #endif
     (void)carplay_app_stop();
@@ -1569,6 +1582,12 @@ done:
 static int cmd_carplay_bt(int argc, char **argv)
 {
     const char *sub = argc >= 2 ? argv[1] : "status";
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+    if (strcmp(sub, "status") != 0) {
+        rt_kprintf("LVGL demo owns Bluetooth; use the connection selector\n");
+        return 0;
+    }
+#endif
     if (strcmp(sub, "start") == 0) {
         if (s_bt_thread_running) {
             rt_kprintf("carplay_bt already running\n");

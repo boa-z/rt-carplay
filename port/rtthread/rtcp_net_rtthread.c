@@ -26,6 +26,13 @@
 
 #include "rtcp/rtcp.h"
 
+static uint8_t multicast_interface[4];
+void rtcp_net_rtthread_multicast_interface(const uint8_t ipv4[4])
+{
+    if (ipv4) memcpy(multicast_interface, ipv4, sizeof(multicast_interface));
+    else memset(multicast_interface, 0, sizeof(multicast_interface));
+}
+
 #if (defined(NETDEV_IPV6) && NETDEV_IPV6) || \
     (defined(LWIP_IPV6) && LWIP_IPV6)
 #define RTCP_NET_HAVE_IPV6 1
@@ -359,6 +366,11 @@ static int udp_join(int fd, const uint8_t group[4])
     struct ip_mreq request;
     memset(&request, 0, sizeof(request));
     memcpy(&request.imr_multiaddr, group, 4U);
+    memcpy(&request.imr_interface, multicast_interface, 4U);
+#ifdef IP_MULTICAST_IF
+    if (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &request.imr_interface,
+                   sizeof(request.imr_interface)) != 0) return RTCP_EIO;
+#endif
     if (setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &request,
                    sizeof(request)) != 0) {
         return RTCP_EIO;

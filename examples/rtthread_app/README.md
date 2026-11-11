@@ -455,15 +455,16 @@ queued inputs and event-channel HID writes. A successful HID write alone does
 not establish that the phone acted on the touch.
 
 
-## Automatic LVGL wired demonstration
+## Automatic LVGL USB / wireless demonstration
 
 Enable `RTCARPLAY_DEMO_LAUNCHER` (LVGL v9 + USB host + video). The D213 SDK
 application target now enables it. The SDK's `lv_user_gui_init()` must call
 `carplay_demo_launcher_init()` under that option; main() does not also start a
 receiver. `RTCARPLAY_AUTO_START` is mutually exclusive.
 
-After boot, the English launch page displays USB/trust/connection guidance and
-the receiver PIN. Plug in an unlocked iPhone and accept Trust/CarPlay on the
+After boot, the English launch page defaults to USB and offers a Wireless
+selector when iAP2 and the Wi-Fi port are enabled. It displays connection
+guidance, diagnostics and pairing management. Plug in an unlocked iPhone and accept Trust/CarPlay on the
 phone if requested. The worker starts the wired receiver, waits for attachment,
 pairs, waits for a usable IPv6 endpoint, then starts iAP2. The launch page stays
 visible until the first decoded frame; input remains exclusively owned by the
@@ -481,8 +482,8 @@ the pair operation waiting; it is not cancelled by a UI timer.
 Manual `carplay_start`, `carplay_stop` and mutating `carplay_usb` commands are
 disabled in this demonstration build so they cannot race the owning worker.
 Read-only status commands remain available. Disable the launcher Kconfig option
-and rebuild to restore manual bring-up. Wireless start and audio-stream support
-are not added by the page. Board validation must cover initial boot, phone
+and rebuild to restore manual bring-up. Audio-stream support is unchanged.
+Board validation must cover initial boot, phone
 consent, first-frame display, physical touch, unplug and reconnect; host tests
 cannot validate the panel/DE transition.
 
@@ -490,6 +491,36 @@ cannot validate the panel/DE transition.
 make check-lubanlite-demo SDK_ROOT=/path/to/luban-lite
 ```
 
-The host test drives the actual demo worker through pairing rejection/replug,
-network readiness, first-frame wait and delayed iAP2 shutdown. The UI compiles
-against SDK LVGL public headers but is not rendered by that test.
+In Wireless mode the same owner starts the AP/DHCP/AirPlay receiver, then
+Bluetooth iAP2. On the iPhone, select `rt-carplay` in Bluetooth settings and
+follow the CarPlay prompt. When numeric comparison is requested, compare the
+six digits and confirm on both screens. Bluetooth handover to Wi-Fi can close
+RFCOMM normally; this does not by itself end the AirPlay session. The launcher
+requires an AirPlay event connection and a decoded frame before declaring it
+live. Bluetooth startup and pairing-to-first-frame have bounded timeouts;
+waiting for a phone does not. Mode changes wait for the old owner to finish
+before replacing receiver state. A blocking USB trust operation must finish
+or time out before a requested mode change takes effect.
+
+`RTCARPLAY_BT_PERSISTENCE` enables the DFS settings backend and SDK Bluetooth
+settings handlers. The D213 linker script must retain the static handler
+section. Bonds live in `/data/bt_settings.bin`; the UI reports storage errors.
+A full flash erases them, whereas an ordinary reboot should restore them.
+The pairing manager can forget USB trust records, AirPlay controllers, or all
+Classic Bluetooth bonds. Bluetooth forgetting uses the host API and a settings
+rewrite, preserving local identity; it never raw-deletes the live settings
+file. Forget the accessory on the iPhone as well before pairing again.
+
+The host test drives the actual demo worker through wired rejection/replug,
+wireless asynchronous startup failure, mode changes, first-frame gating,
+handover, pairing-manager quiescence and delayed shutdown. The UI compiles
+against SDK LVGL public headers but is not rendered by that test. Persistence
+and multicast tests are separate:
+
+```
+make check-lubanlite-bonds SDK_ROOT=/path/to/luban-lite
+make check-rtthread-multicast
+```
+
+See [wireless-bringup.md](../../docs/wireless-bringup.md) for the code findings,
+device test matrix and limits of host validation.

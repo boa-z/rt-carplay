@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Interactive LVGL launch page + one owner for the automatic wired demo.
- * LVGL objects are touched only by the LVGL thread. USB, TLS and shutdown
+/* Interactive LVGL launch page + one owner for USB and wireless sessions.
+ * LVGL objects are touched only by the LVGL thread. Radio, USB, TLS and shutdown
  * run on a separate worker. The launcher retains exclusive panel ownership across receiver restarts. */
 #include <rtthread.h>
 #include <stdio.h>
@@ -13,6 +13,14 @@
 #include "rtcp/input.h"
 #include "pairing_manager.h"
 #include "touch_panel_lubanlite.h"
+#include "iap2_link_lubanlite.h"
+#include "rtcp_lubanlite.h"
+
+#if defined(RTCARPLAY_IAP2) && defined(LPKG_RT_CARPLAY_LUBANLITE_WIFI)
+#define DEMO_HAS_WIRELESS 1
+#else
+#define DEMO_HAS_WIRELESS 0
+#endif
 
 typedef enum {
     DEMO_BOOT, DEMO_WAIT, DEMO_PAIR, DEMO_NETWORK, DEMO_CONNECT,
@@ -24,6 +32,9 @@ typedef struct {
     int error;
     char pin[16];
     bool usb;
+    bool wireless, bt_ready, bt_connected, bt_identified, bt_authenticated;
+    char ssid[33];
+    rtcp_bt_pairing_status_t pairing;
     char ipv6[64];
     unsigned received, frames, drops, errors, hid_sent, hid_failed;
     int trust, storage_error;
@@ -35,6 +46,12 @@ static rt_mutex_t status_lock;
 static demo_status_t status;
 static lv_obj_t *heading, *description, *pin_label, *badge, *debug_label;
 static lv_obj_t *steps[3];
+static lv_obj_t *step_labels[3], *mode_buttons[2];
+static bool requested_wireless;
+static uint32_t pairing_reply_request;
+static bool pairing_reply_pending, pairing_reply_accept;
+static lv_obj_t *bt_panel, *bt_text, *bt_accept;
+static uint32_t visible_pairing_request;
 
 /* The worker owns files and sessions; the LVGL thread only posts requests. */
 typedef enum { FILE_NONE, FILE_SCAN, FILE_DELETE, FILE_RETRY } file_action_t;
@@ -52,6 +69,19 @@ static demo_pointer_t pointer_queue[32], pointer_state;
 static unsigned pointer_head, pointer_tail;
 static bool pointer_active;
 static uint16_t pointer_id;
+
+static bool mode_changed(void)
+{
+    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
+    bool changed = requested_wireless != status.wireless;
+    (void)rt_mutex_release(status_lock);
+    return changed;
+}
+
+static int start_receiver(void)
+{
+    return status.wireless ? carplay_app_autostart() : carplay_app_autostart_wired();
+}
 
 /* Called only by the existing GT911 reader. No LVGL calls here. */
 bool carplay_demo_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
@@ -117,7 +147,7 @@ static void pointer_read(lv_indev_t *indev, lv_indev_data_t *data)
 
 static const char *stage_name(demo_stage_t stage)
 {
-    static const char *names[] = {"Starting", "Waiting for USB", "USB pairing", "IPv6 setup",
+    static const char *names[] = {"Starting", "Waiting for phone", "iAP2 pairing", "Network setup",
                                   "AirPlay pairing", "Video active", "Closing", "Failed"};
     return stage <= DEMO_FAILED ? names[stage] : "Unknown";
 }
@@ -129,6 +159,21 @@ static void sample_debug(void)
     carplay_app_wired_info_t endpoint;
     if (carplay_app_is_running() && carplay_app_wired_info(&endpoint) == RTCP_OK)
         snprintf(sample.ipv6, sizeof(sample.ipv6), "%s", endpoint.ipv6);
+#if DEMO_HAS_WIRELESS
+    if (status.wireless) {
+        carplay_app_iap2_info_t info;
+        if (carplay_app_iap2_info(&info) == RTCP_OK) {
+            snprintf(sample.ssid, sizeof(sample.ssid), "%s", info.ssid);
+            snprintf(sample.ipv6, sizeof(sample.ipv6), "%u.%u.%u.%u",
+                     info.ipv4[0], info.ipv4[1], info.ipv4[2], info.ipv4[3]);
+        }
+        carplay_iap2_status_t bt;
+        carplay_iap2_get_status(&bt);
+        sample.bt_ready = bt.listening; sample.bt_connected = bt.connected;
+        sample.bt_identified = bt.identified; sample.bt_authenticated = bt.authenticated;
+        rtcp_bt_lubanlite_pairing_status(&sample.pairing);
+    }
+#endif
     carplay_video_sink_stats(NULL, &sample.frames, &sample.drops, &sample.errors);
     carplay_app_debug_counters(&sample.received, &sample.hid_sent, &sample.hid_failed);
     carplay_app_performance_report();
@@ -137,6 +182,10 @@ static void sample_debug(void)
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
     status.usb = sample.usb;
     memcpy(status.ipv6, sample.ipv6, sizeof(status.ipv6));
+    memcpy(status.ssid, sample.ssid, sizeof(status.ssid));
+    status.bt_ready = sample.bt_ready; status.bt_connected = sample.bt_connected;
+    status.bt_identified = sample.bt_identified; status.bt_authenticated = sample.bt_authenticated;
+    status.pairing = sample.pairing;
     status.received = sample.received; status.frames = sample.frames;
     status.drops = sample.drops; status.errors = sample.errors;
     status.hid_sent = sample.hid_sent; status.hid_failed = sample.hid_failed;
@@ -164,7 +213,12 @@ static void close_session(void)
     publish(DEMO_CLOSING, 0);
     while (carplay_usb_close_session() != RTCP_OK)
         rt_thread_mdelay(250);
-    (void)carplay_app_stop();
+#if DEMO_HAS_WIRELESS
+    /* An asynchronous BT controller startup may exceed one stop timeout.
+     * Keep its borrowed receiver state alive until the owner really exits. */
+    while (carplay_iap2_stop() != RTCP_OK) rt_thread_mdelay(250);
+#endif
+    while (carplay_app_stop() != RTCP_OK) rt_thread_mdelay(250);
 }
 
 /* Called only with no active USB session. The launcher's single panel
@@ -184,8 +238,14 @@ static bool idle_actions(void)
         /* USB is quiescent here. Restart reloads the AirPlay controller table
          * and prevents an old in-memory copy from rewriting a deleted file. */
         result = carplay_app_stop();
-        if (result == RTCP_OK) result = carplay_pair_file_forget("/data", name);
-        int start = carplay_app_autostart_wired();
+        if (result == RTCP_OK) {
+#if DEMO_HAS_WIRELESS
+            if (!strcmp(name, "Bluetooth bonds")) result = rtcp_bt_lubanlite_forget_bonds();
+            else
+#endif
+                result = carplay_pair_file_forget("/data", name);
+        }
+        int start = status.wireless ? RTCP_OK : start_receiver();
         if (start != RTCP_OK) { publish(DEMO_FAILED, start); result = start; }
     }
     carplay_pair_file_t files[CARPLAY_PAIR_FILES_MAX];
@@ -205,7 +265,7 @@ static bool claim_connection(void)
 {
     bool ready;
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    ready = !manager_open && file_action == FILE_NONE;
+    ready = !manager_open && file_action == FILE_NONE && !requested_wireless;
     if (ready) {
         status.previous = status.stage; status.stage = DEMO_PAIR;
         status.storage_error = 0;
@@ -214,6 +274,65 @@ static bool claim_connection(void)
     return ready;
 }
 
+#if DEMO_HAS_WIRELESS
+static int wireless_connection(void)
+{
+    int result = carplay_iap2_start();
+    if (result != RTCP_OK) return result;
+    bool handover = false, live = false, connecting = false;
+    uint32_t started = rt_tick_get_millisecond(), pairing_started = 0;
+    while (!mode_changed() && carplay_app_is_running()) {
+        (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
+        bool managing = manager_open;
+        bool reply = pairing_reply_pending, accept = pairing_reply_accept;
+        uint32_t request = pairing_reply_request;
+        pairing_reply_pending = false;
+        (void)rt_mutex_release(status_lock);
+        if (reply) (void)rtcp_bt_lubanlite_pairing_reply(request, accept);
+        if (managing) {
+            /* Freeze incoming BT/AirPlay pairing before reading/deleting
+             * records, and keep it frozen until the modal is closed. */
+            close_session();
+            for (;;) {
+                (void)idle_actions();
+                (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
+                managing = manager_open || file_action != FILE_NONE;
+                (void)rt_mutex_release(status_lock);
+                if (!managing || mode_changed()) return RTCP_OK;
+                rt_thread_mdelay(100);
+            }
+        }
+        carplay_iap2_status_t bt;
+        carplay_iap2_get_status(&bt);
+        if (bt.error) return bt.error;
+        if (!bt.running) return RTCP_EIO;
+        if (!bt.listening && (uint32_t)(rt_tick_get_millisecond() - started) > 60000U)
+            return RTCP_ETIMEDOUT;
+        carplay_app_iap2_info_t info;
+        if (carplay_app_iap2_info(&info) != RTCP_OK) return RTCP_ESTATE;
+        if (!connecting && (bt.connected || info.airplay_connected)) {
+            connecting = true; pairing_started = rt_tick_get_millisecond();
+        }
+        handover |= bt.authenticated || info.airplay_connected;
+        unsigned frames = 0;
+        carplay_video_sink_stats(NULL, &frames, NULL, NULL);
+        if (carplay_app_pairing_storage_error()) return RTCP_EIO;
+        if (live && !info.airplay_connected) return RTCP_OK;
+        demo_stage_t stage = frames && info.airplay_connected ? DEMO_LIVE :
+            info.airplay_connected ? DEMO_CONNECT : handover ? DEMO_NETWORK :
+            bt.connected ? DEMO_PAIR : bt.listening ? DEMO_WAIT : DEMO_BOOT;
+        if (stage != status.stage) publish(stage, 0);
+        live |= stage == DEMO_LIVE;
+        if (connecting && !live &&
+            (uint32_t)(rt_tick_get_millisecond() - pairing_started) > 90000U)
+            return RTCP_ETIMEDOUT;
+        sample_debug();
+        rt_thread_mdelay(200);
+    }
+    return mode_changed() ? RTCP_OK : RTCP_EIO;
+}
+#endif
+
 static void demo_worker(void *argument)
 {
     (void)argument;
@@ -221,46 +340,68 @@ static void demo_worker(void *argument)
     if (ret != RTCP_OK) { publish(DEMO_FAILED, ret); return; }
 
     for (;;) {
-        ret = carplay_app_is_running() ? RTCP_OK : carplay_app_autostart_wired();
+        if (mode_changed()) {
+            close_session();
+            (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
+            status.wireless = requested_wireless;
+            status.stage = DEMO_BOOT;
+            status.last_error = status.storage_error = 0;
+            (void)rt_mutex_release(status_lock);
+        }
+        ret = carplay_app_is_running() ? RTCP_OK : start_receiver();
         if (ret != RTCP_OK) {
             publish(DEMO_FAILED, ret);
-            while (!idle_actions()) rt_thread_mdelay(200);
+            while (!mode_changed() && !idle_actions()) rt_thread_mdelay(200);
             continue;
         }
         (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
         snprintf(status.pin, sizeof(status.pin), "%s", carplay_app_pairing_code());
         (void)rt_mutex_release(status_lock);
+#if DEMO_HAS_WIRELESS
+        if (status.wireless) {
+            ret = wireless_connection();
+            sample_debug();
+            close_session();
+            if (ret != RTCP_OK && !mode_changed()) {
+                publish(DEMO_FAILED, ret);
+                while (!mode_changed() && !idle_actions()) rt_thread_mdelay(200);
+            }
+            continue;
+        }
+#endif
         publish(DEMO_WAIT, 0);
         for (;;) {
+            if (mode_changed()) break;
             bool retry = idle_actions();
             if (retry) {
-                int start = carplay_app_is_running() ? RTCP_OK : carplay_app_autostart_wired();
+                int start = carplay_app_is_running() ? RTCP_OK : start_receiver();
                 publish(start == RTCP_OK ? DEMO_WAIT : DEMO_FAILED, start);
             }
             sample_debug();
             if (carplay_app_is_running() && carplay_usb_attached() && claim_connection()) break;
             rt_thread_mdelay(200);
         }
+        if (mode_changed()) continue;
 
         publish(DEMO_PAIR, 0);
         ret = carplay_usb_pair();
         if (ret == RTCP_OK) {
             publish(DEMO_NETWORK, 0);
             ret = RTCP_ETIMEDOUT;
-            for (unsigned wait = 0; wait < 15000U && carplay_usb_attached(); wait += 100U) {
+            for (unsigned wait = 0; wait < 15000U && carplay_usb_attached() && !mode_changed(); wait += 100U) {
                 carplay_app_wired_info_t endpoint;
                 if (carplay_app_wired_info(&endpoint) == RTCP_OK) { ret = RTCP_OK; break; }
                 sample_debug(); rt_thread_mdelay(100);
             }
         }
-        if (ret == RTCP_OK) {
+        if (ret == RTCP_OK && !mode_changed()) {
             publish(DEMO_CONNECT, 0);
             ret = carplay_usb_start_iap2();
         }
         if (ret == RTCP_OK) {
             ret = RTCP_ETIMEDOUT;
             for (unsigned wait = 0; wait < 90000U && carplay_usb_attached() &&
-                                      carplay_usb_iap2_running(); wait += 200U) {
+                                      carplay_usb_iap2_running() && !mode_changed(); wait += 200U) {
                 sample_debug();
                 if (carplay_app_pairing_storage_error() != RTCP_OK) { ret = RTCP_EIO; break; }
                 unsigned frames = 0;
@@ -269,20 +410,21 @@ static void demo_worker(void *argument)
                 rt_thread_mdelay(200);
             }
         }
-        if (ret == RTCP_OK) {
+        if (ret == RTCP_OK && !mode_changed()) {
             publish(DEMO_LIVE, 0);
             while (carplay_usb_attached() && carplay_usb_iap2_running() &&
-                   carplay_app_is_running()) { sample_debug(); rt_thread_mdelay(250); }
+                   carplay_app_is_running() && !mode_changed()) { sample_debug(); rt_thread_mdelay(250); }
         }
         sample_debug();
         close_session();
+        if (mode_changed()) continue;
         if (carplay_usb_attached()) {
             /* One attempt per attachment: never spin pairing/key generation
              * against a rejected trust dialog or an incompatible phone. */
             int failed = ret != RTCP_OK ? ret : RTCP_EIO;
-            int restart = carplay_app_autostart_wired();
+            int restart = start_receiver();
             publish(DEMO_FAILED, restart != RTCP_OK ? restart : failed);
-            while (carplay_usb_attached()) {
+            while (carplay_usb_attached() && !mode_changed()) {
                 if (idle_actions()) break;
                 rt_thread_mdelay(200);
             }
@@ -354,6 +496,25 @@ static void retry_connection(lv_event_t *event)
         file_action = FILE_RETRY;
     (void)rt_mutex_release(status_lock);
 }
+static void select_mode(lv_event_t *event)
+{
+    bool wireless = lv_event_get_target(event) == mode_buttons[1];
+    if (wireless && !DEMO_HAS_WIRELESS) return;
+    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
+    if (!manager_open && file_action == FILE_NONE &&
+        status.stage != DEMO_CLOSING && status.stage != DEMO_LIVE)
+        requested_wireless = wireless;
+    (void)rt_mutex_release(status_lock);
+}
+static void answer_bluetooth(lv_event_t *event)
+{
+    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
+    pairing_reply_request = visible_pairing_request;
+    pairing_reply_accept = lv_event_get_target(event) == bt_accept;
+    pairing_reply_pending = true;
+    (void)rt_mutex_release(status_lock);
+    lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
+}
 static void cancel_forget(lv_event_t *event)
 {
     (void)event;
@@ -378,10 +539,17 @@ static void select_file(lv_event_t *event)
     snprintf(selected_file, sizeof(selected_file), "%s", name);
     lv_label_set_text_fmt(confirm_text,
         "Forget this pairing record?\n\n%s\n\n%s\nDevice identity will be kept.", name,
+        !strcmp(name, "Bluetooth bonds") ?
+        "Forget this display in iPhone Bluetooth settings, then pair again." :
         !strcmp(name, "rt-carplay-pairings.bin") ?
         "AirPlay controllers will need to pair again." :
         "This iPhone may ask you to tap Trust again.");
     lv_obj_remove_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
+}
+static void select_bluetooth_bonds(lv_event_t *event)
+{
+    lv_obj_set_user_data(lv_event_get_target(event), "Bluetooth bonds");
+    select_file(event);
 }
 static void update_files(void)
 {
@@ -413,27 +581,67 @@ static void update_page(lv_timer_t *timer)
     (void)timer;
     update_files();
     static int last_stage = -1;
+    static int last_mode = -1;
     demo_status_t snapshot;
     if (rt_mutex_take(status_lock, RT_WAITING_NO) != RT_EOK) return;
     snapshot = status;
     (void)rt_mutex_release(status_lock);
-    if (snapshot.stage == DEMO_LIVE && (int)snapshot.stage == last_stage) return;
+    if (snapshot.wireless && snapshot.pairing.kind && snapshot.stage != DEMO_CLOSING &&
+        snapshot.stage != DEMO_FAILED) {
+        if (visible_pairing_request != snapshot.pairing.request) {
+            visible_pairing_request = snapshot.pairing.request;
+            if (snapshot.pairing.kind == RTCP_BT_PAIR_CONSENT)
+                lv_label_set_text(bt_text, "Allow this Bluetooth pairing?\nConfirm only if you just started pairing on your iPhone.");
+            else lv_label_set_text_fmt(bt_text,
+                snapshot.pairing.kind == RTCP_BT_PAIR_COMPARE ?
+                "Bluetooth pairing: %06u\n\nCheck that your iPhone shows the same number.\nThen confirm on both screens." :
+                "Bluetooth pairing: %06u\n\nEnter this number on your iPhone.", snapshot.pairing.passkey);
+            if (snapshot.pairing.kind == RTCP_BT_PAIR_DISPLAY) lv_obj_add_state(bt_accept, LV_STATE_DISABLED);
+            else lv_obj_remove_state(bt_accept, LV_STATE_DISABLED);
+            lv_obj_remove_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        visible_pairing_request = 0;
+        lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+    bool mode_update = last_mode != (int)snapshot.wireless;
+    if (snapshot.stage == DEMO_LIVE && (int)snapshot.stage == last_stage && !mode_update) return;
     static uint32_t last_debug_ms;
     uint32_t now = (uint32_t)rt_tick_get_millisecond();
     if (debug_label && ((int)snapshot.stage != last_stage || now - last_debug_ms >= 1000U)) {
         const char *trust = snapshot.trust == 2 ? "REUSED" : snapshot.trust == 3 ? "SAVED" :
                             snapshot.trust == 1 ? "NEW" : snapshot.trust < 0 ? "I/O ERROR" : "UNKNOWN";
         lv_label_set_text_fmt(debug_label,
-            "Stage: %s\nPrevious: %s\nUSB: %s\nIPv6: %s\nTrust record: %s\nAirPlay storage: %s (%d)\nRX / displayed: %u / %u\nDrops / decode errors: %u / %u\nHID sent / failed: %u / %u\nLast error: %d",
-            stage_name(snapshot.stage), stage_name(snapshot.previous),
+            "Mode: %s\nStage: %s\nUSB: %s\nIP: %s\nTrust record: %s\nAirPlay storage: %s (%d)\nRX / displayed: %u / %u\nDrops / decode errors: %u / %u\nHID sent / failed: %u / %u\nLast error: %d",
+            snapshot.wireless ? "Wireless" : "USB",
+            stage_name(snapshot.stage),
             snapshot.usb ? "ATTACHED" : "DETACHED", snapshot.ipv6[0] ? snapshot.ipv6 : "waiting",
             trust, snapshot.storage_error ? "FAILED" : "OK", snapshot.storage_error,
             snapshot.received, snapshot.frames, snapshot.drops, snapshot.errors,
             snapshot.hid_sent, snapshot.hid_failed, snapshot.last_error);
         last_debug_ms = now;
+        if (snapshot.wireless)
+            lv_label_set_text_fmt(pin_label,
+                "Wi-Fi: %s\nBluetooth: %s | MFi: %s\nBT last HCI/security: %02x/%u | Bonds %u/%u: %s",
+                snapshot.ssid[0] ? snapshot.ssid : "starting",
+                snapshot.bt_connected ? "connected" : snapshot.bt_ready ? "discoverable" : "starting",
+                snapshot.bt_authenticated ? "authenticated" : snapshot.bt_identified ? "identified" : "waiting",
+                snapshot.pairing.hci_error, snapshot.pairing.security_error,
+                snapshot.pairing.bond_count, snapshot.pairing.bond_capacity,
+                snapshot.pairing.storage_error ? "I/O ERROR" : snapshot.pairing.persistent ? "storage enabled" : "RAM only");
     }
-    if ((int)snapshot.stage == last_stage) return;
+    if ((int)snapshot.stage == last_stage && !mode_update) return;
     last_stage = (int)snapshot.stage;
+    last_mode = snapshot.wireless;
+    lv_obj_set_style_bg_color(mode_buttons[0], lv_color_hex(snapshot.wireless ? 0x245C80 : 0x287D68), 0);
+    lv_obj_set_style_bg_color(mode_buttons[1], lv_color_hex(snapshot.wireless ? 0x287D68 : 0x245C80), 0);
+    for (unsigned i = 0; i < 2; ++i) {
+        if (snapshot.stage == DEMO_CLOSING || snapshot.stage == DEMO_LIVE || (i && !DEMO_HAS_WIRELESS))
+            lv_obj_add_state(mode_buttons[i], LV_STATE_DISABLED);
+        else lv_obj_remove_state(mode_buttons[i], LV_STATE_DISABLED);
+    }
+    lv_label_set_text(step_labels[0], snapshot.wireless ? "01  Pair Bluetooth" : "01  Connect USB");
+    lv_label_set_text(step_labels[1], snapshot.wireless ? "02  Join CarPlay Wi-Fi" : "02  Trust your display");
     if (snapshot.stage == DEMO_WAIT || snapshot.stage == DEMO_FAILED)
         lv_obj_remove_state(manage_button, LV_STATE_DISABLED);
     else lv_obj_add_state(manage_button, LV_STATE_DISABLED);
@@ -443,15 +651,21 @@ static void update_page(lv_timer_t *timer)
     switch (snapshot.stage) {
     case DEMO_WAIT:
         title = "Connect your iPhone";
-        detail = "Plug an unlocked iPhone into the USB port.\nCarPlay will connect automatically.";
+        detail = snapshot.wireless ?
+            "On your iPhone, open Settings > Bluetooth.\nPair with rt-carplay and allow CarPlay." :
+            "Plug an unlocked iPhone into the USB port.\nCarPlay will connect automatically.";
         tag = "READY"; break;
     case DEMO_PAIR:
-        title = "Trust this connection";
-        detail = "Keep your iPhone unlocked.\nTap Trust on the phone if asked. This may take a moment.";
+        title = snapshot.wireless ? "Pairing over Bluetooth" : "Trust this connection";
+        detail = snapshot.wireless ?
+            "Keep Bluetooth and Wi-Fi enabled on your iPhone.\nAccept pairing and CarPlay prompts on the phone." :
+            "Keep your iPhone unlocked.\nTap Trust on the phone if asked. This may take a moment.";
         tag = "PAIRING"; break;
     case DEMO_NETWORK:
         title = "Preparing the connection";
-        detail = "Your iPhone is paired.\nSetting up the wired connection...";
+        detail = snapshot.wireless ?
+            "Authentication completed.\nWaiting for your iPhone to join CarPlay Wi-Fi..." :
+            "Your iPhone is paired.\nSetting up the wired connection...";
         tag = "CONNECTING"; break;
     case DEMO_CONNECT:
         title = "Starting CarPlay";
@@ -459,7 +673,9 @@ static void update_page(lv_timer_t *timer)
         tag = "CONNECTING"; break;
     case DEMO_LIVE:
         title = "CarPlay connected";
-        detail = "Use the touch screen to interact with CarPlay.\nUnplug your iPhone to return to this page.";
+        detail = snapshot.wireless ?
+            "Use the touch screen to interact with CarPlay.\nDisconnect CarPlay on your iPhone to return." :
+            "Use the touch screen to interact with CarPlay.\nUnplug your iPhone to return to this page.";
         tag = "CONNECTED"; break;
     case DEMO_CLOSING:
         title = "Returning to the launch page";
@@ -469,19 +685,22 @@ static void update_page(lv_timer_t *timer)
         title = "Unable to connect";
         detail = snapshot.storage_error ?
             "AirPlay could not save its pairing record.\nCheck storage diagnostics, then reconnect your iPhone." :
+            snapshot.wireless ?
+            "Check Bluetooth and Wi-Fi on your iPhone.\nTap Retry, or choose USB. See diagnostics for the error." :
             "Unplug your iPhone, unlock it, then reconnect.\nSee connection diagnostics for the last error.";
         tag = "RECONNECT"; break;
     default:
         title = "Getting ready";
-        detail = "Preparing the wired CarPlay receiver...";
+        detail = snapshot.wireless ? "Starting CarPlay Wi-Fi and Bluetooth..." :
+                                    "Preparing the wired CarPlay receiver...";
         tag = "STARTING"; break;
     }
     lv_label_set_text(heading, title);
     lv_label_set_text(description, detail);
     lv_label_set_text(badge, tag);
-    if (snapshot.stage >= DEMO_WAIT && snapshot.stage <= DEMO_CONNECT)
+    if (!snapshot.wireless && snapshot.stage >= DEMO_WAIT && snapshot.stage <= DEMO_CONNECT)
         lv_label_set_text_fmt(pin_label, "Pairing PIN: %s", snapshot.pin);
-    else lv_label_set_text(pin_label, "");
+    else if (!snapshot.wireless) lv_label_set_text(pin_label, "");
     for (unsigned i = 0; i < 3; ++i) {
         bool active = (int)snapshot.stage >= DEMO_PAIR + (int)i && snapshot.stage <= DEMO_LIVE;
         lv_obj_set_style_bg_color(steps[i], lv_color_hex(active ? 0x38D9A9 : 0x2A3A50), 0);
@@ -501,8 +720,12 @@ void carplay_demo_launcher_init(void)
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     int width = lv_display_get_horizontal_resolution(NULL);
     int height = lv_display_get_vertical_resolution(NULL);
-    label(screen, "WIRED CARPLAY", 56, 38, width - 112, 0xE7EEF8, true);
-    label(screen, "Connect. Trust. Enjoy.", 56, 78, width - 112, 0x91A7C0, false);
+    label(screen, "CARPLAY", 56, 38, width - 500, 0xE7EEF8, true);
+    label(screen, "Choose USB or wireless to connect your iPhone.", 56, 78, width - 112, 0x91A7C0, false);
+    mode_buttons[0] = button(screen, "USB", width - 410, 32, 160, select_mode);
+    mode_buttons[1] = button(screen, DEMO_HAS_WIRELESS ? "Wireless" : "Wireless unavailable",
+                             width - 234, 32, 178, select_mode);
+    if (!DEMO_HAS_WIRELESS) lv_obj_add_state(mode_buttons[1], LV_STATE_DISABLED);
     lv_obj_t *card = lv_obj_create(screen);
     lv_obj_set_pos(card, 56, 134);
     lv_obj_set_size(card, width - 424, height - 238);
@@ -540,9 +763,9 @@ void carplay_demo_launcher_init(void)
         lv_obj_set_style_border_width(steps[i], 0, 0);
         lv_obj_set_style_bg_color(steps[i], lv_color_hex(0x2A3A50), 0);
     }
-    label(screen, "01  Connect USB", 56, height - 57, 250, 0x91A7C0, false);
-    label(screen, "02  Trust your display", width / 3 + 32, height - 57, 280, 0x91A7C0, false);
-    label(screen, "03  Touch to explore", width * 2 / 3 + 8, height - 57, 280, 0x91A7C0, false);
+    step_labels[0] = label(screen, "01  Connect USB", 56, height - 57, 250, 0x91A7C0, false);
+    step_labels[1] = label(screen, "02  Trust your display", width / 3 + 32, height - 57, 280, 0x91A7C0, false);
+    step_labels[2] = label(screen, "03  Touch to explore", width * 2 / 3 + 8, height - 57, 280, 0x91A7C0, false);
     manage_button = button(screen, "Pair files", 56, height - 145, 180, files_open);
     retry_button = button(screen, "Retry connection", 252, height - 145, 200, retry_connection);
     lv_obj_add_state(manage_button, LV_STATE_DISABLED);
@@ -558,6 +781,11 @@ void carplay_demo_launcher_init(void)
     lv_obj_set_style_pad_all(file_list, 8, 0);
     button(file_panel, "Refresh", 10, height - 145, 150, files_refresh);
     button(file_panel, "Back", 180, height - 145, 150, files_back);
+#if DEMO_HAS_WIRELESS
+    button(file_panel, "Forget Bluetooth pairs", 350, height - 145, 250, select_bluetooth_bonds);
+#else
+    (void)&select_bluetooth_bonds;
+#endif
     confirm_panel = lv_obj_create(file_panel);
     lv_obj_set_pos(confirm_panel, 40, 50); lv_obj_set_size(confirm_panel, width - 180, height - 180);
     lv_obj_remove_flag(confirm_panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -566,6 +794,14 @@ void carplay_demo_launcher_init(void)
     button(confirm_panel, "Forget record", 200, height - 285, 180, confirm_forget);
     lv_obj_add_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(file_panel, LV_OBJ_FLAG_HIDDEN);
+    bt_panel = lv_obj_create(screen);
+    lv_obj_set_pos(bt_panel, 80, 120); lv_obj_set_size(bt_panel, width - 160, height - 240);
+    lv_obj_remove_flag(bt_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(bt_panel, lv_color_hex(0x142238), 0);
+    bt_text = label(bt_panel, "", 20, 20, width - 240, 0xFFFFFF, true);
+    bt_accept = button(bt_panel, "Numbers match / Allow", 20, height - 340, 260, answer_bluetooth);
+    button(bt_panel, "Cancel pairing", 300, height - 340, 200, answer_bluetooth);
+    lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
     lv_indev_t *pointer = lv_indev_create();
     if (pointer) {
         lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);

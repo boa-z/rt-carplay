@@ -125,6 +125,24 @@ bool rtcp_bt_lubanlite_link_up(void);
 uint8_t rtcp_bt_lubanlite_channel(void);
 unsigned rtcp_bt_lubanlite_rx_dropped(void);
 
+enum { RTCP_BT_PAIR_NONE, RTCP_BT_PAIR_DISPLAY, RTCP_BT_PAIR_COMPARE, RTCP_BT_PAIR_CONSENT };
+typedef struct {
+    uint32_t request, passkey;
+    unsigned kind, failures, bond_count, bond_capacity;
+    uint8_t hci_error, security_error;
+    int storage_error;
+    bool bonded, persistent;
+} rtcp_bt_pairing_status_t;
+/* No connection pointers escape the port. A reply must match the current
+ * request token; late LVGL clicks cannot confirm a replacement request. */
+void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out);
+int rtcp_bt_lubanlite_pairing_reply(uint32_t request, bool accept);
+/* Only call after the iAP2 owner has stopped and discovery is disabled. */
+int rtcp_bt_lubanlite_forget_bonds(void);
+/* Available when LPKG_BT_SETTINGS is selected. */
+int rtcp_bt_settings_error(void);
+int rtcp_bt_settings_forget_link_keys(void);
+
 /*
  * Local controller BR/EDR address in display order (aa:bb:cc:dd:ee:ff, the
  * first byte is the most significant octet).  This is the value iAP2 puts in

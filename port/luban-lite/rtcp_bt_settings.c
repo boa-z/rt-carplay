@@ -41,14 +41,17 @@
 
 #define TAG "bt-settings"
 
+#ifndef SETTINGS_FILE
 #define SETTINGS_FILE        "/data/bt_settings.bin"
 #define SETTINGS_FILE_TMP    "/data/bt_settings.bin.tmp"
+#define SETTINGS_FILE_BAK    "/data/bt_settings.bin.bak"
+#endif
 #define SETTINGS_MAGIC       0x5E77U
 #define SETTINGS_TOMBSTONE   0xFFFFU
 #define SETTINGS_MAX_ENTRIES 16
 #define SETTINGS_NAME_MAX    64
 /* CONFIG_BT_SETTINGS_CCC_STORE_MAX (48) entries of 4-byte structs need 192
- * bytes for the "bt/ccc/<addr>" value; link keys need 16. */
+ * bytes for the "bt/ccc/<addr>" value; BR keys also carry flags/padding. */
 #define SETTINGS_VALUE_MAX   256
 #define SETTINGS_APPEND_MAX  (SETTINGS_MAX_ENTRIES * 4)
 
@@ -64,6 +67,10 @@ static rt_mutex_t s_lock;
 static bool s_ready;
 static bool s_file_loaded;
 static unsigned s_appends;
+static int s_storage_error;
+static bool s_needs_compact;
+
+int rtcp_bt_settings_error(void) { return s_storage_error; }
 
 /* ------------------------------------------------------------------ */
 /* Name helpers                                                        */
@@ -257,13 +264,13 @@ static int file_append(const char *name, const void *value, uint16_t len)
     return ok ? 0 : -EIO;
 }
 
-static void file_compact(void)
+static int file_compact(void)
 {
     FILE *file = fopen(SETTINGS_FILE_TMP, "wb");
     bool ok = true;
 
     if (file == NULL) {
-        return;
+        return -EIO;
     }
 
     for (size_t i = 0U; i < SETTINGS_MAX_ENTRIES && ok; i++) {
@@ -283,21 +290,27 @@ static void file_compact(void)
 
     if (fclose(file) != 0 || !ok) {
         remove(SETTINGS_FILE_TMP);
-        return;
+        return -EIO;
     }
-    remove(SETTINGS_FILE);
-    if (rename(SETTINGS_FILE_TMP, SETTINGS_FILE) == 0) {
-        s_appends = 0U;
-    } else {
-        remove(SETTINGS_FILE_TMP);
+    if (rename(SETTINGS_FILE_TMP, SETTINGS_FILE) != 0) {
+        /* FAT may not replace an existing destination. Preserve the old
+         * store until promotion succeeds, including across power loss. */
+        remove(SETTINGS_FILE_BAK);
+        bool old = rename(SETTINGS_FILE, SETTINGS_FILE_BAK) == 0;
+        if (rename(SETTINGS_FILE_TMP, SETTINGS_FILE) != 0) {
+            if (old) (void)rename(SETTINGS_FILE_BAK, SETTINGS_FILE);
+            remove(SETTINGS_FILE_TMP);
+            return -EIO;
+        }
     }
+    remove(SETTINGS_FILE_BAK);
+    s_appends = 0U; s_needs_compact = false;
+    return 0;
 }
 
-static void file_compact_if_needed(void)
+static int file_compact_if_needed(void)
 {
-    if (s_appends > SETTINGS_APPEND_MAX) {
-        file_compact();
-    }
+    return s_needs_compact || s_appends > SETTINGS_APPEND_MAX ? file_compact() : 0;
 }
 
 static bool file_load(void)
@@ -305,7 +318,10 @@ static bool file_load(void)
     FILE *file = fopen(SETTINGS_FILE, "rb");
 
     if (file == NULL) {
-        return false;
+        if (errno != ENOENT) return false;
+        file = fopen(SETTINGS_FILE_BAK, "rb");
+        if (file == NULL) return errno == ENOENT;
+        s_needs_compact = true;
     }
 
     for (;;) {
@@ -316,7 +332,9 @@ static bool file_load(void)
         char name[SETTINGS_NAME_MAX];
         uint8_t value[SETTINGS_VALUE_MAX];
 
-        if (fread(header, 1U, sizeof(header), file) != sizeof(header)) {
+        size_t got = fread(header, 1U, sizeof(header), file);
+        if (got != sizeof(header)) {
+            if (got || ferror(file)) s_needs_compact = true;
             break;
         }
         magic = (uint16_t)(header[0] | ((uint16_t)header[1] << 8));
@@ -326,16 +344,19 @@ static bool file_load(void)
         if (magic != SETTINGS_MAGIC || name_len == 0U ||
             name_len >= SETTINGS_NAME_MAX ||
             (len != SETTINGS_TOMBSTONE && len > SETTINGS_VALUE_MAX)) {
+            s_needs_compact = true;
             break;
         }
 
         if (fread(name, 1U, name_len, file) != name_len) {
+            s_needs_compact = true;
             break;
         }
         name[name_len] = '\0';
 
         if (len != SETTINGS_TOMBSTONE && len != 0U) {
             if (fread(value, 1U, len, file) != len) {
+                s_needs_compact = true;
                 break;
             }
         }
@@ -347,6 +368,7 @@ static bool file_load(void)
         }
     }
     fclose(file);
+    s_storage_error = file_compact_if_needed();
     return true;
 }
 
@@ -362,7 +384,7 @@ int hex2char(uint8_t x, char *c)
     if (x >= 0x10U) {
         return -EINVAL;
     }
-    *c = (char)(x < 0x0AU ? '0' + x : 'a' + (x - 0x0AU));
+    *c = (char)(x < 0x0AU ? (unsigned)'0' + x : (unsigned)'a' + (x - 0x0AU));
     return 0;
 }
 
@@ -444,10 +466,11 @@ int settings_subsys_init(void)
     }
 
     rt_mutex_take(s_lock, RT_WAITING_FOREVER);
-    /* /data may not be mounted on the first call; keep retrying, and treat
-     * an absent file as an empty store (first boot, nothing bonded yet). */
+    /* An absent file means first boot. An unreadable store must remain an
+     * error instead of silently replacing the saved phone identities. */
     if (!s_file_loaded) {
         s_file_loaded = file_load();
+        if (!s_file_loaded) s_storage_error = -EIO;
     }
     for (size_t i = 0U; i < SETTINGS_MAX_ENTRIES; i++) {
         if (s_entries[i].used) {
@@ -456,6 +479,7 @@ int settings_subsys_init(void)
     }
     rt_mutex_release(s_lock);
 
+    if (!s_file_loaded) return -EIO;
     s_ready = true;
     RTCP_LOGI(TAG, "settings storage ready (%s, %u entries)",
               SETTINGS_FILE, count);
@@ -528,7 +552,7 @@ int settings_load_subtree_direct(const char *subtree,
         rc = cb(snapshot.name, snapshot.len, read_cb_from_mem, &snapshot,
                 param);
         if (rc != 0) {
-            break;
+            return rc;
         }
     }
     return 0;
@@ -536,6 +560,7 @@ int settings_load_subtree_direct(const char *subtree,
 
 int settings_load_subtree(const char *subtree)
 {
+    int result = 0;
     if (!s_ready || subtree == NULL) {
         return -EINVAL;
     }
@@ -556,11 +581,11 @@ int settings_load_subtree(const char *subtree)
         rt_mutex_release(s_lock);
 
         if (handler != NULL && handler->h_set != NULL) {
-            (void)handler->h_set(next, snapshot.len, read_cb_from_mem,
-                                 &snapshot);
+            int rc = handler->h_set(next, snapshot.len, read_cb_from_mem, &snapshot);
+            if (rc && !result) result = rc;
         }
     }
-    return 0;
+    return result;
 }
 
 static int settings_commit_all(void)
@@ -580,6 +605,7 @@ static int settings_commit_all(void)
 
 int settings_load(void)
 {
+    int result = 0;
     if (!s_ready) {
         return -EINVAL;
     }
@@ -602,12 +628,14 @@ int settings_load(void)
         rt_mutex_release(s_lock);
 
         if (handler != NULL && handler->h_set != NULL) {
-            (void)handler->h_set(next, snapshot.len, read_cb_from_mem,
-                                 &snapshot);
+            int rc = handler->h_set(next, snapshot.len, read_cb_from_mem, &snapshot);
+            if (rc && !result) result = rc;
         }
     }
 
-    return settings_commit_all();
+    int committed = settings_commit_all();
+    if (result) s_storage_error = result;
+    return result ? result : committed;
 }
 
 int settings_save_one(const char *name, const void *value, size_t val_len)
@@ -627,13 +655,15 @@ int settings_save_one(const char *name, const void *value, size_t val_len)
 
     rt_mutex_take(s_lock, RT_WAITING_FOREVER);
     stored = entry_set(name, value, val_len);
+    rc = stored ? 0 : -ENOMEM;
     if (stored) {
-        (void)file_append(name, value, (uint16_t)val_len);
-        file_compact_if_needed();
+        rc = s_needs_compact ? file_compact() : file_append(name, value, (uint16_t)val_len);
+        if (!rc) rc = file_compact_if_needed();
+        if (rc) s_needs_compact = true;
     }
+    s_storage_error = rc;
     rt_mutex_release(s_lock);
 
-    rc = stored ? 0 : -ENOMEM;
     return rc;
 }
 
@@ -645,10 +675,32 @@ int settings_delete(const char *name)
 
     rt_mutex_take(s_lock, RT_WAITING_FOREVER);
     entry_delete(name);
-    (void)file_append(name, NULL, SETTINGS_TOMBSTONE);
-    file_compact_if_needed();
+    int rc = s_needs_compact ? file_compact() : file_append(name, NULL, SETTINGS_TOMBSTONE);
+    if (!rc) rc = file_compact_if_needed();
+    if (rc) s_needs_compact = true;
+    s_storage_error = rc;
     rt_mutex_release(s_lock);
-    return 0;
+    return rc;
+}
+
+/* Preserve bt/id and any LE settings. The caller first removes live BR bonds
+ * through the host API; rewrite once so ignored host delete errors cannot
+ * resurrect a bond on the next boot. Also works before the radio is enabled. */
+int rtcp_bt_settings_forget_link_keys(void)
+{
+    int rc = settings_subsys_init();
+    if (rc) return rc;
+    rt_mutex_take(s_lock, RT_WAITING_FOREVER);
+    for (size_t i = 0; i < SETTINGS_MAX_ENTRIES; ++i) {
+        if (s_entries[i].used &&
+            !strncmp(s_entries[i].name, "bt/link_key/", strlen("bt/link_key/")))
+            memset(&s_entries[i], 0, sizeof(s_entries[i]));
+    }
+    rc = file_compact();
+    s_needs_compact = rc != 0;
+    s_storage_error = rc;
+    rt_mutex_release(s_lock);
+    return rc;
 }
 
 int settings_commit(void)
@@ -671,9 +723,11 @@ int settings_save(void)
         return -EINVAL;
     }
     rt_mutex_take(s_lock, RT_WAITING_FOREVER);
-    file_compact();
+    int rc = file_compact();
+    s_needs_compact = rc != 0;
+    s_storage_error = rc;
     rt_mutex_release(s_lock);
-    return 0;
+    return rc;
 }
 
 int settings_save_subtree(const char *subtree)

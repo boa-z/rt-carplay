@@ -31,6 +31,7 @@
 
 #if defined(RT_USING_LWIP)
 #include <lwip/netif.h>
+#include <netif/ethernetif.h>
 #if defined(LWIP_USING_DHCPD)
 #include <dhcp_server.h>
 #endif
@@ -90,6 +91,8 @@ static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
 
 static int wifi_ap_stop(void)
 {
+    /* The WLAN framework stops its own DHCP instance on AP_STOP. The
+     * explicit server started by this seam shares that instance. */
     return rt_wlan_ap_stop() == RT_EOK ? RTCP_OK : RTCP_EIO;
 }
 
@@ -148,9 +151,13 @@ int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6])
 #if defined(RT_USING_LWIP)
 static struct netif *find_ap_netif(void)
 {
+    rt_device_t ap = rt_device_find(RT_WLAN_DEVICE_AP_NAME);
     for (struct netif *entry = netif_list; entry != NULL; entry = entry->next) {
-        if (entry->name[0] == 'w' &&
-            netif_ip4_addr(entry)->addr != 0) {
+        /* WLAN's lwIP adapter stores the owning rt_wlan_device here.
+         * Do not choose a stale STA interface or require a nonzero address
+         * before DHCP has had a chance to assign the AP address. */
+        struct eth_device *eth = entry->state;
+        if (entry->name[0] == 'w' && ap && eth && eth->parent.user_data == ap) {
             return entry;
         }
     }
@@ -163,7 +170,7 @@ int rtcp_wifi_lubanlite_get_ipv4(uint8_t address[4])
     if (address == NULL) return RTCP_EINVAL;
 #if defined(RT_USING_LWIP)
     struct netif *netif = find_ap_netif();
-    if (netif == NULL) return RTCP_ESTATE;
+    if (netif == NULL || netif_ip4_addr(netif)->addr == 0) return RTCP_ESTATE;
     memcpy(address, &netif_ip4_addr(netif)->addr, 4U);
     return RTCP_OK;
 #else

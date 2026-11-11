@@ -9,10 +9,7 @@
  * (carplay_start): the session borrows the live SSID/passphrase, AirPlay
  * port, device id and Ed25519 public key from the application.
  *
- * MFi: no MFi coprocessor provider is built in yet, so the session stops
- * after identification (the phone's MFi certificate/challenge exchange is
- * ignored).  That validates SDP, RFCOMM and IdentificationInformation on the
- * board but cannot reach CarPlayStartSession.
+ * RTCARPLAY_MFI supplies the board's shared authentication provider.
  */
 #pragma once
 
@@ -28,7 +25,7 @@ int carplay_iap2_start(void);
  * session to be destroyed.  Returns RTCP_OK when it is down. */
 int carplay_iap2_stop(void);
 
-/* Non-blocking variant used by carplay_app_stop(); the session is torn down
+/* Non-blocking stop request; the session is torn down
  * on the link thread. */
 void carplay_iap2_request_stop(void);
 
@@ -38,3 +35,9 @@ bool carplay_iap2_is_running(void);
  * the RFCOMM link drops. */
 bool carplay_iap2_identification_accepted(void);
 bool carplay_iap2_authenticated(void);
+
+typedef struct {
+    bool running, listening, connected, identified, authenticated;
+    int error; /* asynchronous startup/session failure; reset on start */
+} carplay_iap2_status_t;
+void carplay_iap2_get_status(carplay_iap2_status_t *status);

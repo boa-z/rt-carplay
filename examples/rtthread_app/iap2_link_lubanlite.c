@@ -83,6 +83,8 @@ typedef struct {
     bool link_up;
     bool airplay_connected;
     volatile bool running;
+    volatile bool listening;
+    volatile int error;
     volatile bool authenticated;
     volatile bool identification_accepted;
     volatile unsigned rx_bytes;
@@ -154,6 +156,7 @@ static void link_event(iap2_session_event_t event, void *context)
         IAP2_LOG("identification accepted");
         break;
     case IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED:
+        link->error = RTCP_ESTATE;
         IAP2_LOG("identification rejected by the phone");
         break;
     case IAP2_SESSION_EVENT_MFI_CERTIFICATE_SENT:
@@ -164,6 +167,7 @@ static void link_event(iap2_session_event_t event, void *context)
         IAP2_LOG("MFi authenticated");
         break;
     case IAP2_SESSION_EVENT_MFI_FAILED:
+        link->error = RTCP_EIO;
         IAP2_LOG("MFi authentication failed");
         break;
     case IAP2_SESSION_EVENT_MFI_CERT_FAILED:
@@ -322,6 +326,7 @@ static void link_thread(void *parameter)
         IAP2_LOG("Bluetooth enable failed rc=%d", result);
         goto done;
     }
+    if (!s_serve) goto done;
 
     result = link_session_create(link, mfi);
     if (result != RTCP_OK) {
@@ -337,6 +342,7 @@ static void link_thread(void *parameter)
         goto done;
     }
     IAP2_LOG("RFCOMM iAP2 service on channel %u", (unsigned)channel);
+    link->listening = true;
 
     while (s_serve) {
         if (!carplay_app_is_running()) {
@@ -353,6 +359,7 @@ static void link_thread(void *parameter)
 
         link->fd = fd;
         link->link_up = true;
+        link->error = RTCP_OK;
         link_reset_progress(link);
         link->rx_bytes = 0U;
         link->tx_bytes = 0U;
@@ -406,9 +413,14 @@ static void link_thread(void *parameter)
     }
 
 done:
+    if (s_serve && result != RTCP_OK) link->error = result;
+    link->listening = false;
     if (link->session != NULL && link->link_up) {
         iap2_session_link_down(link->session);
     }
+    /* Also covers stop arriving during bt_enable()/SDP registration: do
+     * not leave a freshly initialized controller discoverable after stop. */
+    rtcp_bt_lubanlite_disconnect();
     link->fd = -1;
     link->link_up = false;
     link_reset_progress(link);
@@ -417,10 +429,12 @@ done:
         link->session = NULL;
     }
     carplay_mfi_provider_release(mfi);
-    link->running = false;
     s_serve = false;
     carplay_bt_release(CARPLAY_BT_OWNER_IAP2);
     IAP2_LOG("service stopped");
+    /* Publish quiescence last: a mode switch may now replace the receiver
+     * strings, MFi provider and this singleton's storage. */
+    link->running = false;
 }
 
 int carplay_iap2_start(void)
@@ -448,7 +462,13 @@ int carplay_iap2_start(void)
         carplay_bt_release(CARPLAY_BT_OWNER_IAP2);
         return RTCP_ENOMEM;
     }
-    (void)rt_thread_startup(thread);
+    if (rt_thread_startup(thread) != RT_EOK) {
+        rt_thread_delete(thread);
+        s_serve = false; s_link.running = false;
+        s_link.error = RTCP_EIO;
+        carplay_bt_release(CARPLAY_BT_OWNER_IAP2);
+        return RTCP_EIO;
+    }
     return RTCP_OK;
 }
 
@@ -485,6 +505,19 @@ bool carplay_iap2_authenticated(void)
     return s_link.running && s_link.link_up && s_link.authenticated;
 }
 
+void carplay_iap2_get_status(carplay_iap2_status_t *out)
+{
+    if (!out) return;
+    rt_base_t flags = rt_hw_interrupt_disable();
+    out->running = s_link.running;
+    out->listening = s_link.listening;
+    out->connected = s_link.link_up;
+    out->identified = s_link.link_up && s_link.identification_accepted;
+    out->authenticated = s_link.link_up && s_link.authenticated;
+    out->error = s_link.error;
+    rt_hw_interrupt_enable(flags);
+}
+
 /* ------------------------------------------------------------------ */
 /* MSH command                                                         */
 /* ------------------------------------------------------------------ */
@@ -492,6 +525,12 @@ bool carplay_iap2_authenticated(void)
 static int cmd_carplay_iap2(int argc, char **argv)
 {
     const char *sub = argc >= 2 ? argv[1] : "status";
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+    if (strcmp(sub, "status") != 0) {
+        rt_kprintf("LVGL demo owns Bluetooth iAP2; use the connection selector\n");
+        return 0;
+    }
+#endif
 
     if (strcmp(sub, "start") == 0) {
         int result = carplay_iap2_start();

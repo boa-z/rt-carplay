@@ -9,7 +9,8 @@ static jmp_buf finished;
 static unsigned mode, starts, pairs, closes, stops, net_checks, pictures, failed_waits;
 static bool session_live, quiesced, receiver_running;
 static unsigned reports;
-uint32_t rt_tick_get_millisecond(void) { return 0; }
+static unsigned now_ms, radio_mode, radio_starts;
+uint32_t rt_tick_get_millisecond(void) { return now_ms; }
 void carplay_app_performance_report(void) {}
 int carplay_usb_trust_cache_status(void) { return 0; }
 int carplay_app_pairing_storage_error(void) { return mode == 3 && status.stage == DEMO_CONNECT ? RTCP_EIO : 0; }
@@ -19,6 +20,12 @@ int rt_mutex_take(rt_mutex_t m, int wait) { (void)m; (void)wait; return 0; }
 int rt_mutex_release(rt_mutex_t m) { (void)m; return 0; }
 void rt_thread_mdelay(int ms) {
     assert(ms > 0);
+    now_ms += (unsigned)ms;
+    if (status.wireless && radio_mode == 1 && now_ms >= 1000) requested_wireless = false;
+    if (status.wireless && radio_mode == 3) {
+        if (status.stage == DEMO_WAIT && now_ms >= 400) manager_open = true;
+        if (status.stage == DEMO_CLOSING) manager_open = false;
+    }
     if (status.stage == DEMO_FAILED) ++failed_waits;
 }
 int carplay_usb_open(void) { return 0; }
@@ -49,6 +56,28 @@ int carplay_app_autostart_wired(void) {
     receiver_running = true;
     return 0;
 }
+int carplay_app_autostart(void) { assert(!session_live); receiver_running = true; return 0; }
+int carplay_iap2_start(void) { ++radio_starts; return 0; }
+int carplay_iap2_stop(void) { return 0; }
+void carplay_iap2_get_status(carplay_iap2_status_t *out) {
+    memset(out, 0, sizeof(*out)); out->running = true;
+    out->listening = radio_mode != 5 && now_ms >= 200;
+    if (radio_mode == 0 && now_ms >= 600) { out->error = RTCP_EIO; out->running = false; }
+    if (radio_mode == 2 || radio_mode == 4 || radio_mode == 6) {
+        out->connected = now_ms >= 400 && now_ms < 800;
+        out->identified = out->connected;
+        out->authenticated = out->connected && now_ms >= 600;
+    }
+}
+int carplay_app_iap2_info(carplay_app_iap2_info_t *out) {
+    memset(out, 0, sizeof(*out)); out->ssid = "test-carplay";
+    out->ipv4[0] = 192; out->ipv4[1] = 168; out->ipv4[2] = 169; out->ipv4[3] = 1;
+    out->airplay_connected = radio_mode == 2 && now_ms >= 800 && now_ms < 1400;
+    return receiver_running ? RTCP_OK : RTCP_ESTATE;
+}
+void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out) { memset(out, 0, sizeof(*out)); }
+int rtcp_bt_lubanlite_pairing_reply(uint32_t request, bool accept) { (void)request; (void)accept; return RTCP_OK; }
+int rtcp_bt_lubanlite_forget_bonds(void) { return RTCP_OK; }
 const char *carplay_app_pairing_code(void) { return "3939"; }
 int carplay_app_wired_info(carplay_app_wired_info_t *info) {
     (void)info;
@@ -63,6 +92,12 @@ int carplay_app_stop(void) {
 }
 void carplay_video_sink_stats(unsigned *n, unsigned *f, unsigned *d, unsigned *e) {
     (void)n; (void)d; (void)e;
+    if (status.wireless) {
+        if (f) *f = radio_mode == 2 && now_ms >= 1000 ? 1 : 0;
+        if (d) *d = 0;
+        if (e) *e = 0;
+        return;
+    }
     if (status.stage == DEMO_CONNECT) ++pictures;
     if (f) *f = pictures >= 2 ? 1 : 0;
     if (d) *d = 0;
@@ -113,5 +148,23 @@ int main(void) {
     assert(!carplay_demo_touch(RTCP_TOUCH_DOWN,7,10,10));
     receiver_running = false;
     assert(carplay_demo_touch(RTCP_TOUCH_DOWN,7,10,10)); /* stopped sink counters can be stale */
+    /* Real wireless owner: async BT failure, idle mode switch, Bluetooth
+     * handover before video, file manager quiescence and bounded timeouts. */
+    mode = 4;
+    const int expected[] = {RTCP_EIO, RTCP_OK, RTCP_OK, RTCP_OK, RTCP_ETIMEDOUT, RTCP_ETIMEDOUT, RTCP_ETIMEDOUT};
+    for (radio_mode = 0; radio_mode < 7; ++radio_mode) {
+        memset(&status, 0, sizeof(status));
+        status.wireless = requested_wireless = true;
+        status.stage = DEMO_BOOT;
+        now_ms = radio_starts = 0; manager_open = false; file_action = FILE_NONE;
+        receiver_running = true; session_live = false;
+        assert(wireless_connection() == expected[radio_mode]);
+        assert(radio_starts == 1);
+        if (radio_mode == 0) assert(status.stage != DEMO_LIVE);
+        if (radio_mode == 1) assert(status.stage == DEMO_WAIT && mode_changed());
+        if (radio_mode == 2) assert(status.stage == DEMO_LIVE && now_ms == 1400);
+        if (radio_mode == 3) assert(!receiver_running && !manager_open);
+    }
     puts("Actual demo worker: pairing/storage failure, replug, network/first-frame wait, quiescent close, pointer routing/overflow and manager exclusion passed");
+    puts("Wireless owner: asynchronous failure, mode switch, BT-to-WiFi handover, first-frame gating, manager pause and timeouts passed");
 }

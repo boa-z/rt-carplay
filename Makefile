@@ -171,12 +171,35 @@ check-lubanlite-touch:
 	  tests/unit/test_lubanlite_touch.c -o $(BUILD)/test_lubanlite_touch
 	$(BUILD)/test_lubanlite_touch
 
-# Automatic wired demo lifecycle with actual SDK LVGL public headers.
+# Dual-mode demo lifecycle with actual SDK LVGL public headers.
 .PHONY: check-lubanlite-demo
 check-lubanlite-demo:
 	@test -n "$(SDK_ROOT)" || (echo 'set SDK_ROOT to Luban-Lite checkout'; exit 1)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -Itests/support/lubanlite_demo \
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
+	  -Itests/support/lubanlite_demo -Iport/luban-lite/include \
 	  -I$(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl \
 	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c examples/rtthread_app/pairing_manager.c \
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_demo
 	$(BUILD)/test_lubanlite_demo
+
+.PHONY: check-lubanlite-bonds
+check-lubanlite-bonds:
+	@test -n "$(SDK_ROOT)" || (echo 'set SDK_ROOT to Luban-Lite checkout'; exit 1)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DCONFIG_X86 -DCONFIG_64BIT -DRT_IPC_FLAG_FIFO=0 \
+	  -Itests/support/lubanlite_demo \
+	  -I$(SDK_ROOT)/packages/third-party/zephyr-bluetooth/include \
+	  -I$(SDK_ROOT)/packages/third-party/zephyr-bluetooth/porting \
+	  tests/unit/test_lubanlite_bt_settings.c \
+	  -Wl,-T,tests/support/lubanlite_demo/settings_sections.ld -o $(BUILD)/test_lubanlite_bt_settings
+	$(BUILD)/test_lubanlite_bt_settings
+
+.PHONY: check-rtthread-multicast
+check-rtthread-multicast:
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -D_DEFAULT_SOURCE -DRT_USING_SAL -DNETDEV_IPV6=1 \
+	  -Dclosesocket=close -include unistd.h -Itests/support/lubanlite_demo \
+	  -Iport/rtthread/include tests/unit/test_rtthread_multicast.c port/rtthread/rtcp_net_rtthread.c \
+	  -o $(BUILD)/test_rtthread_multicast
+	$(BUILD)/test_rtthread_multicast

@@ -7,9 +7,9 @@
  * RFCOMM over the RTL8733BS H5 transport.  The iAP2 session uses it as a
  * byte stream:
  *
- *   enable()        -> bt_enable + BR/EDR connectable + discoverable
+ *   enable()        -> bt_enable + restore bonds + local name/EIR
  *   rfcomm_listen() -> RFCOMM server, dynamic channel, SDP record with the
- *                      caller supplied 128-bit service class UUID
+ *                      caller supplied 128-bit service class UUID, then publish
  *   rfcomm_accept() -> blocks until a peer DLC is connected
  *   send()/recv()   -> chunked writes (<= negotiated MTU) and a byte ring
  *
@@ -258,6 +258,125 @@ static bool s_enabled;
 static bool s_listening;
 static bool s_stop;
 static uint8_t s_rx_dropped;
+static struct bt_conn *s_pair_conn;
+static rtcp_bt_pairing_status_t s_pair;
+static uint32_t s_pair_sequence;
+
+static void count_bond(const struct bt_br_bond_info *info, void *data)
+{
+    (void)info;
+    ++*(unsigned *)data;
+}
+
+void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out)
+{
+    if (!out) return;
+    rt_base_t flags = rt_hw_interrupt_disable();
+    *out = s_pair;
+#ifdef CONFIG_BT_SETTINGS
+    out->storage_error = rtcp_bt_settings_error();
+    out->persistent = out->storage_error == 0;
+#endif
+    rt_hw_interrupt_enable(flags);
+    out->bond_count = 0;
+    out->bond_capacity = CONFIG_BT_MAX_PAIRED;
+    if (s_enabled) bt_br_foreach_bond(count_bond, &out->bond_count);
+}
+
+static void pairing_clear(struct bt_conn *conn)
+{
+    rt_base_t flags = rt_hw_interrupt_disable();
+    struct bt_conn *old = NULL;
+    if (s_pair_conn == conn) {
+        old = s_pair_conn; s_pair_conn = NULL;
+        s_pair.kind = RTCP_BT_PAIR_NONE;
+    }
+    rt_hw_interrupt_enable(flags);
+    if (old) bt_conn_unref(old);
+}
+
+static void pairing_request(struct bt_conn *conn, unsigned kind, unsigned passkey)
+{
+    struct bt_conn *held = bt_conn_ref(conn);
+    rt_base_t flags = rt_hw_interrupt_disable();
+    bool reject = s_pair_conn != NULL || s_stop;
+    if (!reject) {
+        s_pair_conn = held;
+        if (++s_pair_sequence == 0) ++s_pair_sequence;
+        s_pair.request = s_pair_sequence; s_pair.kind = kind; s_pair.passkey = passkey;
+        s_pair.security_error = 0; s_pair.hci_error = 0;
+    }
+    rt_hw_interrupt_enable(flags);
+    if (reject) { (void)bt_conn_auth_cancel(conn); bt_conn_unref(held); }
+}
+
+int rtcp_bt_lubanlite_pairing_reply(uint32_t request, bool accept)
+{
+    rt_base_t flags = rt_hw_interrupt_disable();
+    struct bt_conn *conn = s_pair_conn;
+    unsigned kind = s_pair.kind;
+    if (!conn || request != s_pair.request || (accept && kind == RTCP_BT_PAIR_DISPLAY)) {
+        rt_hw_interrupt_enable(flags); return RTCP_ESTATE;
+    }
+    /* Transfer our reference to this caller before entering the host API;
+     * cancel/completion callbacks can run synchronously without double unref. */
+    s_pair_conn = NULL; s_pair.kind = RTCP_BT_PAIR_NONE;
+    rt_hw_interrupt_enable(flags);
+    int result = !accept ? bt_conn_auth_cancel(conn) : kind == RTCP_BT_PAIR_COMPARE ?
+        bt_conn_auth_passkey_confirm(conn) : bt_conn_auth_pairing_confirm(conn);
+    bt_conn_unref(conn);
+    return result ? RTCP_EIO : RTCP_OK;
+}
+
+static void pairing_display(struct bt_conn *conn, unsigned passkey)
+{ pairing_request(conn, RTCP_BT_PAIR_DISPLAY, passkey); }
+static void pairing_compare(struct bt_conn *conn, unsigned passkey)
+{ pairing_request(conn, RTCP_BT_PAIR_COMPARE, passkey); }
+static void pairing_consent(struct bt_conn *conn)
+{ pairing_request(conn, RTCP_BT_PAIR_CONSENT, 0); }
+static void pairing_complete(struct bt_conn *conn, bool bonded)
+{
+    pairing_clear(conn);
+    rt_base_t flags = rt_hw_interrupt_disable();
+    s_pair.bonded = bonded; s_pair.security_error = 0;
+    rt_hw_interrupt_enable(flags);
+    RTCP_LOGI(BT_TAG, "pairing completed bonded=%u", bonded);
+}
+static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
+{
+    pairing_clear(conn);
+    rt_base_t flags = rt_hw_interrupt_disable();
+    ++s_pair.failures; s_pair.security_error = (uint8_t)reason;
+    rt_hw_interrupt_enable(flags);
+    RTCP_LOGW(BT_TAG, "pairing failed security_reason=%u", (unsigned)reason);
+}
+static void acl_connected(struct bt_conn *conn, uint8_t error)
+{
+    (void)conn;
+    rt_base_t flags = rt_hw_interrupt_disable();
+    s_pair.hci_error = error;
+    rt_hw_interrupt_enable(flags);
+    if (error) RTCP_LOGW(BT_TAG, "ACL connection failed hci_reason=0x%02x", error);
+}
+static void acl_disconnected(struct bt_conn *conn, uint8_t reason)
+{
+    pairing_clear(conn);
+    rt_base_t flags = rt_hw_interrupt_disable();
+    s_pair.hci_error = reason;
+    rt_hw_interrupt_enable(flags);
+    RTCP_LOGI(BT_TAG, "ACL disconnected hci_reason=0x%02x", reason);
+}
+static const struct bt_conn_auth_cb pairing_callbacks = {
+    .passkey_display = pairing_display, .passkey_confirm = pairing_compare,
+    .pairing_confirm = pairing_consent, .cancel = pairing_clear,
+};
+static struct bt_conn_auth_info_cb pairing_info = {
+    .pairing_complete = pairing_complete, .pairing_failed = pairing_failed,
+};
+static struct bt_conn_cb acl_callbacks = {
+    .connected = acl_connected, .disconnected = acl_disconnected,
+};
+static bool pairing_callbacks_registered;
 
 static void (*s_event_cb)(int ev, void *user);
 static void *s_event_user;
@@ -533,6 +652,7 @@ static int server_accept_cb(struct bt_conn *conn, struct bt_rfcomm_server *serve
 {
     (void)conn;
     (void)server;
+    if (s_stop) return -1;
     for (size_t i = 0U; i < BT_LINK_MAX; ++i) {
         if (s_links[i].state == BT_LINK_FREE) {
             s_links[i].state = BT_LINK_CONNECTING;
@@ -567,6 +687,24 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
 
     if (s_enabled) return RTCP_OK;
 
+    if (!pairing_callbacks_registered) {
+        (void)&pairing_callbacks;
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+        /* The physical display/touch can do numeric comparison. Without
+         * both callbacks the actual SDK SSP advertises NoInputNoOutput. */
+        int result = bt_conn_auth_cb_register(&pairing_callbacks);
+        if (result != 0) return RTCP_ESTATE;
+#endif
+        if (bt_conn_auth_info_cb_register(&pairing_info) != 0) {
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+            (void)bt_conn_auth_cb_register(NULL);
+#endif
+            return RTCP_ESTATE;
+        }
+        bt_conn_cb_register(&acl_callbacks);
+        pairing_callbacks_registered = true;
+    }
+
     RTCP_LOGI(BT_TAG, "enabling Bluetooth (H5 setup + firmware download)");
     int err = bt_enable(NULL);
     if (err != 0 && err != -EALREADY) {
@@ -594,12 +732,6 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
 
     configure_scan();
 
-    err = bt_br_set_connectable(true, NULL);
-    if (err != 0 && err != -EALREADY) {
-        RTCP_LOGE(BT_TAG, "set connectable failed (%d)", err);
-        return RTCP_EIO;
-    }
-
     err = bt_br_set_class_of_device(RTCP_BT_LUBANLITE_COD);
     if (err != 0) {
         RTCP_LOGW(BT_TAG, "set class of device failed (%d)", err);
@@ -620,13 +752,22 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
      * the comment on write_eir). */
     write_eir(name);
 
+    s_enabled = true;
+    RTCP_LOGI(BT_TAG, "Bluetooth enabled; waiting for SDP/RFCOMM registration");
+    return RTCP_OK;
+}
+
+static int publish_service(void)
+{
+    s_stop = false;
+    int err = bt_br_set_connectable(true, NULL);
+    if (err != 0 && err != -EALREADY) { s_stop = true; return RTCP_EIO; }
     err = bt_br_set_discoverable(true, false);
     if (err != 0 && err != -EALREADY) {
-        RTCP_LOGW(BT_TAG, "set discoverable failed (%d)", err);
+        s_stop = true;
+        (void)bt_br_set_connectable(false, NULL);
+        return RTCP_EIO;
     }
-
-    s_enabled = true;
-    RTCP_LOGI(BT_TAG, "Bluetooth enabled (connectable + discoverable)");
     return RTCP_OK;
 }
 
@@ -639,9 +780,8 @@ int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
     if (s_listening) {
         /* Re-arm: a previous disconnect() set s_stop, and the application
          * restarting the service expects accept() to block again. */
-        s_stop = false;
         *out_channel = s_server.channel;
-        return RTCP_OK;
+        return publish_service();
     }
 
     uint8_t uuid[16];
@@ -681,11 +821,10 @@ int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
     }
 
     s_listening = true;
-    s_stop = false;
     *out_channel = s_server.channel;
     RTCP_LOGI(BT_TAG, "RFCOMM listening on channel %u (uuid %s)",
               s_server.channel, have_uuid ? uuid128 : "SPP");
-    return RTCP_OK;
+    return publish_service();
 }
 
 int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd)
@@ -831,7 +970,14 @@ void rtcp_bt_lubanlite_drop_link(int fd)
 void rtcp_bt_lubanlite_disconnect(void)
 {
     s_stop = true;
+    rtcp_bt_pairing_status_t pending;
+    rtcp_bt_lubanlite_pairing_status(&pending);
+    if (pending.kind) (void)rtcp_bt_lubanlite_pairing_reply(pending.request, false);
     if (!s_ipc_ready) return;
+    if (s_enabled) {
+        (void)bt_br_set_discoverable(false, false);
+        (void)bt_br_set_connectable(false, NULL);
+    }
     for (size_t i = 0U; i < BT_LINK_MAX; ++i) {
         struct bt_link *link = &s_links[i];
         rt_sem_release(&link->accept_sem);
@@ -845,6 +991,40 @@ void rtcp_bt_lubanlite_disconnect(void)
 bool rtcp_bt_lubanlite_is_up(void)
 {
     return s_enabled;
+}
+
+static void retire_acl(struct bt_conn *conn, void *data)
+{
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) != 0 || info.state == BT_CONN_STATE_DISCONNECTED)
+        return;
+    ++*(unsigned *)data;
+    (void)bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+}
+
+int rtcp_bt_lubanlite_forget_bonds(void)
+{
+    if (s_enabled && !s_stop) return RTCP_ESTATE;
+    if (s_enabled) {
+        /* A stopped RFCOMM owner need not mean SSP has finished. Retire
+         * existing ACLs before deleting keys so late auth cannot save them
+         * again. foreach owns the callback reference; no pointer escapes. */
+        for (unsigned elapsed = 0; ; elapsed += 50) {
+            unsigned active = 0;
+            bt_conn_foreach(BT_CONN_TYPE_BR, retire_acl, &active);
+            if (!active) break;
+            if (elapsed >= 3000) return RTCP_ETIMEDOUT;
+            rt_thread_mdelay(50);
+        }
+        if (bt_br_unpair(NULL) != 0) return RTCP_EIO;
+    }
+#ifdef CONFIG_BT_SETTINGS
+    if (rtcp_bt_settings_forget_link_keys() != 0) return RTCP_EIO;
+#endif
+    rt_base_t flags = rt_hw_interrupt_disable();
+    s_pair.bonded = false;
+    rt_hw_interrupt_enable(flags);
+    return RTCP_OK;
 }
 
 bool rtcp_bt_lubanlite_link_up(void)
@@ -886,6 +1066,12 @@ int rtcp_bt_lubanlite_local_bdaddr(uint8_t address[6])
 }
 
 #else /* LPKG_RT_CARPLAY_LUBANLITE_BT */
+
+void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out)
+{ if (out) memset(out, 0, sizeof(*out)); }
+int rtcp_bt_lubanlite_pairing_reply(uint32_t request, bool accept)
+{ (void)request; (void)accept; return RTCP_ENOTSUP; }
+int rtcp_bt_lubanlite_forget_bonds(void) { return RTCP_ENOTSUP; }
 
 int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
 {

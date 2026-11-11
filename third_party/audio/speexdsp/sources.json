@@ -1,0 +1,9 @@
+[
+  "libspeexdsp/mdf.c",
+  "libspeexdsp/preprocess.c",
+  "libspeexdsp/fftwrap.c",
+  "libspeexdsp/kiss_fft.c",
+  "libspeexdsp/kiss_fftr.c",
+  "libspeexdsp/filterbank.c",
+  "libspeexdsp/buffer.c"
+]

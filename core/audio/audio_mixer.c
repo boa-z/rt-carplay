@@ -21,14 +21,14 @@ struct rtcp_audio_mixer {
     lane_t lanes[RTCP_AUDIO_LANES];
     size_t capacity;
     unsigned master;
-    bool mute, duck;
+    bool mute, duck, auto_duck;
 };
 rtcp_audio_mixer_t *rtcp_audio_mixer_create(size_t capacity)
 {
     if (capacity < 2 || capacity > 48000) return NULL;
     rtcp_audio_mixer_t *m = calloc(1, sizeof(*m));
     if (!m) return NULL;
-    m->capacity = capacity; m->master = 32768;
+    m->capacity = capacity; m->master = 32768; m->auto_duck = true;
     for (unsigned i = 0; i < RTCP_AUDIO_LANES; ++i) {
         m->lanes[i].pcm = calloc(capacity * 2, sizeof(int16_t));
         m->lanes[i].gain = m->lanes[i].target = 32768;
@@ -77,6 +77,7 @@ void rtcp_audio_mixer_gain(rtcp_audio_mixer_t *m, unsigned i, unsigned gain, uns
     l->ramp = ramp; l->elapsed = 0;
     if (!ramp) l->gain = l->target;
 }
+void rtcp_audio_mixer_auto_duck(rtcp_audio_mixer_t *m, bool enabled) { if(m)m->auto_duck=enabled; }
 void rtcp_audio_mixer_duck(rtcp_audio_mixer_t *m, bool duck) { if (m) m->duck = duck; }
 void rtcp_audio_mixer_master(rtcp_audio_mixer_t *m, unsigned gain, bool mute)
 { if (m) { m->master = gain > 32768 ? 32768 : gain; m->mute = mute; } }
@@ -112,7 +113,7 @@ size_t rtcp_audio_mixer_render(rtcp_audio_mixer_t *m, int16_t *out, size_t frame
             unsigned gain = (unsigned)l->gain;
             if (i != 3) {
                 gain = m->mute ? 0 : (unsigned)((uint64_t)gain*m->master/32768);
-                if (safety || (i == 2 && (prompt || m->duck))) gain /= 4;
+                if (safety || (i == 2 && ((prompt && m->auto_duck) || m->duck))) gain /= 4;
             }
             size_t next = l->count > 1 ? (l->head+1)%m->capacity : l->head;
             for (unsigned c = 0; c < 2; ++c) {

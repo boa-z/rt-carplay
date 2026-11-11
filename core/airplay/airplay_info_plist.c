@@ -433,16 +433,17 @@ static uint32_t emit_audio_latencies(ip_writer_t *w)
 }
 
 static uint32_t emit_audio_format(ip_writer_t *w, int64_t type,
-                                  const char *audio_type, uint64_t formats)
+                                  const char *audio_type, uint64_t formats, uint64_t input_formats)
 {
     static const char *const keys[] = {
-        "type", "audioType", "audioOutputFormats",
+        "type", "audioType", "audioOutputFormats", "audioInputFormats",
     };
-    uint32_t values[3];
+    uint32_t values[4];
     values[0] = ip_emit_int(w, type);
     values[1] = ip_emit_string(w, audio_type);
     values[2] = ip_emit_int(w, (int64_t)formats);
-    return ip_emit_literal_dict(w, keys, values, 3U);
+    if (input_formats) values[3] = ip_emit_int(w, (int64_t)input_formats);
+    return ip_emit_literal_dict(w, keys, values, input_formats ? 4U : 3U);
 }
 
 static uint32_t emit_audio_formats(ip_writer_t *w,
@@ -458,17 +459,18 @@ static uint32_t emit_audio_formats(ip_writer_t *w,
     uint64_t compiled = rtcp_audio_output_formats();
     uint64_t opus = config->audio_compressed ? compiled & 0x70000000ULL : 0;
     uint64_t aac = config->audio_compressed ? compiled & (is48 ? 0x800000ULL : 0x400000ULL) : 0;
+    uint64_t input = config->audio_input ? pcm_mono | opus : 0;
     uint32_t refs[9];
-    refs[0] = emit_audio_format(w, 100, "compatibility", pcm);
-    refs[1] = emit_audio_format(w, 101, "compatibility", pcm);
-    refs[2] = emit_audio_format(w, 100, "default", pcm | opus);
-    refs[3] = emit_audio_format(w, 100, "alert", pcm | opus);
-    refs[4] = emit_audio_format(w, 100, "media", pcm);
-    refs[5] = emit_audio_format(w, 100, "telephony", pcm_mono | opus);
-    refs[6] = emit_audio_format(w, 100, "speechRecognition", pcm_mono | opus);
-    refs[7] = emit_audio_format(w, 101, "default", pcm | opus);
+    refs[0] = emit_audio_format(w, 100, "compatibility", pcm, input);
+    refs[1] = emit_audio_format(w, 101, "compatibility", pcm, 0);
+    refs[2] = emit_audio_format(w, 100, "default", pcm | opus, input);
+    refs[3] = emit_audio_format(w, 100, "alert", pcm | opus, 0);
+    refs[4] = emit_audio_format(w, 100, "media", pcm, 0);
+    refs[5] = emit_audio_format(w, 100, "telephony", pcm_mono | opus, input);
+    refs[6] = emit_audio_format(w, 100, "speechRecognition", pcm_mono | opus, input);
+    refs[7] = emit_audio_format(w, 101, "default", pcm | opus, 0);
     size_t count = 8;
-    if (aac) refs[count++] = emit_audio_format(w, 102, "media", aac);
+    if (aac) refs[count++] = emit_audio_format(w, 102, "media", aac, 0);
     return ip_emit_array(w, refs, count);
 }
 

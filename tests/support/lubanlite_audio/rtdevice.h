@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #pragma once
 #include "rtthread.h"
-typedef void *rt_device_t;
+struct host_audio_device { unsigned ref_count; };
+typedef struct host_audio_device *rt_device_t;
 #define RT_DEVICE_OFLAG_WRONLY 2
 rt_device_t rt_device_find(const char *);
 int rt_device_open(rt_device_t,int);

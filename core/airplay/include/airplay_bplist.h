@@ -132,3 +132,13 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
 
 airplay_bplist_result_t airplay_bplist_build_iap_command(
     const uint8_t *data, size_t len, uint8_t *out, size_t capacity, size_t *written);
+
+/* Integer or finite IEEE754 float/double; rejects NaN/Inf and wrong types. */
+airplay_bplist_result_t airplay_bplist_get_number(const airplay_bplist_doc_t *, airplay_bplist_object_t, double *);
+
+typedef struct { uint16_t type; uint32_t sample_rate; uint64_t connection_id; } airplay_audio_feedback_t;
+/* Metadata-only feedback until the sink supplies a real presentation clock.
+ * Does not invent sampleTime/timestamp from wall time or received packets. */
+airplay_bplist_result_t airplay_bplist_build_audio_feedback(const airplay_audio_feedback_t *, size_t,
+                                                            uint8_t *, size_t, size_t *);
+airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action, uint8_t *, size_t, size_t *);

@@ -4,7 +4,7 @@ import json
 from building import *
 cwd = GetCurrentDir()
 group = []
-for name in ('faad2', 'opus'):
+for name in ('faad2', 'opus', 'speexdsp'):
     base = os.path.join(cwd, name)
     with open(os.path.join(base, 'sources.json')) as f:
         src = [os.path.join(base, p) for p in json.load(f)]
@@ -13,6 +13,9 @@ for name in ('faad2', 'opus'):
         defines = ['FIXED_POINT', 'LC_ONLY_DECODER', 'HAVE_INTTYPES_H=1',
                    'HAVE_MEMCPY=1', 'HAVE_STRING_H=1', 'HAVE_STRINGS_H=1',
                    'HAVE_SYS_STAT_H=1', 'HAVE_SYS_TYPES_H=1']
+    elif name == 'speexdsp':
+        inc = [base + '/include', base + '/libspeexdsp']
+        defines = ['FIXED_POINT', 'USE_KISS_FFT', 'VAR_ARRAYS', 'EXPORT=']
     else:
         inc = [base, base + '/include', base + '/celt', base + '/silk', base + '/silk/fixed']
         defines = ['OPUS_BUILD', 'FIXED_POINT', 'DISABLE_FLOAT_API',

@@ -23,6 +23,7 @@ void rtcp_audio_mixer_clock(rtcp_audio_mixer_t *, unsigned lane, size_t target_f
 void rtcp_audio_mixer_flush(rtcp_audio_mixer_t *, unsigned lane);
 /* Independent gains, linear amplitude 0..1 Q15. Ramp length is output frames. */
 void rtcp_audio_mixer_gain(rtcp_audio_mixer_t *, unsigned lane, unsigned q15, unsigned ramp_frames);
+void rtcp_audio_mixer_auto_duck(rtcp_audio_mixer_t *, bool enabled);
 void rtcp_audio_mixer_duck(rtcp_audio_mixer_t *, bool ducked);
 /* A safety alert cannot be muted by entertainment volume or remote ducking. */
 void rtcp_audio_mixer_master(rtcp_audio_mixer_t *, unsigned q15, bool mute);

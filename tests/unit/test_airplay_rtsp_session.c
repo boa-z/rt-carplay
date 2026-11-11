@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include "../fixtures/audio/session-fixtures.h"
 
 static const uint8_t k_setup_plist[] = {
     0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
@@ -1107,6 +1108,25 @@ static void expect_body_status(airplay_rtsp_session_t *session, const char *meth
     }
 }
 #define EXPECT_IAP(method,path,name,status) expect_body_status(session,method,path,k_##name,sizeof(k_##name),status)
+static unsigned modes_seen,ducks_seen,configured_seen;
+static void audio_modes_test(const airplay_audio_modes_t *m,void *context)
+{
+    (void)context;if(!m->has_call && !m->has_speech && !m->has_main_audio)return;
+    ++modes_seen;
+    assert(m->has_call && m->call_active && m->has_speech && m->speech_mode==2);
+    assert(m->has_main_audio && m->main_audio_entity==1);
+}
+static bool audio_duck_test(bool ducked,float db,uint32_t duration,void *context)
+{
+    (void)context;++ducks_seen;
+    assert(ducked ? db== -18 && duration==250 : db==0 && duration==100);return true;
+}
+static bool configure_audio_test(const airplay_rtsp_pairing_t *p,uint16_t type,const airplay_audio_options_t *o,void *context)
+{
+    (void)p;(void)context;++configured_seen;
+    assert(type==100 && o->input && o->input_port==50000 && o->frames_per_packet==960);
+    assert(o->connection_id==9000 && !strcmp(o->audio_type,"speechRecognition"));return true;
+}
 static void test_iap_runtime_and_commands(void)
 {
     static const uint8_t identifier[]="accessory", public_key[32]={0};
@@ -1132,12 +1152,28 @@ static void test_iap_runtime_and_commands(void)
     config.media_context=&ports;
     config.start_iap=start_iap_test; config.stop_iap=stop_iap_test;
     config.disable_bluetooth=disable_bt_test;
+    config.on_audio_modes=audio_modes_test;config.on_audio_duck=audio_duck_test;
+    config.start_audio=test_start_audio;config.stop_audio=test_stop_audio;
+    config.configure_audio=configure_audio_test;
     airplay_rtsp_session_t *session=NULL;
     assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_OK);
     EXPECT_IAP("POST","/command",disable,"503 Service Unavailable");
     EXPECT_IAP("SETUP","/stream",iap_setup,"503 Service Unavailable");
     expect_body_status(session,"SETUP","/stream",k_initial_setup_plist,sizeof(k_initial_setup_plist),"200 OK");
     EXPECT_IAP("POST","/command",modes,"200 OK");
+    EXPECT_IAP("POST","/command",voice_modes,"200 OK");assert(modes_seen==1);
+    EXPECT_IAP("POST","/command",voice_bad_modes,"400 Bad Request");assert(modes_seen==1);
+    EXPECT_IAP("POST","/command",voice_duck,"200 OK");
+    EXPECT_IAP("POST","/command",voice_unduck,"200 OK");assert(ducks_seen==2);
+    EXPECT_IAP("POST","/command",voice_bad_duck,"400 Bad Request");
+    EXPECT_IAP("POST","/command",voice_bad_duration,"400 Bad Request");assert(ducks_seen==2);
+    EXPECT_IAP("SETUP","/stream",voice_bad_port,"400 Bad Request");
+    EXPECT_IAP("SETUP","/stream",duplicate_audio_keys,"400 Bad Request");assert(configured_seen==0);
+    EXPECT_IAP("SETUP","/stream",voice_setup,"200 OK");assert(configured_seen==1);
+    EXPECT_IAP("SETUP","/stream",voice_setup,"200 OK");assert(configured_seen==1);
+    EXPECT_IAP("SETUP","/stream",voice_changed_format,"400 Bad Request");
+    expect_body_status(session,"POST","/feedback",NULL,0,"200 OK");
+
     EXPECT_IAP("POST","/command",disable,"200 OK");
     assert(handoff_requests==1);
     EXPECT_IAP("POST","/command",bad_disable,"400 Bad Request");

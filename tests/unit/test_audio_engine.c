@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "audio_codec.h"
+#include "audio_voice.h"
+#include "audio_focus.h"
 #include "airplay_audio_sender.h"
 #include "mbedtls/chachapoly.h"
 #include "audio_jitter.h"
@@ -94,6 +96,39 @@ static void opus(void)
     rtcp_audio_decoder_destroy(d); opus_encoder_destroy(e);
 }
 #endif
+static void focus(void)
+{
+    rtcp_audio_focus_t f={0};rtcp_audio_focus_policy_t p;
+    rtcp_audio_focus_policy(&f,&p);assert(p.media_gain==32768);
+    f.navigation_active=true;rtcp_audio_focus_policy(&f,&p);assert(p.media_gain==8192 && p.main_gain==32768);
+    f.call_active=true;rtcp_audio_focus_policy(&f,&p);assert(p.media_gain==0 && p.main_gain==32768);
+    f.call_active=false;f.siri_active=true;rtcp_audio_focus_policy(&f,&p);assert(p.media_gain==0);
+    f.critical_active=true;rtcp_audio_focus_policy(&f,&p);assert(p.main_gain==0 && p.alternate_gain==0 && p.local_gain==32768);
+}
+static void voice(void)
+{
+    rtcp_audio_voice_t *v=rtcp_audio_voice_create(false,true,false);assert(v);
+    int16_t near_end[480], out[480];
+    for(unsigned i=0;i<480;++i)near_end[i]=1000;
+    for(unsigned i=0;i<200;++i)assert(rtcp_audio_voice_process(v,near_end,NULL,out)==0);
+    assert(out[0]>3000 && out[0]<4100);
+    memset(near_end,0,sizeof(near_end));assert(rtcp_audio_voice_process(v,near_end,NULL,out)==0);
+    for(unsigned i=0;i<480;++i)assert(!out[i]);
+    rtcp_audio_voice_destroy(v);
+#ifdef RTCP_AUDIO_CODECS
+    v=rtcp_audio_voice_create(false,false,true);assert(v);
+    int16_t far_end[480];uint32_t rng=1;uint64_t before=0,after=0;
+    for(unsigned f=0;f<250;++f) {
+        for(unsigned i=0;i<480;++i){rng=rng*1664525U+1013904223U;far_end[i]=(int16_t)((int)(rng>>19)-4096);near_end[i]=far_end[i]/2;}
+        assert(rtcp_audio_voice_process(v,near_end,far_end,out)==0);
+        if(f>200)for(unsigned i=0;i<480;++i){before+=(uint64_t)((int64_t)near_end[i]*near_end[i]);after+=(uint64_t)((int64_t)out[i]*out[i]);}
+    }
+    assert(after<before/4); /* synthetic aligned echo attenuation, not a hardware claim */
+    rtcp_audio_voice_destroy(v);
+    v=rtcp_audio_voice_create(true,false,false);assert(v);
+    assert(rtcp_audio_voice_process(v,near_end,NULL,out)==0);rtcp_audio_voice_destroy(v);
+#endif
+}
 static void uplink(void)
 {
     airplay_audio_sender_config_t c = {.format={.sample_rate=48000,.channels=1,.clock_rate=48000}, .payload_type=100};
@@ -133,7 +168,7 @@ static void uplink(void)
 }
 int main(void)
 {
-    jitter(); mixing(); uplink();
+    jitter(); mixing(); uplink(); voice(); focus();
 #ifdef RTCP_AUDIO_CODECS
     aac("tests/fixtures/audio/sine-48k.aac",0x800000);
     aac("tests/fixtures/audio/sine-44k.aac",0x400000); opus();

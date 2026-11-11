@@ -58,3 +58,5 @@ bool airplay_control_port_request_main_screen_keyframe(
     airplay_control_port_t *port);
 
 bool airplay_control_port_send_iap(airplay_control_port_t *, const uint8_t *, size_t);
+
+bool airplay_control_port_request_siri(airplay_control_port_t *);

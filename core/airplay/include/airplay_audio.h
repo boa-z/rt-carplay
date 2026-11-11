@@ -38,6 +38,22 @@
 
 typedef struct airplay_audio_stream airplay_audio_stream_t;
 
+typedef struct {
+    bool has_call, call_active;
+    bool has_speech;
+    int speech_mode;
+    bool has_main_audio;
+    uint32_t main_audio_entity;
+} airplay_audio_modes_t;
+/* Parsed SETUP metadata. Input target is always the authenticated RTSP peer. */
+typedef struct {
+    uint64_t connection_id;
+    uint64_t format_bits;
+    char audio_type[24];
+    uint16_t input_port;
+    uint16_t frames_per_packet;
+    bool input;
+} airplay_audio_options_t;
 typedef rtcp_audio_format_t airplay_audio_format_t;
 
 /* Delivers decrypted payload; LPCM is little-endian int16, compressed

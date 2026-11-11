@@ -43,6 +43,7 @@ typedef struct {
      * audioFormats/audioLatencies; leave false when no audio device exists,
      * otherwise the sender opens a stream nobody consumes. */
     bool audio_output;
+    bool audio_input; /* only with an available microphone uplink */
     bool audio_compressed; /* advertise only compiled AAC/Opus and an encoded-capable sink */
     uint32_t audio_sample_rate; /* 0 defaults to 44100; 48000 selects 48 kHz. */
 } airplay_info_plist_config_t;

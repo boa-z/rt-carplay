@@ -152,3 +152,6 @@ void carplay_app_performance_report(void);
 
 /* RTSP owner only: tunneled iAP2 writes use encrypted event /command. */
 bool carplay_app_send_iap(const uint8_t *, size_t);
+
+/* Thread-safe enqueue; event-channel write remains on the RTSP owner. */
+int carplay_app_request_siri(void);

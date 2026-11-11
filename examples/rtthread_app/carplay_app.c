@@ -38,6 +38,9 @@
 
 #if defined(RTCARPLAY_AUDIO)
 #include "audio_sink_lubanlite.h"
+#if defined(RTCARPLAY_MICROPHONE)
+#include "audio_input_lubanlite.h"
+#endif
 #endif
 
 #if defined(RTCARPLAY_TOUCH_PANEL)
@@ -203,6 +206,7 @@ typedef struct {
     uint32_t screen_sample_ms;
     uint32_t screen_report_ms;
     uint32_t screen_report_frames;
+    bool siri_pending;
     unsigned touch_queued;
     unsigned touch_queue_full;
     unsigned hid_reports_sent;
@@ -415,6 +419,18 @@ static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
     return carplay_audio_sink_packet(stream_type, format, data, len, rtp_timestamp, arrival_us);
 }
 
+#if defined(RTCARPLAY_MICROPHONE)
+static bool on_audio_input_start(const airplay_audio_input_config_t *input, void *context)
+{ (void)context; return carplay_audio_input_start(input); }
+static void on_audio_input_stop(void *context)
+{ (void)context; carplay_audio_input_request_stop(); }
+#endif
+
+static void on_audio_modes(const airplay_audio_modes_t *modes,void *context)
+{ (void)context; carplay_audio_sink_modes(modes); }
+static bool on_audio_duck(bool ducked,float db,uint32_t duration,void *context)
+{ (void)context; return carplay_audio_sink_duck(ducked,db,duration); }
+
 static void on_audio_stop(uint16_t type, void *context)
 {
     (void)context;
@@ -561,6 +577,9 @@ static void shutdown_stack(app_state_t *app)
 #if defined(RTCARPLAY_AUDIO)
     /* After the server: no PCM callback can run once it is stopped. */
     if (app->audio_started) {
+#if defined(RTCARPLAY_MICROPHONE)
+        carplay_audio_input_stop();
+#endif
         carplay_audio_sink_stop();
         app->audio_started = false;
     }
@@ -745,6 +764,11 @@ static void poll_thread(void *argument)
             }
         }
         carplay_ctrl_tick(app, (uint32_t)app->os.now_ms());
+        bool siri=false;
+        if(rt_mutex_take(app->lock,RT_WAITING_NO)==RT_EOK) {
+            siri=app->siri_pending;app->siri_pending=false;(void)rt_mutex_release(app->lock);
+        }
+        if(siri && !airplay_rtsp_server_request_siri(app->server))APP_LOG("Siri request unavailable: event channel not ready");
         /* In wired mode wait for socket readiness, not a fixed sleep before
          * each recv. Screen headers and bodies need separate readable polls;
          * pacing every fragment by 10 ms caps throughput and builds latency. */
@@ -940,6 +964,9 @@ static int build_announcement_data(app_state_t *app)
          * so a controller never negotiates an undecodable audio format. */
         info.audio_output = true;
         info.audio_compressed = true;
+#if defined(RTCARPLAY_MICROPHONE)
+        info.audio_input = carplay_audio_input_available();
+#endif
         info.audio_sample_rate = CARPLAY_APP_AUDIO_SAMPLE_RATE;
     }
 #endif
@@ -1093,6 +1120,12 @@ int carplay_app_start(const carplay_app_config_t *config)
     if (app->audio_started) {
         server_config.on_audio_pcm = on_audio_pcm;
         server_config.on_audio_stop = on_audio_stop;
+        server_config.on_audio_modes = on_audio_modes;
+        server_config.on_audio_duck = on_audio_duck;
+#if defined(RTCARPLAY_MICROPHONE)
+        server_config.on_audio_input_start = on_audio_input_start;
+        server_config.on_audio_input_stop = on_audio_input_stop;
+#endif
         server_config.audio_pcm_context = app;
         server_config.on_volume = on_volume;
         server_config.volume_context = app;
@@ -1747,6 +1780,19 @@ static int cmd_carplay_ab(int argc, char **argv)
                    : "chunked (1024 B)");
     return 0;
 }
+
+int carplay_app_request_siri(void)
+{
+    if(!s_app.running || s_app.shutting_down || !s_app.lock)return RTCP_ESTATE;
+    if(rt_mutex_take(s_app.lock,RT_WAITING_NO)!=RT_EOK)return RTCP_ETIMEDOUT;
+    s_app.siri_pending=true;(void)rt_mutex_release(s_app.lock);return RTCP_OK;
+}
+static int cmd_carplay_siri(int argc,char **argv)
+{
+    (void)argc;(void)argv;int rc=carplay_app_request_siri();
+    rt_kprintf("carplay Siri request queued rc=%d\n",rc);return rc;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_siri,carplay_siri,Request Siri through the encrypted event channel);
 
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_start, carplay_start,
                      Start the rt-carplay receiver);

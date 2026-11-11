@@ -17,3 +17,9 @@ No SDK binary libraries are used.
 `sources.json` records the compiled upstream files. Files retain upstream
 copyrights. Codec licensing does not confer patent rights. The build makes
 no assertion about deployment-specific patent requirements.
+
+* SpeexDSP 1.2.1, `1b28a0f61bc31162979e1f26f3981fc3637095c8`,
+  https://github.com/xiph/speexdsp. BSD-3-Clause; see `speexdsp/COPYING`.
+  Fixed-point NS/AEC with KISS FFT; generated `speexdsp_config_types.h`
+  uses standard fixed-width integer types. RMS AGC is implemented in core;
+  SpeexDSP's floating-point-only AGC is not assumed available.

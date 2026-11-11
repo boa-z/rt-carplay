@@ -93,6 +93,31 @@ config RTCARPLAY_AUDIO
       board's PA/speaker wiring.  Without this option the receiver is
       video-only and the controller starts no audio stream.
 
+config RTCARPLAY_MICROPHONE
+    bool "CarPlay microphone uplink (requires verified dmic0 hardware)"
+    default n
+    depends on RTCARPLAY_AUDIO && AIC_AUDIO_DMIC
+    help
+      Enable opt-in Siri/call input over AirPlay UDP using independent input
+      keys. Captures 48 kHz stereo to preserve the shared codec clock and
+      sends mono LPCM/Opus. Verify physical microphone wiring before enabling.
+      This does not claim tuned acoustic echo cancellation.
+
+config RTCARPLAY_MIC_AEC
+    bool "Experimental acoustic echo cancellation (requires delay calibration)"
+    default n
+    depends on RTCARPLAY_MICROPHONE && LPKG_RT_CARPLAY_AUDIO_CODECS
+    help
+      SpeexDSP fixed-point AEC with the actual output mix as far-end reference.
+      Must be calibrated on the installed speaker/microphone path. Host tests
+      verify aligned synthetic echo attenuation, not acoustic performance.
+
+config RTCARPLAY_MIC_AEC_DELAY_MS
+    int "Speaker-to-microphone reference delay (ms)"
+    default 30
+    range 0 200
+    depends on RTCARPLAY_MIC_AEC
+
 # Library switches consumed by the rt-carplay SConscript.  Defined here only
 # for app mode; package mode defines them in the package Kconfig.
 

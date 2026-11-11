@@ -14,13 +14,17 @@
 #include "audio_jitter.h"
 #include "audio_mixer.h"
 #include "audio_codec.h"
+#include "audio_focus.h"
+#if defined(RTCARPLAY_MICROPHONE)
+#include "audio_input_lubanlite.h"
+#endif
 
 #include "rtcp/rtcp.h"
 
 #define TAG "carplay-aud"
 #define SINK_DEVICE_NAME "sound0"
 
-#define SINK_THREAD_STACK_BYTES (32U * 1024U)
+#define SINK_THREAD_STACK_BYTES (64U * 1024U)
 #define SINK_THREAD_PRIORITY 18U
 #define SINK_THREAD_TICK 20U
 #define SINK_AMP_SETTLE_MS 200U /* aplay's power-amplifier settle value */
@@ -35,11 +39,16 @@ typedef struct {
     rt_sem_t wake;
     rt_mutex_t lock;
 
-    rtcp_audio_jitter_t *queue[3];
-    rtcp_audio_format_t format[3];
-    unsigned generation[3];
-    uint64_t last_arrival[3];
+    rtcp_audio_jitter_t *queue[4];
+    rtcp_audio_format_t format[4];
+    unsigned generation[4];
+    uint64_t last_arrival[4];
     rtcp_audio_mixer_t *mixer;
+    rtcp_audio_focus_t focus;
+    bool ducked, local_critical;
+    float duck_db;
+    uint32_t duck_ms;
+    uint32_t local_timestamp;
 
     /* Device format, owned by the writer thread. */
     uint32_t device_rate;
@@ -191,15 +200,32 @@ static uint64_t sink_now_us(void)
 static void sink_thread(void *argument)
 {
     audio_sink_t *sink = argument;
-    rtcp_audio_decoder_t *decoders[3] = {0};
-    unsigned generation[3] = {0};
-    uint32_t expected[3] = {0};
-    bool timeline[3] = {false};
+    rtcp_audio_decoder_t *decoders[4] = {0};
+    unsigned generation[4] = {0};
+    unsigned last_gain[4] = {32768,32768,32768,32768};
+    uint32_t expected[4] = {0};
+    bool timeline[4] = {false};
     rt_kprintf("[" TAG "] writer running: independent streams, 48kHz stereo mixer\n");
     while (!sink->stop) {
         (void)rt_sem_take(sink->wake, rt_tick_from_millisecond(10));
         service_volume(sink);
-        for (unsigned lane = 0; lane < 3 && !sink->stop; ++lane) {
+        rtcp_audio_focus_t focus;
+        bool ducked,critical; float duck_db; uint32_t ramp;
+        (void)rt_mutex_take(sink->lock, RT_WAITING_FOREVER);
+        focus=sink->focus;ducked=sink->ducked;duck_db=sink->duck_db;ramp=sink->duck_ms;critical=sink->local_critical;
+        (void)rt_mutex_release(sink->lock);
+        rtcp_audio_lane_stats_t alt,local;
+        rtcp_audio_mixer_stats(sink->mixer,1,&alt);rtcp_audio_mixer_stats(sink->mixer,3,&local);
+        focus.navigation_active=alt.queued_frames!=0;
+        focus.critical_active=critical && local.queued_frames!=0;
+        focus.local_active=!critical && local.queued_frames!=0;
+        rtcp_audio_focus_policy_t policy;rtcp_audio_focus_policy(&focus,&policy);
+        if(ducked)policy.media_gain=(unsigned)((uint64_t)policy.media_gain*(unsigned)(powf(10,duck_db/20)*32768)/32768);
+        unsigned gains[4]={policy.main_gain,policy.alternate_gain,policy.media_gain,policy.local_gain};
+        for(unsigned i=0;i<4;++i)if(gains[i]!=last_gain[i]) {
+            rtcp_audio_mixer_gain(sink->mixer,i,gains[i],ramp*48U);last_gain[i]=gains[i];
+        }
+        for (unsigned lane = 0; lane < 4 && !sink->stop; ++lane) {
             for (unsigned budget = 0; budget < 8; ++budget) {
                 uint8_t packet[RTCP_AUDIO_PACKET_MAX];
                 rtcp_audio_format_t format;
@@ -257,8 +283,11 @@ static void sink_thread(void *argument)
             if (!written || written > bytes-offset) { ++sink->write_errors; break; }
             offset += written;
         }
+#if defined(RTCARPLAY_MICROPHONE)
+        if(offset==bytes)carplay_audio_input_reference(chunk,frames);
+#endif
     }
-    for (unsigned i = 0; i < 3; ++i) rtcp_audio_decoder_destroy(decoders[i]);
+    for (unsigned i = 0; i < 4; ++i) rtcp_audio_decoder_destroy(decoders[i]);
     stop_device(sink);
     rt_kprintf("[" TAG "] stopped: %u packets, %u replay(s), %u dropped bytes, %u errors\n",
                sink->packets, sink->replays, sink->dropped_bytes, sink->write_errors);
@@ -291,12 +320,14 @@ int carplay_audio_sink_start(void)
     sink->device_opened = true;
 
     sink->mixer = rtcp_audio_mixer_create(8192);
-    for (unsigned i = 0; i < 3; ++i) sink->queue[i] = rtcp_audio_jitter_create(16, 20000);
+    rtcp_audio_mixer_auto_duck(sink->mixer,false);
+    sink->duck_ms=100;
+    for (unsigned i = 0; i < 4; ++i) sink->queue[i] = rtcp_audio_jitter_create(i==3?4:16, 20000);
     sink->wake = rt_sem_create("caud", 0, RT_IPC_FLAG_FIFO);
     sink->lock = rt_mutex_create("caudq", RT_IPC_FLAG_FIFO);
-    if (sink->mixer == NULL || sink->queue[0] == NULL || sink->queue[1] == NULL || sink->queue[2] == NULL || sink->wake == NULL || sink->lock == NULL) {
+    if (sink->mixer == NULL || sink->queue[0] == NULL || sink->queue[1] == NULL || sink->queue[2] == NULL || sink->queue[3] == NULL || sink->wake == NULL || sink->lock == NULL) {
         rtcp_audio_mixer_destroy(sink->mixer);
-        for (unsigned i = 0; i < 3; ++i) rtcp_audio_jitter_destroy(sink->queue[i]);
+        for (unsigned i = 0; i < 4; ++i) rtcp_audio_jitter_destroy(sink->queue[i]);
         if (sink->wake != NULL) (void)rt_sem_delete(sink->wake);
         if (sink->lock != NULL) (void)rt_mutex_delete(sink->lock);
         (void)rt_device_close(sink->dev);
@@ -313,7 +344,7 @@ int carplay_audio_sink_start(void)
     if (sink->thread == NULL) {
         sink->running = false;
         rtcp_audio_mixer_destroy(sink->mixer);
-        for (unsigned i = 0; i < 3; ++i) rtcp_audio_jitter_destroy(sink->queue[i]);
+        for (unsigned i = 0; i < 4; ++i) rtcp_audio_jitter_destroy(sink->queue[i]);
         (void)rt_sem_delete(sink->wake);
         (void)rt_mutex_delete(sink->lock);
         (void)rt_device_close(sink->dev);
@@ -363,7 +394,7 @@ void carplay_audio_sink_stop(void)
         sink->lock = NULL;
     }
     rtcp_audio_mixer_destroy(sink->mixer); sink->mixer = NULL;
-    for (unsigned i = 0; i < 3; ++i) { rtcp_audio_jitter_destroy(sink->queue[i]); sink->queue[i] = NULL; }
+    for (unsigned i = 0; i < 4; ++i) { rtcp_audio_jitter_destroy(sink->queue[i]); sink->queue[i] = NULL; }
     sink->thread = NULL;
     sink->thread_running = false;
 }
@@ -379,7 +410,7 @@ size_t carplay_audio_sink_pending(void)
     if (!sink->running || sink->lock == NULL) return 0U;
     if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK) return 0U;
     size_t pending = 0;
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < 4; ++i) {
         rtcp_audio_jitter_stats_t stats;
         rtcp_audio_jitter_stats(sink->queue[i], &stats); pending += stats.queued;
     }
@@ -475,4 +506,37 @@ int carplay_audio_sink_volume_percent(void)
     int percent = sink->volume_known ? sink->volume_level : -1;
     (void)rt_mutex_release(sink->lock);
     return percent;
+}
+
+void carplay_audio_sink_modes(const airplay_audio_modes_t *modes)
+{
+    audio_sink_t *sink=&s_sink;
+    if(!modes || !sink->running || !sink->lock)return;
+    (void)rt_mutex_take(sink->lock,RT_WAITING_FOREVER);
+    if(modes->has_call)sink->focus.call_active=modes->call_active;
+    if(modes->has_speech)sink->focus.siri_active=modes->speech_mode==1 || modes->speech_mode==2;
+    if(modes->has_main_audio)sink->focus.remote_audio_entity=modes->main_audio_entity;
+    (void)rt_mutex_release(sink->lock);(void)rt_sem_release(sink->wake);
+}
+bool carplay_audio_sink_duck(bool ducked,float db,uint32_t duration)
+{
+    audio_sink_t *sink=&s_sink;
+    if(!sink->running || !sink->lock || !isfinite(db) || db< -144 || db>0 || duration>10000)return false;
+    (void)rt_mutex_take(sink->lock,RT_WAITING_FOREVER);
+    sink->ducked=ducked;sink->duck_db=db;sink->duck_ms=duration;
+    (void)rt_mutex_release(sink->lock);(void)rt_sem_release(sink->wake);return true;
+}
+int carplay_audio_sink_local_pcm(const uint8_t *data,size_t len,uint32_t rate,uint8_t channels,bool critical)
+{
+    audio_sink_t *sink=&s_sink;
+    if(!sink->running || !sink->lock)return RTCP_ESTATE;
+    if(!data || !len || channels<1 || channels>2 || rate<8000 || rate>48000 || len%(channels*2U))return RTCP_EINVAL;
+    if(rt_mutex_take(sink->lock,0)!=RT_EOK)return RTCP_ETIMEDOUT;
+    rtcp_audio_format_t f={.sample_rate=rate,.channels=channels,.clock_rate=rate};
+    if(sink->format[3].sample_rate!=rate || sink->format[3].channels!=channels) {
+        rtcp_audio_jitter_flush(sink->queue[3]);sink->format[3]=f;++sink->generation[3];
+    }
+    int rc=rtcp_audio_jitter_push(sink->queue[3],data,len,sink->local_timestamp,sink_now_us());
+    sink->local_timestamp+=(uint32_t)(len/(channels*2));sink->local_critical=critical;
+    (void)rt_mutex_release(sink->lock);if(rc==0)(void)rt_sem_release(sink->wake);return rc;
 }

@@ -8,6 +8,7 @@
 #include "airplay_bplist.h"
 
 #include <string.h>
+#include <math.h>
 
 #define BPLIST_HEADER_BYTES 8U
 #define BPLIST_TRAILER_BYTES 32U
@@ -422,6 +423,22 @@ airplay_bplist_result_t airplay_bplist_get_data(
     return AIRPLAY_BPLIST_OK;
 }
 
+airplay_bplist_result_t airplay_bplist_get_number(const airplay_bplist_doc_t *doc,
+                                                airplay_bplist_object_t object, double *value)
+{
+    if(!value)return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_object_info_t info;
+    airplay_bplist_result_t rc=resolve_object(doc,object,&info);if(rc!=AIRPLAY_BPLIST_OK)return rc;
+    uint64_t bits;
+    if(!read_be(doc->bytes,doc->offset_table_offset,info.payload_offset,(uint8_t)info.payload_bytes,&bits))
+        return AIRPLAY_BPLIST_WRONG_TYPE;
+    if(info.type==1) *value=info.payload_bytes==8 ? (double)(int64_t)bits : (double)bits;
+    else if(info.type==2 && info.payload_bytes==4) {uint32_t raw=(uint32_t)bits;float f;memcpy(&f,&raw,4);*value=f;}
+    else if(info.type==2 && info.payload_bytes==8) memcpy(value,&bits,8);
+    else return AIRPLAY_BPLIST_WRONG_TYPE;
+    return isfinite(*value)?AIRPLAY_BPLIST_OK:AIRPLAY_BPLIST_INVALID_OBJECT;
+}
+
 typedef enum {
     BPLIST_WRITE_DATA,
     BPLIST_WRITE_STRING,
@@ -737,4 +754,39 @@ airplay_bplist_result_t airplay_bplist_build_iap_command(
         {.kind=BPLIST_WRITE_DATA, .data=data, .data_len=len},
     };
     return build_setup_response(objects, 7, out, capacity, written);
+}
+
+airplay_bplist_result_t airplay_bplist_build_audio_feedback(const airplay_audio_feedback_t *entries,size_t n,
+                                                           uint8_t *out,size_t capacity,size_t *written)
+{
+    if(n>3 || (!entries && n))return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_write_object_t o[24]={0};
+    o[0]=(bplist_write_object_t){.kind=BPLIST_WRITE_DICTIONARY,.references={1,2},.reference_count=2};
+    o[1]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="streams"};
+    o[2].kind=BPLIST_WRITE_ARRAY;o[2].reference_count=(uint8_t)n;
+    uint8_t next=3;
+    for(size_t i=0;i<n;++i) {
+        uint8_t d=next;next+=7;
+        o[2].references[i]=d;o[d].kind=BPLIST_WRITE_DICTIONARY;o[d].reference_count=6;
+        const char *keys[]={"type","sampleRate","streamConnectionID"};
+        uint64_t values[]={entries[i].type,entries[i].sample_rate,entries[i].connection_id};
+        for(unsigned j=0;j<3;++j) {
+            o[d].references[j]=(uint8_t)(d+1+j);o[d].references[j+3]=(uint8_t)(d+4+j);
+            o[d+1+j]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text=keys[j]};
+            o[d+4+j]=(bplist_write_object_t){.kind=BPLIST_WRITE_INTEGER,.number=values[j]};
+        }
+    }
+    return build_setup_response(o,next,out,capacity,written);
+}
+airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action,uint8_t *out,size_t capacity,size_t *written)
+{
+    if(action!=2 && action!=3)return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_write_object_t o[]={
+        {.kind=BPLIST_WRITE_DICTIONARY,.references={1,2,3,4},.reference_count=4},
+        {.kind=BPLIST_WRITE_STRING,.text="type"},{.kind=BPLIST_WRITE_STRING,.text="params"},
+        {.kind=BPLIST_WRITE_STRING,.text="requestSiri"},
+        {.kind=BPLIST_WRITE_DICTIONARY,.references={5,6},.reference_count=2},
+        {.kind=BPLIST_WRITE_STRING,.text="siriAction"},{.kind=BPLIST_WRITE_INTEGER,.number=action}
+    };
+    return build_setup_response(o,7,out,capacity,written);
 }

@@ -59,3 +59,6 @@ FAAD2 2.11.2, GPL-2.0-or-later, upstream knik0/faad2.
 Code from FAAD2 is copyright (c) Nero AG, www.nero.com.
 Opus 1.5.2, BSD-3-Clause, upstream xiph/opus.
 See third_party/audio/README.md and the retained COPYING/file notices.
+
+SpeexDSP 1.2.1, BSD-3-Clause, upstream xiph/speexdsp.
+See third_party/audio/speexdsp/COPYING for copyright and license.

@@ -42,7 +42,7 @@ if GetDepend('LPKG_RT_CARPLAY_ED25519'):
     cpppath.append(cwd + '/third_party/ed25519')
 
 if GetDepend('LPKG_RT_CARPLAY_AUDIO_CODECS'):
-    cpppath += [cwd + '/third_party/audio/faad2/include', cwd + '/third_party/audio/opus/include']
+    cpppath += [cwd + '/third_party/audio/faad2/include', cwd + '/third_party/audio/opus/include', cwd + '/third_party/audio/speexdsp/include']
     # Group-local definition: do not change the SDK's unrelated audio packages.
     ccflags = (ccflags or '') + ' -DRTCP_AUDIO_CODECS'
 
@@ -97,6 +97,10 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT'):
 # Luban-Lite MFi seam: 2.0C authentication coprocessor on the I2C bus.
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI'):
     src += Glob('port/luban-lite/rtcp_mfi_lubanlite.c')
+
+if GetDepend('RTCARPLAY_MICROPHONE'):
+    src += Glob('port/luban-lite/rtcp_audio_capture_lubanlite.c')
+    cpppath.append(cwd + '/port/luban-lite/include')
 
 # Luban-Lite wired USB host seam: CherryUSB host stack, Apple USBMUX class
 # driver and the configuration-selection hook.  The CherryUSB headers are

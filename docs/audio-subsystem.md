@@ -68,3 +68,33 @@ Further protocol/resource/uplink work is ongoing; this document is updated
 alongside implementation. The current slot model remains one instance per
 stream type and must not be described as arbitrary same-type multi-session
 support.
+
+## Uplink and control implementation progress
+
+* Independent DataStream Input Encryption Key HKDF, not the output key.
+* Mono L16 big-endian or fixed-point Opus encoder; RTP/AEAD header, nonce tail,
+  MTU-safe packets, separate 16/24/48 kHz RTP clock and 48 kHz Opus capture.
+* SETUP validates input port, audioType, framesPerPacket; input targets only
+  the authenticated control peer. Same-id renegotiation with different
+  options is rejected. Key ids are reserved before callbacks can transmit;
+  duplicate keys in a multi-stream transaction are rejected.
+* Opt-in `RTCARPLAY_MICROPHONE`: dedicated source/encode/send worker, SDK
+  exclusive dmic0 capture at 48 kHz stereo, mono conversion/resampling.
+  Nonblocking pipe reads, async stop request on protocol owner, bounded
+  shutdown wait and quarantine if a worker remains busy. `carplay_mic
+  mute|unmute` preserves RTP continuity while muting the transmitted samples.
+* SpeexDSP fixed-point NS; bounded RMS AGC. Experimental AEC uses actual
+  submitted mixed playback frames as a reference; delay is configurable
+  (`RTCARPLAY_MIC_AEC_DELAY_MS`). AEC is opt-in and needs physical calibration.
+* Normalized modesChanged call/Siri/resource state and validated duckAudio/
+  unduckAudio volume/duration drive worker-owned gain policy and ramps.
+* `/feedback` now returns active stream metadata. Real DAC sampleTime and
+  NTP-correlated presentation timestamps remain absent; no received-packet or
+  wall-time counter is passed off as a hardware presentation clock.
+* `carplay_siri` queues event-channel requestSiri actions 2/3 on the RTSP owner.
+
+New host tests run the actual microphone worker against virtual PCM capture
+and real loopback UDP, decrypt its packets and test PCM/Opus clocking plus
+stop/restart. Synthetic aligned echo attenuation is tested independently;
+this is not measured echo performance on D213. The SDK microphone/AEC build
+is also checked separately from the default configuration.

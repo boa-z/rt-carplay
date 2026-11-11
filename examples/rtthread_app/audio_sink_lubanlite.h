@@ -44,3 +44,9 @@ int carplay_audio_sink_volume_percent(void);
 #include "audio_codec.h"
 int carplay_audio_sink_packet(uint16_t type, const rtcp_audio_format_t *, const uint8_t *, size_t, uint32_t timestamp, uint64_t arrival_us);
 void carplay_audio_sink_stream_stop(uint16_t type);
+
+#include "airplay_audio.h"
+void carplay_audio_sink_modes(const airplay_audio_modes_t *);
+bool carplay_audio_sink_duck(bool ducked, float volume_db, uint32_t duration_ms);
+/* Local HMI/critical audio never shares a remote stream queue. */
+int carplay_audio_sink_local_pcm(const uint8_t *, size_t, uint32_t rate, uint8_t channels, bool critical);

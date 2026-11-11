@@ -391,29 +391,33 @@ done_without_lock:
     return false;
 }
 
-bool airplay_control_port_send_iap(airplay_control_port_t *port,
-                                  const uint8_t *bytes, size_t len)
+static bool send_command(airplay_control_port_t *port,const uint8_t *plist,size_t plist_len)
 {
-    if (!port) return false;
-    uint8_t plaintext[2560U];
-    char header[192];
-    size_t plist_len = 0;
-    bool sent = false;
-    if (airplay_bplist_build_iap_command(bytes, len, plaintext,
-            sizeof(plaintext), &plist_len) != AIRPLAY_BPLIST_OK) return false;
+    if(!port || !plist || !plist_len || plist_len>2300)return false;
+    uint8_t plaintext[2560U];char header[192];bool sent=false;
     lock(port);
-    if (!port->active) goto done;
-    if (++port->cseq == 0) port->cseq = 1;
-    int n = snprintf(header, sizeof(header),
+    if(!port->active)goto done;
+    if(++port->cseq==0)port->cseq=1;
+    int n=snprintf(header,sizeof(header),
         "POST /command RTSP/1.0\r\nContent-Type: application/x-apple-binary-plist\r\n"
-        "Content-Length: %u\r\nCSeq: %u\r\n\r\n", (unsigned)plist_len, (unsigned)port->cseq);
-    if (n <= 0 || (size_t)n >= sizeof(header) || (size_t)n + plist_len > sizeof(plaintext)) goto done;
-    memmove(plaintext + n, plaintext, plist_len);
-    memcpy(plaintext, header, (size_t)n);
-    sent = send_plaintext_locked(port, plaintext, (size_t)n + plist_len) == RTCP_OK;
-    if (!sent) destroy_channel(port);
+        "Content-Length: %u\r\nCSeq: %u\r\n\r\n",(unsigned)plist_len,(unsigned)port->cseq);
+    if(n<=0 || (size_t)n>=sizeof(header) || (size_t)n+plist_len>sizeof(plaintext))goto done;
+    memcpy(plaintext,header,(size_t)n);memcpy(plaintext+n,plist,plist_len);
+    sent=send_plaintext_locked(port,plaintext,(size_t)n+plist_len)==RTCP_OK;
+    if(!sent)destroy_channel(port);
 done:
-    mbedtls_platform_zeroize(plaintext, sizeof(plaintext));
-    unlock(port);
-    return sent;
+    mbedtls_platform_zeroize(plaintext,sizeof(plaintext));unlock(port);return sent;
+}
+bool airplay_control_port_send_iap(airplay_control_port_t *port,const uint8_t *bytes,size_t len)
+{
+    uint8_t plist[2300];size_t n;
+    bool ok=airplay_bplist_build_iap_command(bytes,len,plist,sizeof(plist),&n)==AIRPLAY_BPLIST_OK && send_command(port,plist,n);
+    mbedtls_platform_zeroize(plist,sizeof(plist));return ok;
+}
+bool airplay_control_port_request_siri(airplay_control_port_t *port)
+{
+    uint8_t plist[256];size_t n;
+    for(unsigned action=2;action<=3;++action)
+        if(airplay_bplist_build_siri_command(action,plist,sizeof(plist),&n)!=AIRPLAY_BPLIST_OK || !send_command(port,plist,n))return false;
+    return true;
 }

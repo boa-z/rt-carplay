@@ -8,6 +8,12 @@ typedef struct {
     uint8_t payload_type; /* CarPlay stream type (100), not the codec enum. */
     unsigned frames_per_packet; /* per channel; 0 selects MTU-safe default */
 } airplay_audio_sender_config_t;
+typedef struct {
+    airplay_audio_sender_config_t sender;
+    rtcp_addr_t peer;
+    const struct rtcp_net *net;
+    bool telephony;
+} airplay_audio_input_config_t;
 int airplay_audio_sender_create(const airplay_audio_sender_config_t *, airplay_audio_sender_t **);
 size_t airplay_audio_sender_frames(const airplay_audio_sender_t *);
 /* PCM is host-endian interleaved S16. Muting sends encoded silence, preserving

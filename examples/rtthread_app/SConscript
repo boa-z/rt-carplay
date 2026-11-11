@@ -34,6 +34,9 @@ if GetDepend('RTCARPLAY_VIDEO'):
 if GetDepend('RTCARPLAY_AUDIO'):
     src += Glob('audio_sink_lubanlite.c')
 
+if GetDepend('RTCARPLAY_MICROPHONE'):
+    src += Glob('audio_input_lubanlite.c')
+
 # Touch panel (GT911 on demo128-nand-carplay): panel points -> touch queue.
 if GetDepend('RTCARPLAY_TOUCH_PANEL'):
     src += Glob('touch_panel_lubanlite.c')

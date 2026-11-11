@@ -14,3 +14,9 @@ target_compile_definitions(rtcp_opus PRIVATE OPUS_BUILD FIXED_POINT DISABLE_FLOA
 foreach(t rtcp_faad rtcp_opus)
   target_compile_options(${t} PRIVATE -O2 -fwrapv -fno-strict-aliasing)
 endforeach()
+
+file(GLOB SPEEX_SOURCES speexdsp/libspeexdsp/*.c)
+add_library(rtcp_speexdsp STATIC ${SPEEX_SOURCES})
+target_include_directories(rtcp_speexdsp PUBLIC speexdsp/include PRIVATE speexdsp/libspeexdsp)
+target_compile_definitions(rtcp_speexdsp PRIVATE FIXED_POINT USE_KISS_FFT VAR_ARRAYS EXPORT=)
+target_compile_options(rtcp_speexdsp PRIVATE -O2 -fwrapv -fno-strict-aliasing)

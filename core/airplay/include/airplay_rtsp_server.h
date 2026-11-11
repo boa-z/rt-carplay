@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "airplay_audio.h"
+#include "airplay_audio_sender.h"
 #include "airplay_rtsp_session.h"
 #include "airplay_screen.h"
 #include "airplay_screen_server.h"
@@ -59,6 +60,10 @@ typedef struct {
     void *audio_pcm_context;
     /* Flush only this stream from the sink on selective TEARDOWN/replacement. */
     void (*on_audio_stop)(uint16_t stream_type, void *context);
+    bool (*on_audio_input_start)(const airplay_audio_input_config_t *, void *context);
+    void (*on_audio_input_stop)(void *context);
+    void (*on_audio_modes)(const airplay_audio_modes_t *, void *context);
+    bool (*on_audio_duck)(bool ducked, float volume_db, uint32_t duration_ms, void *context);
 
     /* SET_PARAMETER "volume: <dB>" from the sender (0 = full scale).
      * NULL acknowledges the request without changing anything. */
@@ -117,3 +122,6 @@ bool airplay_rtsp_server_single_cipher_frame(const airplay_rtsp_server_t *server
 void airplay_rtsp_server_stop(airplay_rtsp_server_t *server);
 
 bool airplay_rtsp_server_send_iap(airplay_rtsp_server_t *, const uint8_t *, size_t);
+
+/* RTSP owner only; sends documented requestSiri down/up actions on event. */
+bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *);

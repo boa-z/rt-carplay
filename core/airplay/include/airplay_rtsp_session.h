@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "airplay_rtsp_pairing.h"
+#include "airplay_audio.h"
 
 /* The audio advertisement (audioFormats/audioLatencies) grows /info to about
  * 4.2 KB; keep this in step with AIRPLAY_INFO_PLIST_MAX_BYTES. */
@@ -60,6 +61,9 @@ typedef struct {
     airplay_rtsp_start_event_cb_t start_event;
     airplay_rtsp_start_timing_cb_t start_timing;
     airplay_rtsp_start_audio_cb_t start_audio;
+    /* Optional second phase for stream role/input; failure rolls back the listener. */
+    bool (*configure_audio)(const airplay_rtsp_pairing_t *, uint16_t,
+                            const airplay_audio_options_t *, void *);
     airplay_rtsp_stop_media_cb_t stop_screen;
     airplay_rtsp_stop_media_cb_t stop_event;
     airplay_rtsp_stop_media_cb_t stop_timing;
@@ -71,6 +75,8 @@ typedef struct {
     airplay_rtsp_stop_media_cb_t stop_iap;
     airplay_rtsp_disable_bt_cb_t disable_bluetooth;
     void *command_context;
+    void (*on_audio_modes)(const airplay_audio_modes_t *, void *context);
+    bool (*on_audio_duck)(bool ducked, float volume_db, uint32_t duration_ms, void *context);
 } airplay_rtsp_session_config_t;
 
 typedef enum {

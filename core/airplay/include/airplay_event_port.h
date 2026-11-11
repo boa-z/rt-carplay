@@ -49,3 +49,5 @@ bool airplay_event_port_send_hid_report(airplay_event_port_t *port,
                                         size_t report_len);
 
 bool airplay_event_port_send_iap(airplay_event_port_t *, const uint8_t *, size_t);
+
+bool airplay_event_port_request_siri(airplay_event_port_t *);

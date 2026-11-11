@@ -388,6 +388,25 @@ static bool server_start_audio(const airplay_rtsp_pairing_t *pairing,
     return true;
 }
 
+static bool server_configure_audio(const airplay_rtsp_pairing_t *pairing, uint16_t type,
+                                   const airplay_audio_options_t *options, void *context)
+{
+    airplay_rtsp_server_t *s = context;
+    if (!options->input) return true;
+    if (!s->config.on_audio_input_start || type != 100) return false;
+    airplay_audio_input_config_t input = {0};
+    if (!rtcp_audio_format_parse(options->format_bits, &input.sender.format) ||
+        input.sender.format.channels != 1 || input.sender.format.codec == RTCP_AUDIO_AAC_LC) return false;
+    input.sender.frames_per_packet = options->frames_per_packet;
+    input.sender.payload_type = (uint8_t)type;
+    input.peer = s->peer; input.peer.port = options->input_port; input.net = s->net;
+    input.telephony = strcmp(options->audio_type, "telephony") == 0;
+    if (airplay_rtsp_pairing_derive_input_key(pairing, options->connection_id, input.sender.input_key) != AIRPLAY_PAIR_VERIFY_OK) return false;
+    bool ok = s->config.on_audio_input_start(&input, s->config.audio_pcm_context);
+    mbedtls_platform_zeroize(&input, sizeof(input));
+    return ok;
+}
+
 static void server_stop_audio(uint16_t stream_type, void *context)
 {
     airplay_rtsp_server_t *server = context;
@@ -396,11 +415,28 @@ static void server_stop_audio(uint16_t stream_type, void *context)
     if (slot < 0 || server->audio[slot] == NULL) return;
     airplay_audio_stream_t *stream = server->audio[slot];
     server->audio[slot] = NULL;
+    if (stream_type == 100 && server->config.on_audio_input_stop)
+        server->config.on_audio_input_stop(server->config.audio_pcm_context);
     airplay_audio_stream_stop(stream, server->net);
     if (server->config.on_audio_stop)
         server->config.on_audio_stop(stream_type, server->config.audio_pcm_context);
 }
 
+static bool server_disable_bluetooth(const char *device,void *context)
+{
+    airplay_rtsp_server_t *s=context;
+    return s->config.disable_bluetooth && s->config.disable_bluetooth(device,s->config.iap_context);
+}
+static void server_audio_modes(const airplay_audio_modes_t *modes,void *context)
+{
+    airplay_rtsp_server_t *s=context;
+    if(s->config.on_audio_modes)s->config.on_audio_modes(modes,s->config.audio_pcm_context);
+}
+static bool server_audio_duck(bool ducked,float db,uint32_t ms,void *context)
+{
+    airplay_rtsp_server_t *s=context;
+    return s->config.on_audio_duck && s->config.on_audio_duck(ducked,db,ms,s->config.audio_pcm_context);
+}
 static void server_volume(float volume_db, void *context)
 {
     airplay_rtsp_server_t *server = context;
@@ -742,6 +778,7 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.start_event = server_start_event;
     session_config.start_timing = server_start_timing;
     session_config.start_audio = server_start_audio;
+    session_config.configure_audio = server_configure_audio;
     session_config.stop_screen = server_stop_screen;
     session_config.stop_event = server_stop_event;
     session_config.stop_timing = server_stop_timing;
@@ -749,12 +786,14 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.media_context = server;
     session_config.on_volume = server_volume;
     session_config.volume_context = server;
+    session_config.on_audio_modes = server_audio_modes;
+    session_config.on_audio_duck = server_audio_duck;
+    session_config.command_context = server;
     if (server->config.on_iap_bytes) {
         session_config.start_iap = server_start_iap;
         session_config.stop_iap = server_stop_iap;
     }
-    session_config.disable_bluetooth = server->config.disable_bluetooth;
-    session_config.command_context = server->config.iap_context;
+    session_config.disable_bluetooth = server_disable_bluetooth;
 
     if (airplay_rtsp_session_create_borrowing_info_plist(
             &session_config, &server->session) != AIRPLAY_RTSP_SESSION_OK) {
@@ -1079,4 +1118,9 @@ void airplay_rtsp_server_stop(airplay_rtsp_server_t *server)
     memset(&server->config, 0, sizeof(server->config));
     mbedtls_platform_zeroize(server, sizeof(*server));
     free(server);
+}
+
+bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *s)
+{
+    return s && !s->stopping && s->event_connected && airplay_event_port_request_siri(s->event_port);
 }

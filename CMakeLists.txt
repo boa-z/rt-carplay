@@ -54,7 +54,7 @@ target_link_libraries(rtcp_core PUBLIC rtcp_mbedcrypto m)
 if(RTCP_AUDIO_CODECS)
     add_subdirectory(third_party/audio)
     target_compile_definitions(rtcp_core PUBLIC RTCP_AUDIO_CODECS)
-    target_link_libraries(rtcp_core PUBLIC rtcp_faad rtcp_opus)
+    target_link_libraries(rtcp_core PUBLIC rtcp_faad rtcp_opus rtcp_speexdsp)
 endif()
 
 file(GLOB_RECURSE RTCP_PORT_LINUX_SOURCES CONFIGURE_DEPENDS port/linux/*.c)
@@ -83,7 +83,7 @@ if(RTCP_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
     set(RTCP_TESTS
-        test_audio_engine
+        test_audio_engine test_audio_input test_audio_sink
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
         test_iap2_parameter test_iap2_session test_iap2_stream
@@ -91,7 +91,7 @@ if(RTCP_BUILD_TESTS)
         test_airplay_screen_codec test_airplay_timing test_airplay_hid_plist
         test_airplay_control_stream test_airplay_screen_stream test_airplay_mfi_sap test_airplay_mfi_sap_backend
         test_airplay_srp6a test_airplay_pair_setup test_airplay_pair_verify
-        test_airplay_rtsp_pairing test_airplay_rtsp_session
+        test_airplay_rtsp_pairing test_airplay_rtsp_session test_airplay_iap_tunnel
         test_airplay_pairing_store
         test_airplay_control_cipher test_airplay_control_port
         test_airplay_timing_port test_airplay_event_port
@@ -128,6 +128,14 @@ if(RTCP_BUILD_TESTS)
                 rtcp_core rtcp_test_support rtcp_port_linux)
         else()
             target_link_libraries(${name} PRIVATE rtcp_core rtcp_test_support)
+        endif()
+        if(name STREQUAL "test_audio_sink" OR name STREQUAL "test_audio_input")
+            target_sources(${name} PRIVATE tests/support/lubanlite_audio/rtthread_host.c)
+            target_include_directories(${name} PRIVATE tests/support/lubanlite_audio port/luban-lite/include)
+            target_link_libraries(${name} PRIVATE Threads::Threads)
+        endif()
+        if(name STREQUAL "test_audio_input")
+            target_link_libraries(${name} PRIVATE rtcp_port_linux)
         endif()
         if(name STREQUAL "test_lockdown_tls" OR
            name STREQUAL "test_lockdown_session")

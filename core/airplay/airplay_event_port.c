@@ -226,3 +226,8 @@ bool airplay_event_port_send_iap(airplay_event_port_t *port, const uint8_t *data
     return port && !port->failed && port->connected_notified &&
         airplay_control_port_send_iap(port->control, data, len);
 }
+
+bool airplay_event_port_request_siri(airplay_event_port_t *port)
+{
+    return port && !port->failed && port->connected_notified && airplay_control_port_request_siri(port->control);
+}

@@ -369,3 +369,32 @@ independent.
    phone UI).  If the device is missing the log says
    `touch device gt911 not found`; `carplay_touch down x y` still injects
    events for isolating the AirPlay HID path from the panel driver.
+
+### Official CherryUSB DMA contract
+
+The D213 official CherryUSB EHCI port requires both Setup and transfer-buffer
+addresses to be `CONFIG_USB_ALIGN_SIZE` aligned (64 bytes with the current
+cache configuration). Application buffers, including configuration diagnostics,
+stack descriptors, vendor replies and USBMUX packets, pass through an owned
+aligned allocation; IN results are copied back only within the actual returned
+length. The allocation reserves complete cache lines so invalidation cannot
+corrupt adjacent heap objects. Zero-length transfers use a NULL data pointer.
+
+Each operation owns its URB and completion semaphore. A timeout cancels the
+operation before releasing them. Failed cancellation retains the DMA allocation
+and callback semaphore to tolerate late HCD access; this logs an error and
+costs memory until reboot. Control results exclude the eight Setup bytes, in
+agreement with the official core API. This applies to the application USB seam;
+the independent Ethernet driver manages its own aligned DMA storage.
+
+Run the actual SDK-port regression on the host (ASan/UBSan enabled by default):
+
+```sh
+make check-lubanlite-usb CHERRYUSB_ROOT=/path/to/official/CherryUSB
+```
+
+It covers unaligned caller buffers, cache-line padding, control and bulk IN/OUT,
+short replies, invalid completion lengths, zero-length packets, allocation and
+submission failures, successful timeout cancellation, and a late callback after
+failed cancellation. The official EHCI checks stay enabled. Real controller DMA
+and cache behavior still require a board run.

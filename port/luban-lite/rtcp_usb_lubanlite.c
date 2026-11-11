@@ -139,13 +139,16 @@ static uint8_t map_speed(uint8_t cherryusb_speed)
     }
 }
 
-/* CherryUSB's blocking submit uses the URB timeout, and the EHCI driver
- * prints an error for every expired URB.  The wired link polls the bulk IN
- * endpoint while it is idle, so use a completion semaphore instead: the URB
- * is submitted non-blocking, the caller waits on the semaphore with its own
- * timeout and cancels the URB quietly when it expires. */
-static usb_osal_sem_t s_control_sem;
-static usb_osal_sem_t s_bulk_sem;
+/* Application callers can supply stack or unaligned buffers. Only this owned,
+ * cache-line-padded allocation is exposed to DMA, including the Setup stage.
+ * Each transfer owns its semaphore/URB so a failed cancel can retain them. */
+struct usb_dma_transfer {
+    struct usbh_urb urb;
+    struct usb_endpoint_descriptor endpoint;
+    usb_osal_sem_t done;
+    USB_MEM_ALIGNX struct usb_setup_packet setup;
+    USB_MEM_ALIGNX uint8_t data[];
+};
 
 static void transfer_complete(void *arg, int nbytes)
 {
@@ -155,36 +158,78 @@ static void transfer_complete(void *arg, int nbytes)
 
 static int map_urb_error(int error)
 {
-    if (error == -USB_ERR_TIMEOUT) {
-        return RTCP_ETIMEDOUT;
-    }
-    if (error == -USB_ERR_NOTCONN || error == -USB_ERR_SHUTDOWN) {
-        return RTCP_ESTATE;
-    }
+    if (error == -USB_ERR_TIMEOUT) return RTCP_ETIMEDOUT;
+    if (error == -USB_ERR_NOTCONN || error == -USB_ERR_SHUTDOWN ||
+        error == -USB_ERR_NODEV) return RTCP_ESTATE;
     return RTCP_EIO;
 }
 
-static int wait_urb(usb_osal_sem_t *semaphore, struct usbh_urb *urb,
-                    uint32_t timeout_ms)
+/* endpoint == NULL selects EP0. Caller buffers are copied only while this
+ * function runs; no HCD ever retains a caller's data or stack Setup packet. */
+static int dma_transfer(struct usbh_hubport *hport,
+                        const struct usb_endpoint_descriptor *endpoint,
+                        const struct usb_setup_packet *setup, void *data,
+                        size_t length, uint32_t timeout_ms)
 {
-    if (*semaphore == NULL) {
-        /* The URB already references the semaphore; never reach here. */
-        return RTCP_ESTATE;
+    if (!hport || (!endpoint && !setup) || (length && !data))
+        return RTCP_EINVAL;
+    if (length > INT32_MAX ||
+        length > SIZE_MAX - sizeof(struct usb_dma_transfer) -
+                     (CONFIG_USB_ALIGN_SIZE - 1U)) return RTCP_EINVAL;
+    size_t padded = (length + CONFIG_USB_ALIGN_SIZE - 1U) &
+                    ~(size_t)(CONFIG_USB_ALIGN_SIZE - 1U);
+    struct usb_dma_transfer *t = rt_malloc_align(sizeof(*t) + padded,
+                                                CONFIG_USB_ALIGN_SIZE);
+    if (!t) return RTCP_ENOMEM;
+    memset(t, 0, sizeof(*t) + padded);
+    t->done = usb_osal_sem_create(0U);
+    if (!t->done) { rt_free_align(t); return RTCP_ENOMEM; }
+    bool input = endpoint ? (endpoint->bEndpointAddress & USB_REQUEST_DIR_IN) != 0U
+                          : (setup->bmRequestType & USB_REQUEST_DIR_IN) != 0U;
+    if (length && !input) memcpy(t->data, data, length);
+    if (endpoint) {
+        t->endpoint = *endpoint;
+        usbh_bulk_urb_fill(&t->urb, hport, &t->endpoint,
+                           length ? t->data : NULL, (uint32_t)length, 0U,
+                           transfer_complete, t->done);
+    } else {
+        t->setup = *setup;
+        usbh_control_urb_fill(&t->urb, hport, &t->setup,
+                              length ? t->data : NULL, (uint32_t)length, 0U,
+                              transfer_complete, t->done);
+        t->endpoint = *t->urb.ep;
+        t->urb.ep = &t->endpoint;
     }
-    usb_osal_sem_reset(*semaphore);
-    int ret = usbh_submit_urb(urb);
+    usb_osal_mutex_take(hport->mutex);
+    int ret = usbh_submit_urb(&t->urb);
+    bool reclaim = true;
     if (ret < 0) {
-        return map_urb_error(ret);
+        ret = map_urb_error(ret);
+    } else if (usb_osal_sem_take(t->done, timeout_ms) < 0) {
+        /* On cancellation failure retain URB, callback argument and DMA
+         * storage: a late HCD access must not touch freed memory. */
+        reclaim = usbh_kill_urb(&t->urb) == 0;
+        ret = RTCP_ETIMEDOUT;
+    } else if (t->urb.errorcode < 0) {
+        ret = map_urb_error(t->urb.errorcode);
+    } else {
+        size_t actual = t->urb.actual_length;
+        size_t prefix = endpoint ? 0U : sizeof(t->setup);
+        if (actual < prefix || actual - prefix > length) {
+            ret = RTCP_EIO;
+        } else {
+            ret = (int)(actual - prefix);
+            if (input && ret > 0) memcpy(data, t->data, (size_t)ret);
+        }
     }
-    ret = usb_osal_sem_take(*semaphore, timeout_ms);
-    if (ret < 0) {
-        usbh_kill_urb(urb);
-        return RTCP_ETIMEDOUT;
+    usb_osal_mutex_give(hport->mutex);
+    if (reclaim) {
+        usb_osal_sem_delete(t->done);
+        rt_free_align(t);
+    } else {
+        USB_LOG_ERR("USB transfer cancel failed; DMA storage quarantined\r\n");
     }
-    if (urb->errorcode < 0) {
-        return map_urb_error(urb->errorcode);
-    }
-    return (int)urb->actual_length;
+    return ret;
 }
 
 static int control_transfer_timeout(struct usbh_hubport *hport,
@@ -192,40 +237,13 @@ static int control_transfer_timeout(struct usbh_hubport *hport,
                                     uint16_t value, uint16_t index, void *data,
                                     uint16_t length, uint32_t timeout_ms)
 {
-    struct usb_setup_packet setup;
-    struct usbh_urb urb;
-
-    if (hport == NULL) {
-        return RTCP_ESTATE;
-    }
-    setup.bmRequestType = request_type;
-    setup.bRequest = request;
-    setup.wValue = value;
-    setup.wIndex = index;
-    setup.wLength = length;
-
-    memset(&urb, 0, sizeof(urb));
-    if (s_control_sem == NULL) {
-        s_control_sem = usb_osal_sem_create(0U);
-        if (s_control_sem == NULL) {
-            return RTCP_ENOMEM;
-        }
-    }
-    usbh_control_urb_fill(&urb, hport, &setup, data, length, 0U,
-                          transfer_complete, s_control_sem);
-    usb_osal_mutex_take(hport->mutex);
-    int ret = wait_urb(&s_control_sem, &urb,
-                       timeout_ms != 0U
-                           ? timeout_ms
-                           : CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
-    usb_osal_mutex_give(hport->mutex);
-    /* The upstream HCD includes the SETUP stage in URB actual_length;
-     * match usbh_control_transfer(), whose public result is data bytes. */
-    if (ret >= 0) {
-        if (ret < (int)sizeof(setup)) return RTCP_EIO;
-        ret -= (int)sizeof(setup);
-    }
-    return ret;
+    struct usb_setup_packet setup = {
+        .bmRequestType = request_type, .bRequest = request,
+        .wValue = value, .wIndex = index, .wLength = length,
+    };
+    return dma_transfer(hport, NULL, &setup, data, length,
+                         timeout_ms ? timeout_ms :
+                         CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
 }
 
 static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
@@ -687,22 +705,8 @@ static int submit_bulk(struct usbh_hubport *hport,
                        struct usb_endpoint_descriptor *endpoint, void *data,
                        size_t length, uint32_t timeout_ms)
 {
-    struct usbh_urb urb;
-
-    if (s_bulk_sem == NULL) {
-        s_bulk_sem = usb_osal_sem_create(0U);
-        if (s_bulk_sem == NULL) {
-            return RTCP_ENOMEM;
-        }
-    }
-    memset(&urb, 0, sizeof(urb));
-    usbh_bulk_urb_fill(&urb, hport, endpoint, data, (uint32_t)length, 0U,
-                       transfer_complete, s_bulk_sem);
-    usb_osal_mutex_take(hport->mutex);
-    int ret = wait_urb(&s_bulk_sem, &urb,
-                       timeout_ms != 0U ? timeout_ms : 1000U);
-    usb_osal_mutex_give(hport->mutex);
-    return ret;
+    return dma_transfer(hport, endpoint, NULL, data, length,
+                         timeout_ms ? timeout_ms : 1000U);
 }
 
 static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,

@@ -130,3 +130,16 @@ clean:
 	rm -rf $(BUILD)
 
 .PHONY: all check clean
+
+# Optional SDK-port regression using official CherryUSB headers (no SDK build).
+# make check-lubanlite-usb CHERRYUSB_ROOT=/path/to/CherryUSB
+.PHONY: check-lubanlite-usb
+check-lubanlite-usb:
+	@test -f "$(CHERRYUSB_ROOT)/core/usbh_core.h" || (echo "Set CHERRYUSB_ROOT to official CherryUSB"; exit 1)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DLPKG_RT_CARPLAY_LUBANLITE_USB \
+	  -Itests/support/lubanlite_usb -Iport/luban-lite/include \
+	  -I$(CHERRYUSB_ROOT)/core -I$(CHERRYUSB_ROOT)/common \
+	  -I$(CHERRYUSB_ROOT)/class/hub -ffunction-sections -fdata-sections \
+	  tests/unit/test_lubanlite_usb_dma.c core/usb/usb_device.c -Wl,--gc-sections -o $(BUILD)/test_lubanlite_usb_dma
+	$(BUILD)/test_lubanlite_usb_dma

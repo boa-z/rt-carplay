@@ -48,6 +48,15 @@ typedef struct {
     int speech_mode;
     bool has_main_audio;
     uint32_t main_audio_entity;
+    /* modesChanged is a delta. Permanent and current owners are independent;
+     * 0=None, 1=Controller (iPhone), 2=Accessory, as in catplay's wire model.
+     */
+    bool has_main_audio_permanent;
+    uint32_t main_audio_permanent_entity;
+    bool has_screen;
+    uint32_t screen_entity;
+    bool has_screen_permanent;
+    uint32_t screen_permanent_entity;
 } airplay_audio_modes_t;
 /* Parsed SETUP metadata. Input target is always the authenticated RTSP peer. */
 typedef struct {

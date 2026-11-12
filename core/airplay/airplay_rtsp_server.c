@@ -54,6 +54,7 @@ typedef struct {
     uint32_t tx_bytes;
     unsigned tx_frames;
     unsigned requests;
+    unsigned rejected_traces;
 } rtsp_connection_t;
 
 struct airplay_rtsp_server {
@@ -605,6 +606,18 @@ static bool process_stream(airplay_rtsp_server_t *server,
         connection->requests++;
         connection->tx_bytes += (uint32_t)wire_len;
         connection->tx_frames += frames;
+        /* Bounded metadata only: enough to find a silently rejected route or
+         * capability request without dumping plists, identifiers or key data.
+         * Keep error visibility after the first 32 handshake requests.
+         */
+        if (connection->requests <= 32U ||
+            (status >= 400U && connection->rejected_traces++ < 8U)) {
+            RTCP_LOGI(TAG, "negotiation id=%u request=%u method=%s path=%s body=%u status=%u encrypted=%u",
+                      connection->id, connection->requests,
+                      connection->request.method, connection->request.path,
+                      (unsigned)connection->request.body_len, status,
+                      connection->cipher != NULL ? 1U : 0U);
+        }
         consume_stream(connection, consumed);
         RTCP_LOGD(TAG, "rtsp_request=handled id=%u ms=%u method=%s path=%s "
                   "cseq=%s bytes=%u",

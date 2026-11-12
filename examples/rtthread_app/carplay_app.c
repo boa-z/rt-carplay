@@ -435,6 +435,9 @@ static void on_audio_modes(const airplay_audio_modes_t *modes,void *context)
     app_state_t *app=context;
     if (rt_mutex_take(app->lock,RT_WAITING_FOREVER)==RT_EOK) {
         if(modes->has_main_audio) {app->audio_modes.has_main_audio=true;app->audio_modes.main_audio_entity=modes->main_audio_entity;}
+        if(modes->has_main_audio_permanent) {app->audio_modes.has_main_audio_permanent=true;app->audio_modes.main_audio_permanent_entity=modes->main_audio_permanent_entity;}
+        if(modes->has_screen) {app->audio_modes.has_screen=true;app->audio_modes.screen_entity=modes->screen_entity;}
+        if(modes->has_screen_permanent) {app->audio_modes.has_screen_permanent=true;app->audio_modes.screen_permanent_entity=modes->screen_permanent_entity;}
         if(modes->has_call) {app->audio_modes.has_call=true;app->audio_modes.call_active=modes->call_active;}
         if(modes->has_speech) {app->audio_modes.has_speech=true;app->audio_modes.speech_mode=modes->speech_mode;}
         (void)rt_mutex_release(app->lock);
@@ -1542,6 +1545,10 @@ static int cmd_carplay_status(int argc, char **argv)
     rt_kprintf("carplay audio modes: entity=%s%u call=%u speech=%d\n",
                modes.has_main_audio ? "" : "unknown/",modes.main_audio_entity,
                modes.call_active ? 1U : 0U,modes.has_speech ? modes.speech_mode : -1);
+    rt_kprintf("carplay audio resource: permanent=%s%u screen=%s%u screen_permanent=%s%u (0=none 1=iPhone 2=accessory)\n",
+               modes.has_main_audio_permanent ? "" : "unknown/", modes.main_audio_permanent_entity,
+               modes.has_screen ? "" : "unknown/", modes.screen_entity,
+               modes.has_screen_permanent ? "" : "unknown/", modes.screen_permanent_entity);
     int volume = carplay_audio_sink_volume_percent();
     if (volume >= 0) {
         rt_kprintf("carplay audio speaker volume: %d%%\n", volume);

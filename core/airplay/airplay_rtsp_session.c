@@ -1107,11 +1107,25 @@ static bool parse_audio_modes(const airplay_bplist_doc_t *doc, airplay_bplist_ob
                     if(airplay_bplist_get_number(doc,object,&mode)!=AIRPLAY_BPLIST_OK || mode< -1 || mode>3 || mode!=(int)mode)return false;
                     modes->has_speech=true;modes->speech_mode=(int)mode;
                 }
-            } else if((!k && id==2) || (k && id==2)) {
+            } else if (k && (id == 1 || id == 2)) {
+                airplay_bplist_result_t rc = airplay_bplist_dict_get(doc,entry,"entity",&object);
+                if (rc != AIRPLAY_BPLIST_NOT_FOUND) {
+                    if (rc != AIRPLAY_BPLIST_OK ||
+                        airplay_bplist_get_uint(doc,object,&value)!=AIRPLAY_BPLIST_OK || value>2)return false;
+                    if (id == 2) {modes->has_main_audio=true;modes->main_audio_entity=(uint32_t)value;}
+                    else {modes->has_screen=true;modes->screen_entity=(uint32_t)value;}
+                }
+                rc = airplay_bplist_dict_get(doc,entry,"permanentEntity",&object);
+                if (rc != AIRPLAY_BPLIST_NOT_FOUND) {
+                    if (rc != AIRPLAY_BPLIST_OK ||
+                        airplay_bplist_get_uint(doc,object,&value)!=AIRPLAY_BPLIST_OK || value>2)return false;
+                    if (id == 2) {modes->has_main_audio_permanent=true;modes->main_audio_permanent_entity=(uint32_t)value;}
+                    else {modes->has_screen_permanent=true;modes->screen_permanent_entity=(uint32_t)value;}
+                }
+            } else if (!k && id == 2) {
                 if(airplay_bplist_dict_get(doc,entry,"entity",&object)!=AIRPLAY_BPLIST_OK)continue;
-                if(airplay_bplist_get_uint(doc,object,&value)!=AIRPLAY_BPLIST_OK || value>3)return false;
-                if(k) {modes->has_main_audio=true;modes->main_audio_entity=(uint32_t)value;}
-                else {modes->has_call=true;modes->call_active=value==1;}
+                if(airplay_bplist_get_uint(doc,object,&value)!=AIRPLAY_BPLIST_OK || value>2)return false;
+                modes->has_call=true;modes->call_active=value==1;
             }
         }
     }
@@ -1139,6 +1153,21 @@ static void log_info_audio(airplay_rtsp_session_t *session)
             if (airplay_bplist_array_get(&doc, array, i, &entry) == AIRPLAY_BPLIST_OK &&
                 airplay_bplist_get_string(&doc, entry, address, sizeof(address), &length) == AIRPLAY_BPLIST_OK && length == 17)
                 RTCP_LOGI(TAG, "info_bluetooth index=%u id=%s", (unsigned)i, address);
+        }
+    }
+    airplay_bplist_object_t modes, resources;
+    if (airplay_bplist_dict_get(&doc, root, "modes", &modes) == AIRPLAY_BPLIST_OK &&
+        airplay_bplist_dict_get(&doc, modes, "resources", &resources) == AIRPLAY_BPLIST_OK &&
+        airplay_bplist_get_type(&doc, resources, &type, &count) == AIRPLAY_BPLIST_OK && type == AIRPLAY_BPLIST_ARRAY) {
+        for (uint64_t i = 0; i < count && i < 4; ++i) {
+            uint64_t values[4] = {0};
+            const char *keys[] = {"resourceID", "transferType", "transferPriority", "takeConstraint"};
+            if (airplay_bplist_array_get(&doc, resources, i, &entry) != AIRPLAY_BPLIST_OK) continue;
+            for (unsigned k = 0; k < 4; ++k)
+                if (airplay_bplist_dict_get(&doc, entry, keys[k], &object) == AIRPLAY_BPLIST_OK)
+                    (void)airplay_bplist_get_uint(&doc, object, &values[k]);
+            RTCP_LOGI(TAG, "info_resource id=%u transfer=%u priority=%u take_constraint=%u",
+                      (unsigned)values[0], (unsigned)values[1], (unsigned)values[2], (unsigned)values[3]);
         }
     }
     count = 0;
@@ -1267,8 +1296,16 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
                 return status_response(request,400,"Bad Request",response,response_capacity,response_len);
             if(session->config.on_audio_modes)session->config.on_audio_modes(&modes,session->config.command_context);
             ++session->modes_changes;
-            if (session->modes_changes <= 2U)
-                RTCP_LOGI(TAG, "command=modesChanged acknowledged count=%u", session->modes_changes);
+            if (session->modes_changes <= 8U) {
+                RTCP_LOGI(TAG, "modes_changed count=%u main=%s%u permanent=%s%u screen=%s%u screen_permanent=%s%u call=%s%u speech=%s%d",
+                          session->modes_changes,
+                          modes.has_main_audio ? "" : "unchanged/", modes.main_audio_entity,
+                          modes.has_main_audio_permanent ? "" : "unchanged/", modes.main_audio_permanent_entity,
+                          modes.has_screen ? "" : "unchanged/", modes.screen_entity,
+                          modes.has_screen_permanent ? "" : "unchanged/", modes.screen_permanent_entity,
+                          modes.has_call ? "" : "unchanged/", modes.call_active ? 1U : 0U,
+                          modes.has_speech ? "" : "unchanged/", modes.speech_mode);
+            }
             return status_response(request, 200, "OK", response, response_capacity, response_len);
         }
         if (strcmp(command,"duckAudio")==0 || strcmp(command,"unduckAudio")==0) {
@@ -1297,8 +1334,13 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
                 return status_response(request, 503, "Service Unavailable", response, response_capacity, response_len);
             return status_response(request, 200, "OK", response, response_capacity, response_len);
         }
-        if (++session->unsupported_commands <= 8U)
-            RTCP_LOGI(TAG, "unsupported_command bytes=%u count=%u", (unsigned)request->body_len, session->unsupported_commands);
+        if (++session->unsupported_commands <= 8U) {
+            for (size_t i = 0; command[i]; ++i)
+                if (!((command[i] >= 'a' && command[i] <= 'z') ||
+                      (command[i] >= 'A' && command[i] <= 'Z') ||
+                      (command[i] >= '0' && command[i] <= '9') || command[i] == '_')) command[i] = '_';
+            RTCP_LOGI(TAG, "unsupported_command type=%s bytes=%u count=%u", command, (unsigned)request->body_len, session->unsupported_commands);
+        }
         return status_response(request, 405, "Method Not Allowed", response, response_capacity, response_len);
     }
 

@@ -18,6 +18,17 @@ fixtures = {
     "voice_modes": {"type": "modesChanged", "params": {"appStates": [
         {"appStateID": 2, "entity": 1}, {"appStateID": 1, "speechMode": 2}],
         "resources": [{"resourceID": 2, "entity": 1}]}},
+    "resource_modes": {"type": "modesChanged", "params": {"resources": [
+        {"resourceID": 1, "entity": 1, "permanentEntity": 2},
+        {"resourceID": 2, "entity": 1, "permanentEntity": 1}]}},
+    "permanent_delta": {"type": "modesChanged", "params": {"resources": [
+        {"resourceID": 2, "permanentEntity": 2}]}},
+    "screen_delta": {"type": "modesChanged", "params": {"resources": [
+        {"resourceID": 1, "entity": 2}]}},
+    "bad_permanent": {"type": "modesChanged", "params": {"resources": [
+        {"resourceID": 2, "entity": 1, "permanentEntity": 3}]}},
+    "bad_entity": {"type": "modesChanged", "params": {"resources": [
+        {"resourceID": 2, "entity": 3}]}},
     "voice_bad_modes": {"type": "modesChanged", "params": {"appStates": "invalid"}},
     "voice_duck": {"type": "duckAudio", "params": {"volume": -18.0, "durationMs": 250}},
     "voice_unduck": {"type": "unduckAudio", "params": {"durationMs": 100}},

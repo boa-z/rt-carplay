@@ -275,6 +275,23 @@ int main(void)
         assert(airplay_bplist_dict_get(&doc, entry, "audioOutputFormats", &value) == AIRPLAY_BPLIST_OK);
         assert(airplay_bplist_get_uint(&doc, value, &bits) == AIRPLAY_BPLIST_OK);
         assert((bits & ~rtcp_audio_output_formats()) == 0);
+        /* Output-only is represented by an omitted input field (DiPlay and
+         * catplay), rather than an explicit zero-capability microphone.
+         */
+        assert(airplay_bplist_dict_get(&doc, entry, "audioInputFormats", &value) == AIRPLAY_BPLIST_NOT_FOUND);
+    }
+    /* Wire semantics of the working DiPlay initial-mode declaration. This is
+     * distinct from an accessory taking audio at runtime over /command.
+     */
+    assert(airplay_bplist_dict_get(&doc, root, "modes", &object) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, object, "resources", &object) == AIRPLAY_BPLIST_OK);
+    for (uint64_t i = 0; i < 2; ++i) {
+        assert(airplay_bplist_array_get(&doc, object, i, &entry) == AIRPLAY_BPLIST_OK);
+        expect_uint(&doc, entry, "resourceID", i+1);
+        expect_uint(&doc, entry, "transferType", 1);
+        expect_uint(&doc, entry, "transferPriority", 100);
+        expect_uint(&doc, entry, "takeConstraint", 100);
+        expect_uint(&doc, entry, "borrowConstraint", 100);
     }
 
     /* Bounds and argument validation. */

@@ -1109,8 +1109,11 @@ static void expect_body_status(airplay_rtsp_session_t *session, const char *meth
 }
 #define EXPECT_IAP(method,path,name,status) expect_body_status(session,method,path,k_##name,sizeof(k_##name),status)
 static unsigned modes_seen,ducks_seen,configured_seen;
+static bool checking_resources;
+static airplay_audio_modes_t last_resource_modes;
 static void audio_modes_test(const airplay_audio_modes_t *m,void *context)
 {
+    if (checking_resources) { last_resource_modes = *m; return; }
     (void)context;if(!m->has_call && !m->has_speech && !m->has_main_audio)return;
     ++modes_seen;
     assert(m->has_call && m->call_active && m->has_speech && m->speech_mode==2);
@@ -1175,6 +1178,23 @@ static void test_iap_runtime_and_commands(void)
     EXPECT_IAP("POST","/command",modes,"200 OK");
     EXPECT_IAP("POST","/command",voice_modes,"200 OK");assert(modes_seen==1);
     EXPECT_IAP("POST","/command",voice_bad_modes,"400 Bad Request");assert(modes_seen==1);
+    checking_resources=true;
+    EXPECT_IAP("POST","/command",resource_modes,"200 OK");
+    assert(last_resource_modes.has_main_audio && last_resource_modes.main_audio_entity==1);
+    assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity==1);
+    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity==1);
+    assert(last_resource_modes.has_screen_permanent && last_resource_modes.screen_permanent_entity==2);
+    EXPECT_IAP("POST","/command",permanent_delta,"200 OK");
+    assert(!last_resource_modes.has_main_audio && !last_resource_modes.has_screen);
+    assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity==2);
+    EXPECT_IAP("POST","/command",screen_delta,"200 OK");
+    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity==2);
+    assert(!last_resource_modes.has_main_audio && !last_resource_modes.has_main_audio_permanent);
+    EXPECT_IAP("POST","/command",bad_permanent,"400 Bad Request");
+    EXPECT_IAP("POST","/command",bad_entity,"400 Bad Request");
+    /* Rejected deltas never reach the callback or replace the last valid report. */
+    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity==2);
+    checking_resources=false;
     EXPECT_IAP("POST","/command",voice_duck,"200 OK");
     EXPECT_IAP("POST","/command",voice_unduck,"200 OK");assert(ducks_seen==2);
     EXPECT_IAP("POST","/command",voice_bad_duck,"400 Bad Request");

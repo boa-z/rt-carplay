@@ -24,6 +24,9 @@ def function(path, name):
 
 info = plistlib.dumps({
     "features": 0x615657AEE2, "bluetoothIDs": ["66:55:44:33:22:11"],
+    "modes": {"resources": [{"resourceID": i, "transferType": 1,
+                              "transferPriority": 100, "takeConstraint": 100}
+                             for i in (1, 2)]},
     "audioFormats": [
         {"type": 102 if i == 8 else 100, "audioType": "media",
          "audioOutputFormats": 0xC00000 if i == 8 else 0xCFFC}
@@ -90,6 +93,8 @@ int main(void)
     assert(strstr(logs, "info_bluetooth count=1"));
     assert(strstr(logs, "id=66:55:44:33:22:11"));
     assert(strstr(logs, "type=102 role=media output=0x0000000000c00000 input=0x0000000000000000"));
+    assert(strstr(logs, "info_resource id=1 transfer=1 priority=100 take_constraint=100"));
+    assert(strstr(logs, "info_resource id=2 transfer=1 priority=100 take_constraint=100"));
     assert(!strchr(logs, '%'));
     assert(announcement_features_match(info, sizeof(info), txt, sizeof(txt)));
     uint8_t corrupt[sizeof(txt)]; memcpy(corrupt, txt, sizeof(txt));

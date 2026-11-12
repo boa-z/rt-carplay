@@ -569,7 +569,9 @@ sound. Direct mode is diagnostic and resets to mixer on receiver restart.
 The first eight decoded packets of each lane generation print format, payload
 length, timestamp delta and decoded frame count. Save these with both status
 snapshots and describe whether direct output changes the audible symptom. No
-raw audio or keys are printed. See [the investigation record](../../docs/audio-routing-reference-review.md).
+raw audio or keys are printed. Each lane generation also logs up to eight
+nonzero timestamp gaps with expected/actual timestamps and decoded frames.
+Diagnostic output is split to fit the SDK console buffer. See [the investigation record](../../docs/audio-routing-reference-review.md).
 
 ### Offline audio test page
 

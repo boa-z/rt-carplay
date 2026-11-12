@@ -269,6 +269,7 @@ static void sink_thread(void *argument)
     unsigned generation[RTCP_AUDIO_LANES] = {0};
     unsigned stack_report_packets=0;
     unsigned trace_count[RTCP_AUDIO_LANES]={0};
+    unsigned gap_trace_count[RTCP_AUDIO_LANES]={0};
     uint32_t previous_ts[RTCP_AUDIO_LANES]={0};
     bool previous_path=false;
     unsigned last_gain[RTCP_AUDIO_LANES];
@@ -339,7 +340,7 @@ static void sink_thread(void *argument)
                 if (gen != generation[lane]) {
                     rtcp_audio_decoder_destroy(decoders[lane]); decoders[lane] = NULL;
                     rtcp_audio_mixer_flush(sink->mixer, lane); generation[lane] = gen; timeline[lane] = false;
-                    trace_count[lane]=0;++sink->diag[lane].resets;
+                    trace_count[lane]=0;gap_trace_count[lane]=0;++sink->diag[lane].resets;
                 }
                 if (got <= 0) break;
                 if (!decoders[lane] && rtcp_audio_decoder_create(&format, &decoders[lane]) != RTCP_OK) {
@@ -385,6 +386,11 @@ static void sink_thread(void *argument)
                 }
                 if (timeline[lane]) {
                     int32_t gap = (int32_t)(timestamp - expected[lane]);
+                    if(gap && gap_trace_count[lane]<8) {
+                        rt_kprintf("[carplay-aud] gap lane=%u expected=%u ts=%u delta=%d frames=%u\n",
+                          lane,expected[lane],timestamp,gap,(unsigned)(samples/format.channels));
+                        ++gap_trace_count[lane];
+                    }
                     if (gap < 0) {++d->negative;continue;}
                     if (gap > 0 && (uint64_t)gap * 1000 / format.clock_rate <= 100) {
                         int16_t *silence=sink->silence;
@@ -727,9 +733,12 @@ void carplay_audio_sink_diagnostics(void)
 {
     audio_sink_t *s=&s_sink;
     if(!s->running)return;
-    rt_kprintf("audio diag: requested=%s last_output=%s frames=%u peak=%u device_errors=%u write_max_us=%u\n",
-      s->direct_requested?"direct":"mixer",s->direct_active?"direct":"mixer",s->output_frames,
-      s->output_peak,s->device_errors,s->write_max_us);
+    /* SDK console formatting is limited to 128 bytes per call. Keep the
+     * newline and all counters even when unsigned values grow to 10 digits. */
+    rt_kprintf("audio diag: requested=%s last_output=%s\n",
+      s->direct_requested?"direct":"mixer",s->direct_active?"direct":"mixer");
+    rt_kprintf("audio output: frames=%u peak=%u device_errors=%u write_max_us=%u\n",
+      s->output_frames,s->output_peak,s->device_errors,s->write_max_us);
     for(unsigned i=0;i<RTCP_AUDIO_LANES;++i) {
         lane_diagnostics_t *d=&s->diag[i];
         if(!d->decoded && !d->decode_errors && !d->init_errors)continue;
@@ -737,10 +746,13 @@ void carplay_audio_sink_diagnostics(void)
         (void)rt_mutex_take(s->lock,RT_WAITING_FOREVER);
         rtcp_audio_jitter_stats(s->queue[i],&q);
         (void)rt_mutex_release(s->lock);
-        rt_kprintf("audio lane=%u decoded=%u frames=%u empty=%u init_err=%u decode_err=%u pcm_peak=%u decode_max_us=%u\n",
-          i,d->decoded,d->frames,d->empty,d->init_errors,d->decode_errors,d->peak_pcm,d->decode_max_us);
-        rt_kprintf("audio lane=%u negative_ts=%u silence_frames=%u resets=%u mix_drop=%u mix_queue=%u arrival_max_ms=%u jitter_queue=%u late=%u duplicate=%u overflow=%u\n",
-          i,d->negative,d->gap_frames,d->resets,d->mix_drops,d->queued,d->arrival_max_ms,
+        rt_kprintf("audio lane=%u decoded=%u frames=%u empty=%u\n",i,d->decoded,d->frames,d->empty);
+        rt_kprintf("audio lane=%u init_err=%u decode_err=%u pcm_peak=%u decode_max_us=%u\n",
+          i,d->init_errors,d->decode_errors,d->peak_pcm,d->decode_max_us);
+        rt_kprintf("audio lane=%u negative_ts=%u silence_frames=%u arrival_max_ms=%u\n",
+          i,d->negative,d->gap_frames,d->arrival_max_ms);
+        rt_kprintf("audio lane=%u resets=%u mix_drop=%u mix_queue=%u\n",i,d->resets,d->mix_drops,d->queued);
+        rt_kprintf("audio lane=%u jitter_queue=%u late=%u duplicate=%u overflow=%u\n",i,
           (unsigned)q.queued,(unsigned)q.late,(unsigned)q.duplicates,(unsigned)q.overflow);
     }
 }

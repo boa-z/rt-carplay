@@ -1,5 +1,25 @@
 # 无线音乐未建立音频流：参考实现逐项复核
 
+## 新日志：1024 帧 AAC 正常递增，等待 direct 听感对照
+
+新实机日志显示初始零帧后每包解码 1024 帧，RTP timestamp 每包增加 1024；
+init_err/decode_err/negative_ts/mix_drop/device_errors 均为零，解码峰值耗时
+2 ms。第一批 6 字节 AAC 包也成功解码，不能凭长度判断错误 PCM 输入。
+累计 silence_frames 从 6144 增至 23552，后者在 44.1 kHz 下约 534 ms；
+这反映多处 timestamp 缺口被补偿，尚不能区分传输缺包、发送端跳跃或
+恢复播放的边界，不应按一个连续 534 ms 缺口解读。arrival_max_ms=22323
+是生命周期最大值，可能包含停播；不是每包延迟。
+
+切换指令立即打印 requested=direct/last_output=mixer 属于异步切换的快照；
+其后的 playback 44100 Hz 表明已进入源速率输出。用户尚未提供 direct
+听感及后续 status，不能据此宣布混音路径是根因或音质已恢复。
+
+本版诊断的一条长行超过 SDK 128 字节 console 缓冲，导致 duplicate/
+overflow 和换行截断。本轮拆为短行，每次格式化在 32 位计数最大值下也
+保留换行；补充每代流最多八条非零 gap 的 expected/ts/delta/frames，
+在前八包之后仍能观察首次缺口。未改变解码、时间线或混音行为。
+验证和更新镜像见 SDK 构建记录第 23 节。
+
 ## 离线测试正常、CarPlay 仍异常：分阶段计数与直接输出对照
 
 用户已确认离线音频测试符合预期。最新 CarPlay 栈水位 total=98304、

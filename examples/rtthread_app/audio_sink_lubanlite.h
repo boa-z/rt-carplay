@@ -50,3 +50,6 @@ bool carplay_audio_sink_duck(bool ducked, float volume_db, uint32_t duration_ms)
 int carplay_audio_sink_local_pcm(const uint8_t *, size_t, uint32_t rate, uint8_t channels, bool critical);
 
 void carplay_audio_sink_slot_stop(unsigned slot);
+
+/* Cumulative stage counters, printed only on request. */
+void carplay_audio_sink_diagnostics(void);

@@ -540,6 +540,30 @@ make check-rtthread-multicast
 See [wireless-bringup.md](../../docs/wireless-bringup.md) for the code findings,
 device test matrix and limits of host validation.
 
+### CarPlay audio stage diagnostics
+
+When offline PCM/AAC tests pass but music still clicks, use `carplay_status` to
+inspect per-lane decoded frames, empty output, decoder errors, PCM peak, negative
+timestamps, inserted silence, mixer drops and jitter counters. Output statistics
+include written frames, peak, device errors and maximum write time. Counters and
+maxima are cumulative for this receiver run; compare snapshots. Transport counters
+refer to currently active streams and can reset when streams are recreated.
+
+For the same playing track, run `carplay_audio_path mixer`, wait 5–10 seconds and
+save status; then run `carplay_audio_path direct`, wait and save status again.
+Restore `carplay_audio_path mixer` afterward. Direct mode keeps transport, jitter
+and decoding but bypasses timestamp repair, resampling and mixing together. An
+independent stereo type102 track writes at its native rate (normally 44100 Hz),
+with software volume and media focus gain. Calls, Siri, other audio and local
+alerts force mixing. `requested` is the requested path; `last_output` is the last
+path actually written, and can lag while idle. Rate changes may briefly interrupt
+sound. Direct mode is diagnostic and resets to mixer on receiver restart.
+
+The first eight decoded packets of each lane generation print format, payload
+length, timestamp delta and decoded frame count. Save these with both status
+snapshots and describe whether direct output changes the audible symptom. No
+raw audio or keys are printed. See [the investigation record](../../docs/audio-routing-reference-review.md).
+
 ### Offline audio test page
 
 On the LVGL launch page, tap **Audio tests** while READY or after a failed

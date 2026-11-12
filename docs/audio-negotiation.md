@@ -2,7 +2,7 @@
 
 最新 mic-on 实测已出现 type102 AAC 音频 SETUP，控制中心可见并默认切换到
 CarPlay；现转入声音异常及本地音量控制排查。详情见[参考实现复核](audio-routing-reference-review.md)。
-本页下方 SHA 为历史固件；播放修正后 Speaker 仍有点击声；PCM 已正常，AAC 测试发现线程栈溢出；当前修正镜像见 SDK 构建文档第 20 节。
+本页下方 SHA 为历史固件。离线 PCM/AAC 测试现已正常，CarPlay 仍异常；当前分阶段诊断和直接输出对照镜像见 SDK 构建文档第 21 节。
 
 本轮基线为 main `bffc3be`。实机反馈仍为 `entity=1`、`streams=0`、
 `datagrams=0`、`packets=0`，连接日志只有110/screen和130/iAP2。

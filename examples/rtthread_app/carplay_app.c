@@ -1588,6 +1588,7 @@ static int cmd_carplay_status(int argc, char **argv)
                modes.has_main_audio_permanent ? "" : "unknown/", modes.main_audio_permanent_entity,
                modes.has_screen ? "" : "unknown/", modes.screen_entity,
                modes.has_screen_permanent ? "" : "unknown/", modes.screen_permanent_entity);
+    carplay_audio_sink_diagnostics();
     int volume = carplay_audio_sink_volume_percent();
     if (volume >= 0) {
         rt_kprintf("carplay audio speaker volume: %d%%\n", volume);

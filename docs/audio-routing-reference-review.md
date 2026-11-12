@@ -1,5 +1,42 @@
 # 无线音乐未建立音频流：参考实现逐项复核
 
+## 离线测试正常、CarPlay 仍异常：分阶段计数与直接输出对照
+
+用户已确认离线音频测试符合预期。最新 CarPlay 栈水位 total=98304、
+used_peak=47700、free_min=50604，当前执行过的路径未显示栈预算不足；
+write_errors/auth_failures 为零也不等于音频内容和时序正确。sink packets
+从 124 到 206，而 transport 从 streams=0 到 streams=1/datagrams=82，
+说明观察到了流重新建立。sink 为接收器生命周期累计，transport 为当前
+活动流统计，不能直接用两个 status 间隔推算音乐包速率。
+
+新增 `carplay_status` 分阶段统计：每条 lane 的解码包/帧、零帧输出、初始化/
+解码错误、PCM 峰值、解码耗时、负时间戳丢弃、补静音帧、混音入队失败、
+队列占用和到包最大间隔；输出端增加实际写入帧、峰值、设备错误和最大写入
+耗时。每代流前八包打印 codec/rate/clock/payload/ts/step/frames，不打印
+原始音频或密钥。累计计数/峰值应比较同一接收器运行期间的两次差值；
+mix_queue 为 writer 最近一次观察值，jitter_queue 为查询时的快照。
+
+修正 AAC priming 零帧仍建立时间线的边界：零帧只计数，不推进 expected，
+避免下一包人为补静音。该代码问题不能直接证明持续点击声已经解决。
+
+新增诊断命令 `carplay_audio_path [mixer|direct]`，默认 mixer。direct 仅用于
+独立 type102 立体声音乐：保留网络、解密、jitter、真实 decoder，绕过时间戳
+补偿、重采样和混音，按源采样率输出 sound0；仍应用媒体焦点增益和软件
+音量。有通话、Siri、其他音轨或本地提示音时退回混音。`requested` 是请求，
+`last_output` 是最近实际输出路径，停播时不会自动变成 inactive。切换路径
+可能短暂停音，不应频繁切换。该模式不是永久替代正常混音的产品配置。
+
+实机对照：同一首音乐，先 mixer 播放 5–10 秒并保存 status，再 direct 播放
+5–10 秒保存 status，最后恢复 mixer。当前 44.1 kHz AAC 预期 direct 日志为
+`playback 44100 Hz 2 ch 16-bit` 且 last_output=direct。若 direct 正常而 mixer
+异常，定位到被绕过的三个阶段，再结合 negative_ts/silence_frames/mix_drop
+缩小范围；若两者异常，则继续核查网络/jitter、实际 AAC 解码输出及设备写入
+节奏，不再只凭零 write_errors 判断。无需额外 MP3/WAV。
+
+Host 回归覆盖原始 AAC 经真实 sink worker 直接输出、源速率/帧数保持、静音、
+切回混音、关键本地提示音回退及负时间戳计数。实机音质仍待用户验证。
+固定镜像及验证结果见 SDK 构建记录第 21 节。
+
 ## PCM 正常、AAC 测试栈溢出：修正线程栈与调用方工作区
 
 用户确认开发板 Speaker 的直接 PCM tone 正常，AAC 测试却打印

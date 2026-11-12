@@ -38,6 +38,12 @@
 #define SINK_VOLUME_MAX_DB 0.0f
 
 typedef struct {
+    atomic_uint decoded, frames, empty, init_errors, decode_errors;
+    atomic_uint negative, gap_frames, resets, mix_drops, queued;
+    atomic_uint peak_pcm, decode_max_us, arrival_max_ms;
+} lane_diagnostics_t;
+
+typedef struct {
     rt_device_t dev;
     rt_thread_t thread;
     rt_sem_t wake;
@@ -75,6 +81,9 @@ typedef struct {
     atomic_uint write_errors;
     atomic_uint replays;
     atomic_uint config_errors;
+    lane_diagnostics_t diag[RTCP_AUDIO_LANES];
+    atomic_uint output_frames, output_peak, device_errors, write_max_us;
+    atomic_bool direct_requested, direct_active;
     /* Writer-owned workspace; never copied onto the nested codec stack. */
     uint8_t packet[RTCP_AUDIO_PACKET_MAX];
     int16_t pcm[5760], silence[960], chunk[960];
@@ -191,6 +200,21 @@ static void stop_device(audio_sink_t *sink)
     }
 }
 
+static void maximum(atomic_uint *value,unsigned sample)
+{
+    unsigned old=atomic_load(value);
+    while(sample>old && !atomic_compare_exchange_weak(value,&old,sample)) {}
+}
+static unsigned pcm_peak(const int16_t *pcm,size_t samples)
+{
+    unsigned peak=0;
+    for(size_t i=0;i<samples;++i) {
+        int sample=pcm[i];unsigned mag=(unsigned)(sample<0?-sample:sample);
+        if(mag>peak)peak=mag;
+    }
+    return peak;
+}
+
 /* ------------------------------------------------------------------ */
 /* Writer thread                                                       */
 /* ------------------------------------------------------------------ */
@@ -200,12 +224,53 @@ static uint64_t sink_now_us(void)
     return rtcp_os_rtthread.now_us();
 }
 
+/* Writer only: rate switches stop the old replay before configure. */
+static bool output_samples(audio_sink_t *sink,const int16_t *pcm,size_t frames,
+                           unsigned rate,unsigned channels)
+{
+    if(sink->device_started && (sink->device_rate!=rate || sink->device_channels!=channels))stop_device(sink);
+    if(!sink->device_started && !start_device(sink,rate,(uint8_t)channels)) {
+        ++sink->write_errors;++sink->device_errors;return false;
+    }
+    maximum(&sink->output_peak,pcm_peak(pcm,frames*channels));
+    size_t bytes=frames*channels*2,offset=0;
+    uint64_t began=sink_now_us();
+    while(offset<bytes && !sink->stop) {
+        size_t written=rt_device_write(sink->dev,0,(const uint8_t *)pcm+offset,bytes-offset);
+        if(!written || written>bytes-offset) {++sink->write_errors;++sink->device_errors;break;}
+        offset+=written;
+    }
+    maximum(&sink->write_max_us,(unsigned)(sink_now_us()-began));
+    sink->output_frames+=(unsigned)(offset/(channels*2));
+    return offset==bytes;
+}
+/* Debug direct media output must yield to other remote and local audio. */
+static bool media_only(audio_sink_t *sink)
+{
+    bool alone=true;
+    (void)rt_mutex_take(sink->lock,RT_WAITING_FOREVER);
+    uint64_t now=sink_now_us();
+    for(unsigned i=0;i<RTCP_AUDIO_LANES;++i)if(i!=2) {
+        rtcp_audio_jitter_stats_t q;rtcp_audio_jitter_stats(sink->queue[i],&q);
+        if(q.queued || (sink->last_arrival[i] && now>=sink->last_arrival[i] && now-sink->last_arrival[i]<500000))alone=false;
+    }
+    (void)rt_mutex_release(sink->lock);
+    for(unsigned i=0;i<RTCP_AUDIO_LANES;++i)if(i!=2) {
+        rtcp_audio_lane_stats_t m;rtcp_audio_mixer_stats(sink->mixer,i,&m);
+        if(m.queued_frames)alone=false;
+    }
+    return alone;
+}
+
 static void sink_thread(void *argument)
 {
     audio_sink_t *sink = argument;
     rtcp_audio_decoder_t *decoders[RTCP_AUDIO_LANES] = {0};
     unsigned generation[RTCP_AUDIO_LANES] = {0};
     unsigned stack_report_packets=0;
+    unsigned trace_count[RTCP_AUDIO_LANES]={0};
+    uint32_t previous_ts[RTCP_AUDIO_LANES]={0};
+    bool previous_path=false;
     unsigned last_gain[RTCP_AUDIO_LANES];
     for(unsigned i=0;i<RTCP_AUDIO_LANES;++i)last_gain[i]=32768;
     uint32_t expected[RTCP_AUDIO_LANES] = {0};
@@ -218,6 +283,10 @@ static void sink_thread(void *argument)
         if (rtcp_audio_mixer_buffered(sink->mixer) < 480)
             (void)rt_sem_take(sink->wake, rt_tick_from_millisecond(10));
         service_volume(sink);
+        bool requested=atomic_load(&sink->direct_requested);
+        if(requested!=previous_path) {
+            rtcp_audio_mixer_flush(sink->mixer,2);timeline[2]=false;previous_path=requested;
+        }
         rtcp_audio_focus_t focus;
         bool ducked,critical; float duck_db; uint32_t ramp;
         (void)rt_mutex_take(sink->lock, RT_WAITING_FOREVER);
@@ -255,6 +324,7 @@ static void sink_thread(void *argument)
                 int got;
                 rtcp_audio_lane_stats_t stats;
                 rtcp_audio_mixer_stats(sink->mixer, lane, &stats);
+                atomic_store(&sink->diag[lane].queued,(unsigned)stats.queued_frames);
                 if (stats.queued_frames > 2880) { /* bounded decode ahead */
                     (void)rt_mutex_take(sink->lock, RT_WAITING_FOREVER);
                     bool unchanged = generation[lane] == sink->generation[lane];
@@ -269,24 +339,61 @@ static void sink_thread(void *argument)
                 if (gen != generation[lane]) {
                     rtcp_audio_decoder_destroy(decoders[lane]); decoders[lane] = NULL;
                     rtcp_audio_mixer_flush(sink->mixer, lane); generation[lane] = gen; timeline[lane] = false;
+                    trace_count[lane]=0;++sink->diag[lane].resets;
                 }
                 if (got <= 0) break;
                 if (!decoders[lane] && rtcp_audio_decoder_create(&format, &decoders[lane]) != RTCP_OK) {
-                    ++sink->write_errors; continue;
+                    ++sink->write_errors;++sink->diag[lane].init_errors; continue;
                 }
+                uint64_t decode_began=sink_now_us();
                 int16_t *pcm=sink->pcm; size_t samples = 0;
                 if (rtcp_audio_decoder_decode(decoders[lane], packet, (size_t)got, pcm, 5760, &samples) != RTCP_OK) {
-                    ++sink->write_errors; continue;
+                    ++sink->write_errors;++sink->diag[lane].decode_errors; continue;
+                }
+                lane_diagnostics_t *d=&sink->diag[lane];
+                maximum(&d->decode_max_us,(unsigned)(sink_now_us()-decode_began));
+                ++d->decoded;d->frames+=(unsigned)(samples/format.channels);
+                maximum(&d->peak_pcm,pcm_peak(pcm,samples));
+                if(trace_count[lane]<8) {
+                    rt_kprintf("[carplay-aud] lane=%u codec=%u rate=%u clock=%u payload=%u ts=%u step=%d frames=%u\n",
+                      lane,(unsigned)format.codec,format.sample_rate,format.clock_rate,(unsigned)got,timestamp,
+                      trace_count[lane]?(int32_t)(timestamp-previous_ts[lane]):0,(unsigned)(samples/format.channels));
+                    ++trace_count[lane];
+                }
+                previous_ts[lane]=timestamp;
+                /* FAAD priming may emit no samples; it does not establish a
+                 * decoded timeline and must not synthesize a following gap. */
+                if(!samples) {++d->empty;continue;}
+                bool direct=requested && lane==2 && format.channels==2 &&
+                    !focus.call_active && !focus.siri_active && !critical && media_only(sink);
+                if(direct) {
+                    rtcp_audio_mixer_flush(sink->mixer,2);timeline[2]=false;
+                    if(sink->device_started && sink->device_rate!=format.sample_rate)stop_device(sink);
+                    if(!sink->device_started && !start_device(sink,format.sample_rate,2)) {
+                        ++sink->write_errors;++sink->device_errors;continue;
+                    }
+                    unsigned master=sink->applied_volume<0?32768:sink->applied_volume==0?0:
+                        (unsigned)(powf(10,((float)sink->applied_volume-100)*0.45f/20)*32768);
+                    unsigned gain=(unsigned)((uint64_t)gains[2]*master/32768);
+                    for(size_t i=0;i<samples;++i)pcm[i]=(int16_t)((int64_t)pcm[i]*gain/32768);
+                    atomic_store(&sink->direct_active,true);
+                    (void)output_samples(sink,pcm,samples/2,format.sample_rate,2);
+                    if(sink->packets>=stack_report_packets+200) {
+                        carplay_audio_stack_report(TAG);stack_report_packets=sink->packets;
+                    }
+                    continue;
                 }
                 if (timeline[lane]) {
                     int32_t gap = (int32_t)(timestamp - expected[lane]);
-                    if (gap < 0) continue;
+                    if (gap < 0) {++d->negative;continue;}
                     if (gap > 0 && (uint64_t)gap * 1000 / format.clock_rate <= 100) {
                         int16_t *silence=sink->silence;
                         size_t missing = (size_t)((uint64_t)gap * format.sample_rate / format.clock_rate);
+                        d->gap_frames+=(unsigned)missing;
                         while (missing) {
                             size_t n = missing > 480 ? 480 : missing;
-                            (void)rtcp_audio_mixer_push(sink->mixer, lane, silence, n, format.sample_rate, format.channels);
+                            if(rtcp_audio_mixer_push(sink->mixer,lane,silence,n,format.sample_rate,format.channels)!=RTCP_OK)
+                                d->mix_drops+=(unsigned)n;
                             missing -= n;
                         }
                     } else if (gap > 0) rtcp_audio_mixer_flush(sink->mixer, lane);
@@ -295,7 +402,7 @@ static void sink_thread(void *argument)
                 expected[lane] = timestamp + (uint32_t)((uint64_t)(samples/format.channels)*format.clock_rate/format.sample_rate);
                 if (samples && rtcp_audio_mixer_push(sink->mixer, lane, pcm, samples/format.channels,
                                                      format.sample_rate, format.channels) != RTCP_OK)
-                    sink->dropped_bytes += (unsigned)(samples * 2);
+                    { sink->dropped_bytes += (unsigned)(samples * 2);d->mix_drops+=(unsigned)(samples/format.channels); }
             }
         }
         if (rtcp_audio_mixer_buffered(sink->mixer) < 480) {
@@ -306,6 +413,7 @@ static void sink_thread(void *argument)
             if (!pending_local.queued_frames) continue;
         }
         /* Apply a queued volume before rendering the first samples too. */
+        if(sink->device_started && sink->device_rate!=48000)stop_device(sink);
         if (!sink->device_started && !start_device(sink, 48000, 2)) { ++sink->write_errors; continue; }
         if(sink->packets>=stack_report_packets+200) {
             carplay_audio_stack_report(TAG);stack_report_packets=sink->packets;
@@ -313,16 +421,14 @@ static void sink_thread(void *argument)
         int16_t *chunk=sink->chunk;
         size_t frames = rtcp_audio_mixer_render(sink->mixer, chunk, 480);
         if (!frames) continue;
-        rt_size_t bytes = frames * 4;
-        rt_size_t offset = 0;
-        while (offset < bytes && !sink->stop) {
-            rt_size_t written = rt_device_write(sink->dev, 0, (const uint8_t *)chunk + offset, bytes-offset);
-            if (!written || written > bytes-offset) { ++sink->write_errors; break; }
-            offset += written;
-        }
+        atomic_store(&sink->direct_active,false);
+        bool complete=output_samples(sink,chunk,frames,48000,2);
 #if defined(RTCARPLAY_MICROPHONE)
-        if(offset==bytes)carplay_audio_input_reference(chunk,frames);
+        if(complete)carplay_audio_input_reference(chunk,frames);
+#else
+        (void)complete;
 #endif
+
     }
     for (unsigned i = 0; i < RTCP_AUDIO_LANES; ++i) rtcp_audio_decoder_destroy(decoders[i]);
     stop_device(sink);
@@ -473,6 +579,8 @@ int carplay_audio_sink_packet(uint16_t type, const rtcp_audio_format_t *format,
         sink->format[i].codec != format->codec || sink->format[i].clock_rate != format->clock_rate) {
         rtcp_audio_jitter_flush(sink->queue[i]); sink->format[i] = *format; ++sink->generation[i];
     }
+    if(sink->last_arrival[i] && arrival>sink->last_arrival[i])
+        maximum(&sink->diag[i].arrival_max_ms,(unsigned)((arrival-sink->last_arrival[i])/1000));
     sink->last_arrival[i] = arrival;
     int result = rtcp_audio_jitter_push(sink->queue[i], data, len, timestamp, arrival);
     if (result == RTCP_OK) ++sink->packets; else sink->dropped_bytes += (unsigned)len;
@@ -614,3 +722,35 @@ usage:
     rt_kprintf("Usage: carplay_volume [0..100]\n");
 }
 MSH_CMD_EXPORT_ALIAS(volume_command,carplay_volume,CarPlay output volume 0..100);
+
+void carplay_audio_sink_diagnostics(void)
+{
+    audio_sink_t *s=&s_sink;
+    if(!s->running)return;
+    rt_kprintf("audio diag: requested=%s last_output=%s frames=%u peak=%u device_errors=%u write_max_us=%u\n",
+      s->direct_requested?"direct":"mixer",s->direct_active?"direct":"mixer",s->output_frames,
+      s->output_peak,s->device_errors,s->write_max_us);
+    for(unsigned i=0;i<RTCP_AUDIO_LANES;++i) {
+        lane_diagnostics_t *d=&s->diag[i];
+        if(!d->decoded && !d->decode_errors && !d->init_errors)continue;
+        rtcp_audio_jitter_stats_t q={0};
+        (void)rt_mutex_take(s->lock,RT_WAITING_FOREVER);
+        rtcp_audio_jitter_stats(s->queue[i],&q);
+        (void)rt_mutex_release(s->lock);
+        rt_kprintf("audio lane=%u decoded=%u frames=%u empty=%u init_err=%u decode_err=%u pcm_peak=%u decode_max_us=%u\n",
+          i,d->decoded,d->frames,d->empty,d->init_errors,d->decode_errors,d->peak_pcm,d->decode_max_us);
+        rt_kprintf("audio lane=%u negative_ts=%u silence_frames=%u resets=%u mix_drop=%u mix_queue=%u arrival_max_ms=%u jitter_queue=%u late=%u duplicate=%u overflow=%u\n",
+          i,d->negative,d->gap_frames,d->resets,d->mix_drops,d->queued,d->arrival_max_ms,
+          (unsigned)q.queued,(unsigned)q.late,(unsigned)q.duplicates,(unsigned)q.overflow);
+    }
+}
+static void audio_path_command(int argc,char **argv)
+{
+    if(argc==2 && (!strcmp(argv[1],"direct") || !strcmp(argv[1],"mixer"))) {
+        if(!s_sink.running) {rt_kprintf("[carplay-aud] receiver audio not running\n");return;}
+        atomic_store(&s_sink.direct_requested,!strcmp(argv[1],"direct"));
+        (void)rt_sem_release(s_sink.wake);
+    } else if(argc!=1) {rt_kprintf("Usage: carplay_audio_path [mixer|direct]\n");return;}
+    carplay_audio_sink_diagnostics();
+}
+MSH_CMD_EXPORT_ALIAS(audio_path_command,carplay_audio_path,Compare mixed and direct media audio);

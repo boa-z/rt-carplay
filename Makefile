@@ -222,6 +222,10 @@ check-rtthread-multicast:
 check-lubanlite-handoff:
 	python3 tests/run_lubanlite_handoff.py
 
+.PHONY: check-lubanlite-capabilities
+check-lubanlite-capabilities:
+	python3 tests/run_lubanlite_capabilities.py $(SDK_ROOT)
+
 # Actual board sink with a pthread-backed RT-Thread/device seam.
 $(BUILD)/test_audio_sink: tests/unit/test_audio_sink.c examples/rtthread_app/audio_sink_lubanlite.c tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(MBEDTLS_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_audio -o $@ $< tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread

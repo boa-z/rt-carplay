@@ -181,11 +181,11 @@ int airplay_audio_stream_start(const struct rtcp_os *os,
 
     *out_stream = stream;
     RTCP_LOGI(TAG, "stream=ready type=%u data_port=%u control_port=%u "
-                   "rate=%u channels=%u format=0x%llx",
+                   "rate=%u channels=%u format=0x%08x%08x",
               (unsigned)stream->stream_type, (unsigned)stream->data_port,
               (unsigned)stream->control_port, (unsigned)stream->format.sample_rate,
               (unsigned)stream->format.channels,
-              (unsigned long long)stream->format_bits);
+              (unsigned)(stream->format_bits >> 32), (unsigned)(uint32_t)stream->format_bits);
     return RTCP_OK;
 }
 

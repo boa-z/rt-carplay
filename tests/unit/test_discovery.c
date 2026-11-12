@@ -26,7 +26,14 @@ static void capability_consistency(void)
         assert(airplay_bplist_dict_get(&doc,root,"features",&value)==AIRPLAY_BPLIST_OK);
         assert(airplay_bplist_get_uint(&doc,value,&served)==AIRPLAY_BPLIST_OK);
         assert(served==discovered && served==features);
-        if(mode==1)assert(!strcmp(words,"0x5653aee2,0x61"));
+        if(mode==1) {
+            assert(served & (UINT64_C(1) << 18)); /* actual PCM capability */
+#ifdef RTCP_AUDIO_CODECS
+            assert(!strcmp(words,"0x5657aee2,0x61"));
+#else
+            assert(!strcmp(words,"0x5647aee2,0x61"));
+#endif
+        }
         if(!mode)assert(!strcmp(words,AIRPLAY_TXT_DEFAULT_FEATURES));
     }
     char tiny[2]={'x','x'};

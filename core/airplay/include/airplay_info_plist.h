@@ -15,8 +15,10 @@
 
 /* DiPlay CarPlay feature mask with audio-output bits cleared (no audio sink). */
 #define AIRPLAY_INFO_DEFAULT_FEATURES 0x615203a4e2ULL
-/* The audio-output capability bits reported by the CarPlay senders. */
-#define AIRPLAY_INFO_AUDIO_FEATURES 0x4500a00ULL
+/* Audio/RedundantAudio/AudioPCM/AudioUnencrypted/AudioAES128MFiSAPv1.
+ * AAC-LC is added only when the compiled decoder is actually offered. */
+#define AIRPLAY_INFO_AUDIO_FEATURES 0x4440a00ULL
+#define AIRPLAY_INFO_AAC_LC_FEATURE (UINT64_C(1) << 20)
 #define AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO \
     (AIRPLAY_INFO_DEFAULT_FEATURES | AIRPLAY_INFO_AUDIO_FEATURES)
 #define AIRPLAY_INFO_DEFAULT_STATUS_FLAGS 4U
@@ -45,7 +47,9 @@ typedef struct {
     bool audio_output;
     bool audio_input; /* only with an available microphone uplink */
     bool audio_compressed; /* advertise only compiled AAC/Opus and an encoded-capable sink */
-    uint32_t audio_sample_rate; /* 0 defaults to 44100; 48000 selects 48 kHz. */
+    /* 0 offers both 44.1/48 kHz, as in catplay; explicit 44100/48000 restricts
+     * entertainment formats. This never changes decoder or device settings. */
+    uint32_t audio_sample_rate;
 } airplay_info_plist_config_t;
 
 /*

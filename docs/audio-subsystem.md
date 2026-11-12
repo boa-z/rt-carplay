@@ -8,7 +8,9 @@ See [audio routing repair](audio-routing.md) for the subsequent discovery-mask
 and startup-clock-wrap fixes, connection-time Bluetooth identity refresh, the
 current image checksum and board diagnostics. The user's subsequent board trace
 still had no audio SETUP after the first routing repair; the identity repair
-and new capability trace await another phone test.
+and new capability trace did not establish audio SETUP in the user's next test.
+See [current negotiation investigation](audio-negotiation.md) for the formatter
+repair, truthful PCM/AAC flags, dual-rate media offer and current test image.
 
 ## Findings from actual code and open source references
 

@@ -7,6 +7,7 @@
 
 #include "airplay_bplist.h"
 #include "airplay_hid_descriptor.h"
+#include "audio_codec.h"
 
 static const airplay_info_plist_config_t k_config = {
     .device_id = "00:11:22:33:44:55",
@@ -218,6 +219,7 @@ int main(void)
     assert(airplay_bplist_array_get(&doc, object, 8U, &entry) ==
            AIRPLAY_BPLIST_OK);
     expect_uint(&doc, entry, "type", 102U);
+    expect_string(&doc, entry, "audioType", "media");
     expect_uint(&doc, entry, "outputLatencyMicros", 0U);
 
 #ifdef RTCP_AUDIO_CODECS
@@ -225,6 +227,7 @@ int main(void)
     assert(airplay_info_plist_build(&audio, plist, sizeof(plist), &plist_len));
     assert(airplay_bplist_open(plist, plist_len, &doc) == AIRPLAY_BPLIST_OK);
     assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, root, "features", AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO | AIRPLAY_INFO_AAC_LC_FEATURE);
     assert(airplay_bplist_dict_get(&doc, root, "audioFormats", &object) == AIRPLAY_BPLIST_OK);
     assert(airplay_bplist_array_get(&doc, object, 8, &entry) == AIRPLAY_BPLIST_OK);
     expect_uint(&doc, entry, "type", 102);
@@ -241,6 +244,38 @@ int main(void)
     assert(airplay_bplist_array_get(&doc, object, 0U, &entry) ==
            AIRPLAY_BPLIST_OK);
     expect_uint(&doc, entry, "audioOutputFormats", 0x3fcULL | 0xc00ULL);
+
+    /* A receiver with both decoders must let the controller select its media
+     * rate, rather than constrain negotiation to the old local 44.1 kHz default. */
+    audio.audio_sample_rate = 0;
+    audio.audio_compressed = true;
+    assert(airplay_info_plist_build(&audio, plist, sizeof(plist), &plist_len));
+    assert(airplay_bplist_open(plist, plist_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "audioFormats", &object) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, object, 4, &entry) == AIRPLAY_BPLIST_OK);
+    expect_string(&doc, entry, "audioType", "media");
+    expect_uint(&doc, entry, "audioOutputFormats", 0xcffc);
+    assert(airplay_bplist_get_type(&doc, object, &object_type, &item_count) == AIRPLAY_BPLIST_OK);
+#ifdef RTCP_AUDIO_CODECS
+    assert(item_count == 9);
+    assert(airplay_bplist_array_get(&doc, object, 8, &entry) == AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, entry, "type", 102);
+    expect_string(&doc, entry, "audioType", "media");
+    expect_uint(&doc, entry, "audioOutputFormats", 0xc00000);
+#else
+    assert(item_count == 8);
+#endif
+    uint64_t offered_features = airplay_info_plist_features(&audio);
+    assert(offered_features & (UINT64_C(1) << 18));
+    assert(!!(offered_features & AIRPLAY_INFO_AAC_LC_FEATURE) == (item_count == 9));
+    for (uint64_t i = 0; i < item_count; ++i) {
+        uint64_t bits;
+        assert(airplay_bplist_array_get(&doc, object, i, &entry) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc, entry, "audioOutputFormats", &value) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_uint(&doc, value, &bits) == AIRPLAY_BPLIST_OK);
+        assert((bits & ~rtcp_audio_output_formats()) == 0);
+    }
 
     /* Bounds and argument validation. */
     size_t unused = 0U;

@@ -428,7 +428,8 @@ static uint32_t emit_audio_latencies(ip_writer_t *w)
     refs[5] = emit_audio_latency(w, 100, "alert");
     refs[6] = emit_audio_latency(w, 101, NULL);
     refs[7] = emit_audio_latency(w, 101, "default");
-    refs[8] = emit_audio_latency(w, 102, "default");
+    /* Match the type/role of the media format, as in catplay's receiver. */
+    refs[8] = emit_audio_latency(w, 102, "media");
     return ip_emit_array(w, refs, 9U);
 }
 
@@ -452,12 +453,13 @@ static uint32_t emit_audio_formats(ip_writer_t *w,
     /* Advertise only compiled decoders; microphone formats additionally
      * require the platform capture capability. 102/media is raw AAC-LC. */
     const bool is48 = config->audio_sample_rate == 48000U;
-    const uint64_t pcm = 0x3fcULL | (is48 ? 0xc000ULL : 0xc00ULL);
-    const uint64_t pcm_mono = 0x154ULL | (is48 ? 0x4000ULL : 0x400ULL);
+    const bool both = config->audio_sample_rate == 0U;
+    const uint64_t pcm = 0x3fcULL | (both ? 0xcc00ULL : is48 ? 0xc000ULL : 0xc00ULL);
+    const uint64_t pcm_mono = 0x154ULL | (both ? 0x4400ULL : is48 ? 0x4000ULL : 0x400ULL);
 
     uint64_t compiled = rtcp_audio_output_formats();
     uint64_t opus = config->audio_compressed ? compiled & 0x70000000ULL : 0;
-    uint64_t aac = config->audio_compressed ? compiled & (is48 ? 0x800000ULL : 0x400000ULL) : 0;
+    uint64_t aac = config->audio_compressed ? compiled & (both ? 0xc00000ULL : is48 ? 0x800000ULL : 0x400000ULL) : 0;
     uint64_t input = config->audio_input ? pcm_mono | opus : 0;
     uint32_t refs[9];
     refs[0] = emit_audio_format(w, 100, "compatibility", pcm, input);
@@ -688,6 +690,9 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
 uint64_t airplay_info_plist_features(const airplay_info_plist_config_t *config)
 {
     if (config && config->features) return config->features;
-    return config && config->audio_output ? AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO
-                                         : AIRPLAY_INFO_DEFAULT_FEATURES;
+    if (!config || !config->audio_output) return AIRPLAY_INFO_DEFAULT_FEATURES;
+    uint64_t features = AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO;
+    if (config->audio_compressed && (rtcp_audio_output_formats() & UINT64_C(0xc00000)))
+        features |= AIRPLAY_INFO_AAC_LC_FEATURE;
+    return features;
 }

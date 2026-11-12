@@ -283,6 +283,8 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
         IAP2_LOG("cannot read the local Bluetooth address rc=%d", result);
         return result;
     }
+    IAP2_LOG("identity bluetoothID=%02X:%02X:%02X:%02X:%02X:%02X", bdaddr[0],
+             bdaddr[1], bdaddr[2], bdaddr[3], bdaddr[4], bdaddr[5]);
 
     iap2_identity_config_t identity;
     memset(&identity, 0, sizeof(identity));

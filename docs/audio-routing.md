@@ -1,5 +1,9 @@
 # 音乐仍在 iPhone 本机播放：发现能力与时钟修复
 
+本文记录前两轮排查。最新的printf修复、AudioPCM Features、双采样率宣告、
+当前固件SHA及验收日志见 [audio-negotiation.md](audio-negotiation.md)；下文旧
+Features、44.1 kHz专用位图和镜像SHA属于当时的构建，不是当前版本期望值。
+
 ## 日志能确认什么
 
 用户实机日志的 `tunnel=1 identified=1 authenticated=1 handoff_complete=1`

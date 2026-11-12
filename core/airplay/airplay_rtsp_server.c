@@ -147,8 +147,8 @@ static bool server_start_screen(const airplay_rtsp_pairing_t *pairing,
     if (airplay_rtsp_pairing_derive_screen_output_key(
             pairing, stream_connection_id, output_key) != AIRPLAY_PAIR_VERIFY_OK) {
         mbedtls_platform_zeroize(output_key, sizeof(output_key));
-        RTCP_LOGE(TAG, "screen_setup=key_derivation_failed connection_id=%llu",
-                  (unsigned long long)stream_connection_id);
+        RTCP_LOGE(TAG, "screen_setup=key_derivation_failed connection_id=0x%08x%08x",
+                  (unsigned)(stream_connection_id >> 32), (unsigned)(uint32_t)stream_connection_id);
         return false;
     }
 
@@ -341,8 +341,8 @@ static bool server_start_audio(const airplay_rtsp_pairing_t *pairing, uint16_t s
                                                output_key) !=
         AIRPLAY_PAIR_VERIFY_OK) {
         mbedtls_platform_zeroize(output_key, sizeof(output_key));
-        RTCP_LOGE(TAG, "audio_setup=key_derivation_failed connection_id=%llu",
-                  (unsigned long long)stream_connection_id);
+        RTCP_LOGE(TAG, "audio_setup=key_derivation_failed connection_id=0x%08x%08x",
+                  (unsigned)(stream_connection_id >> 32), (unsigned)(uint32_t)stream_connection_id);
         return false;
     }
 
@@ -372,10 +372,10 @@ static bool server_start_audio(const airplay_rtsp_pairing_t *pairing, uint16_t s
         return false;
     }
     RTCP_LOGI(TAG, "audio_setup=ready type=%u data_port=%u control_port=%u "
-                   "connection_id=%llu",
+                   "connection_id=0x%08x%08x",
               (unsigned)stream_type, (unsigned)*data_port,
               (unsigned)*control_port,
-              (unsigned long long)stream_connection_id);
+              (unsigned)(stream_connection_id >> 32), (unsigned)(uint32_t)stream_connection_id);
     return true;
 }
 

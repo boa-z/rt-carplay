@@ -740,10 +740,10 @@ static airplay_rtsp_session_result_t handle_setup(
                                                audio_connection_ids[slot]) ||
             session->data_stream_connection_id_count >=
                 AIRPLAY_RTSP_SESSION_MAX_DATA_STREAM_KEY_IDS) {
-            RTCP_LOGW(TAG, "audio_setup=refused type=%u connection_id=%llu "
+            RTCP_LOGW(TAG, "audio_setup=refused type=%u connection_id=0x%08x%08x "
                            "start=%u reused=%u",
                       (unsigned)stream_type,
-                      (unsigned long long)audio_connection_ids[slot],
+                      (unsigned)(audio_connection_ids[slot] >> 32), (unsigned)(uint32_t)audio_connection_ids[slot],
                       (session->config.start_audio != NULL || session->config.start_audio_ex != NULL) ? 1U : 0U,
                       data_stream_connection_id_was_used(
                           session, audio_connection_ids[slot])
@@ -788,9 +788,9 @@ static airplay_rtsp_session_result_t handle_setup(
                                           &bound_port,
                                           session->config.media_context);
         if (!started || bound_port == 0U) {
-            RTCP_LOGE(TAG, "screen_start=failed stream_type=%llu connection_id=%llu port=%u",
-                     (unsigned long long)screen_type,
-                     (unsigned long long)screen_connection_id,
+            RTCP_LOGE(TAG, "screen_start=failed stream_type=0x%08x%08x connection_id=0x%08x%08x port=%u",
+                     (unsigned)(screen_type >> 32), (unsigned)(uint32_t)screen_type,
+                     (unsigned)(screen_connection_id >> 32), (unsigned)(uint32_t)screen_connection_id,
                      (unsigned)bound_port);
             if (started && session->config.stop_screen != NULL) {
                 session->config.stop_screen(session->config.media_context);
@@ -823,12 +823,12 @@ static airplay_rtsp_session_result_t handle_setup(
             session->config.start_audio_ex(session->pairing,stream_type,&audio_options[slot],&data_port,&control_port,session->config.media_context) :
             session->config.start_audio && session->config.start_audio(session->pairing,stream_type,audio_connection_ids[slot],audio_format_bits[slot],&data_port,&control_port,session->config.media_context);
         if (!started || data_port == 0U || control_port == 0U) {
-            RTCP_LOGE(TAG, "audio_start=failed type=%u connection_id=%llu "
-                           "data_port=%u control_port=%u format=0x%llx",
+            RTCP_LOGE(TAG, "audio_start=failed type=%u connection_id=0x%08x%08x "
+                           "data_port=%u control_port=%u format=0x%08x%08x",
                      (unsigned)stream_type,
-                     (unsigned long long)audio_connection_ids[slot],
+                     (unsigned)(audio_connection_ids[slot] >> 32), (unsigned)(uint32_t)audio_connection_ids[slot],
                      (unsigned)data_port, (unsigned)control_port,
-                     (unsigned long long)audio_format_bits[slot]);
+                     (unsigned)(audio_format_bits[slot] >> 32), (unsigned)(uint32_t)audio_format_bits[slot]);
             if(started)stop_audio_endpoint(session,stream_type,&audio_options[slot]);
             audio_failed = true;
             break;
@@ -853,12 +853,12 @@ static airplay_rtsp_session_result_t handle_setup(
         audio_data_port[slot] = data_port;
         audio_control_port[slot] = control_port;
         started_audio_mask |= (uint8_t)(1U << slot);
-        RTCP_LOGI(TAG, "audio_start=ready type=%u connection_id=%llu "
-                       "data_port=%u control_port=%u format=0x%llx",
+        RTCP_LOGI(TAG, "audio_start=ready type=%u connection_id=0x%08x%08x "
+                       "data_port=%u control_port=%u format=0x%08x%08x",
                  (unsigned)stream_type,
-                 (unsigned long long)audio_connection_ids[slot],
+                 (unsigned)(audio_connection_ids[slot] >> 32), (unsigned)(uint32_t)audio_connection_ids[slot],
                  (unsigned)data_port, (unsigned)control_port,
-                 (unsigned long long)audio_format_bits[slot]);
+                 (unsigned)(audio_format_bits[slot] >> 32), (unsigned)(uint32_t)audio_format_bits[slot]);
     }
 
     if (audio_failed) {
@@ -1130,11 +1130,23 @@ static void log_info_audio(airplay_rtsp_session_t *session)
         airplay_bplist_root(&doc, &root) != AIRPLAY_BPLIST_OK) return;
     if (airplay_bplist_dict_get(&doc, root, "features", &object) == AIRPLAY_BPLIST_OK)
         (void)airplay_bplist_get_uint(&doc, object, &features);
+    if (airplay_bplist_dict_get(&doc, root, "bluetoothIDs", &array) == AIRPLAY_BPLIST_OK &&
+        airplay_bplist_get_type(&doc, array, &type, &count) == AIRPLAY_BPLIST_OK && type == AIRPLAY_BPLIST_ARRAY) {
+        RTCP_LOGI(TAG, "info_bluetooth count=%u", (unsigned)count);
+        for (uint64_t i = 0; i < count && i < 4; ++i) {
+            char address[18];
+            size_t length = 0;
+            if (airplay_bplist_array_get(&doc, array, i, &entry) == AIRPLAY_BPLIST_OK &&
+                airplay_bplist_get_string(&doc, entry, address, sizeof(address), &length) == AIRPLAY_BPLIST_OK && length == 17)
+                RTCP_LOGI(TAG, "info_bluetooth index=%u id=%s", (unsigned)i, address);
+        }
+    }
+    count = 0;
     if (airplay_bplist_dict_get(&doc, root, "audioFormats", &array) != AIRPLAY_BPLIST_OK ||
         airplay_bplist_get_type(&doc, array, &type, &count) != AIRPLAY_BPLIST_OK || type != AIRPLAY_BPLIST_ARRAY)
         count = 0;
-    RTCP_LOGI(TAG, "info=served bytes=%u features=0x%llx audio_formats=%u",
-              (unsigned)session->config.info_plist_len, (unsigned long long)features, (unsigned)count);
+    RTCP_LOGI(TAG, "info=served bytes=%u features=0x%08x%08x audio_formats=%u",
+              (unsigned)session->config.info_plist_len, (unsigned)(features >> 32), (unsigned)(uint32_t)features, (unsigned)count);
     for (uint64_t i = 0; i < count && i < 16; ++i) {
         uint64_t stream_type = 0, output = 0, input = 0;
         char role[32] = "any";
@@ -1148,8 +1160,9 @@ static void log_info_audio(airplay_rtsp_session_t *session)
             (void)airplay_bplist_get_uint(&doc, object, &output);
         if (airplay_bplist_dict_get(&doc, entry, "audioInputFormats", &object) == AIRPLAY_BPLIST_OK)
             (void)airplay_bplist_get_uint(&doc, object, &input);
-        RTCP_LOGI(TAG, "info_audio type=%u role=%s output=0x%llx input=0x%llx",
-                  (unsigned)stream_type, role, (unsigned long long)output, (unsigned long long)input);
+        RTCP_LOGI(TAG, "info_audio type=%u role=%s output=0x%08x%08x input=0x%08x%08x",
+                  (unsigned)stream_type, role, (unsigned)(output >> 32), (unsigned)(uint32_t)output,
+                  (unsigned)(input >> 32), (unsigned)(uint32_t)input);
     }
 }
 

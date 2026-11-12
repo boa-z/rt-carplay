@@ -18,6 +18,7 @@
 
 #include "airplay_ed25519.h"
 #include "airplay_info_plist.h"
+#include "airplay_bplist.h"
 #include "airplay_pairing_store.h"
 #include "pairing_files.h"
 #include "airplay_rtsp_server.h"
@@ -80,9 +81,9 @@
 
 /* Advertised PCM sample rate.  The sink configures the codec from the format
  * the SETUP actually negotiates; this only selects which capability mask the
- * /info plist publishes (44.1 kHz or 48 kHz). */
+ * /info plist publishes (0 = both 44.1 and 48 kHz). */
 #ifndef CARPLAY_APP_AUDIO_SAMPLE_RATE
-#define CARPLAY_APP_AUDIO_SAMPLE_RATE 44100U
+#define CARPLAY_APP_AUDIO_SAMPLE_RATE 0U
 #endif
 
 #define DEFAULT_NAME "rt-carplay"
@@ -960,6 +961,33 @@ static int start_wifi(app_state_t *app)
 }
 #endif /* LPKG_RT_CARPLAY_LUBANLITE_WIFI */
 
+/* Compare the encoded buffers, not only the configuration used to build them. */
+static bool announcement_features_match(const uint8_t *info, size_t info_length,
+                                        const uint8_t *txt, size_t txt_length)
+{
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root, object;
+    uint64_t features;
+    char words[32];
+    if (airplay_bplist_open(info, info_length, &doc) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_root(&doc, &root) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_dict_get(&doc, root, "features", &object) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_get_uint(&doc, object, &features) != AIRPLAY_BPLIST_OK ||
+        !airplay_txt_format_features(features, words, sizeof(words))) return false;
+    unsigned matches = 0;
+    for (size_t offset = 0; offset < txt_length;) {
+        size_t length = txt[offset++];
+        if (length > txt_length - offset) return false;
+        if (length >= 9 && memcmp(txt + offset, "features=", 9) == 0) {
+            if (length != 9 + strlen(words) || memcmp(txt + offset + 9, words, strlen(words)) != 0)
+                return false;
+            ++matches;
+        }
+        offset += length;
+    }
+    return matches == 1;
+}
+
 static int build_announcement_data(app_state_t *app)
 {
     airplay_info_plist_config_t info;
@@ -1016,6 +1044,11 @@ static int build_announcement_data(app_state_t *app)
         APP_LOG("cannot encode the mDNS TXT record");
         return RTCP_EIO;
     }
+    if (!announcement_features_match(app->info_plist, app->info_plist_len, app->txt, app->txt_len)) {
+        APP_LOG("capabilities TXT and /info Features mismatch");
+        return RTCP_EIO;
+    }
+    APP_LOG("capabilities_check txt_features=%s info_match=1", feature_words);
     return RTCP_OK;
 }
 

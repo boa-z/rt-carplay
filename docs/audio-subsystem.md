@@ -1,6 +1,6 @@
 # CarPlay audio subsystem development
 
-Branch: `feat/carplay-audio`. Hardware baseline: wireless v30 video and
+Branch: `main` (audio changes integrated). Hardware baseline: wireless v30 video and
 Bluetooth handoff were confirmed by the user. Audio changes on this branch
 have **not** been tested on D213 hardware.
 
@@ -194,7 +194,7 @@ software buffering values, not measured end-to-end or DAC latency.
 ## Board validation checklist and commands
 
 Use SDK [build instructions](../../luban-lite-jc-carplay-oss/doc/rt-carplay-build.md)
-and a matched app/SDK feat/carplay-audio checkout. Default enables downlink
+with app `main` and SDK `poc/carplay-oss` checkouts. Default enables downlink
 AAC/Opus and leaves microphone/AEC disabled. Enable RTCARPLAY_MICROPHONE
 (and optionally RTCARPLAY_MIC_AEC) in menuconfig only for capture tests.
 

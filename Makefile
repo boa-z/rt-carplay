@@ -223,6 +223,10 @@ check-rtthread-multicast:
 check-lubanlite-handoff:
 	python3 tests/run_lubanlite_handoff.py
 
+.PHONY: check-lubanlite-reconnect
+check-lubanlite-reconnect:
+	python3 tests/run_lubanlite_reconnect.py
+
 .PHONY: check-lubanlite-capabilities
 check-lubanlite-capabilities:
 	python3 tests/run_lubanlite_capabilities.py $(SDK_ROOT)

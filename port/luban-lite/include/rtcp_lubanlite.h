@@ -78,9 +78,9 @@ int rtcp_wifi_lubanlite_start_dhcpd(void);
  * (packages/third-party/zephyr-bluetooth, RTL8733BS over H5).  This is the
  * transport the wireless iAP2 path needs:
  *
- *   rtcp_bt_lubanlite.enable(name, NULL)        BT on, connectable+discoverable
+ *   rtcp_bt_lubanlite.enable(name, NULL)        BT on, restore saved bonds
  *   rtcp_bt_lubanlite.rfcomm_listen(0, name, uuid128, &channel)
- *                                               RFCOMM server + SDP record
+ *                                               RFCOMM + SDP, verify page/inquiry scan
  *   rtcp_bt_lubanlite.rfcomm_accept(1, &fd)     blocks for one DLC
  *   rtcp_bt_lubanlite.send/recv(fd, ...)        byte stream (recv returns 0
  *                                               when the link closed and
@@ -91,9 +91,9 @@ int rtcp_wifi_lubanlite_start_dhcpd(void);
  * rfcomm_listen() is idempotent while the listener is registered.  The seam
  * supports one link; callers must serialize accept/send/recv on one thread.
  *
- * The transport is build-verified only.  The Zephyr H5 transport, the
- * Realtek firmware download and the discoverable/pairing behavior all need
- * the first board run; see port/luban-lite/README.md.
+ * Wireless iAP2/video and Wi-Fi handoff have board confirmation. The added
+ * READY readback and bonded-peer paging have Host/SDK verification only;
+ * automatic phone profile/CarPlay activation still needs a board run.
  */
 extern const struct rtcp_bt rtcp_bt_lubanlite;
 
@@ -101,6 +101,12 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6]);
 int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
                                     const char *uuid128, uint8_t *out_channel);
 int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd);
+/* One bounded accept iteration. The iAP2 owner uses it to service READY
+ * reconnects and check AirPlay handoff without another Bluetooth thread. */
+int rtcp_bt_lubanlite_rfcomm_accept_timeout(int lfd, int *fd, int timeout_ms);
+/* Single iAP2-owner thread only. false releases/cancels an owned pending
+ * attempt, but never tears down an accepted RFCOMM link. */
+int rtcp_bt_lubanlite_reconnect_tick(bool allowed);
 int rtcp_bt_lubanlite_send(int fd, const void *buf, size_t len);
 int rtcp_bt_lubanlite_recv(int fd, void *buf, size_t len);
 
@@ -132,6 +138,10 @@ typedef struct {
     uint8_t hci_error, security_error;
     int storage_error;
     bool bonded, persistent;
+    unsigned reconnect_attempts, active_acls;
+    int radio_error;
+    uint8_t scan_enable;
+    bool scan_known;
 } rtcp_bt_pairing_status_t;
 /* No connection pointers escape the port. A reply must match the current
  * request token; late LVGL clicks cannot confirm a replacement request. */

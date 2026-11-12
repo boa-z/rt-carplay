@@ -1,5 +1,76 @@
 # 已配对 iPhone 在 READY 状态重连失败
 
+## READY 自动重连与“手动 Connect 无日志”的后续修正
+
+产品行为上，已经配对并允许无线 CarPlay 的手机，在双方蓝牙／Wi-Fi 开启、
+车辆系统允许连接时，应能自动恢复连接。协议栈保存 bond 并不等于应用已经
+实现主动重连。此前 `rfcomm_accept()` 无限等待手机接入，根本没有调用
+`bt_conn_create_br()` 主动寻呼已配对地址；因此不能承诺它会自动连接。
+
+本轮新增实际行为：
+
+* 注册 SDP/RFCOMM 后使用 HCI Read Scan Enable 读回控制器状态；只有
+  page/inquiry scan 均已开启（0x03）才发布 READY。发现 host 缓存与控制器
+  不一致时，通过公开接口 off/on 修复并再次读回，失败则返回错误。
+* 仅在无线 iAP2 owner 空闲时，启动后等待 2 秒主动寻呼已恢复的 BR bond。
+  多个 bond 轮询，每次尝试间隔至少 30 秒；不执行额外的 inquiry 搜索。
+* ACL 成功后请求 L2 加密，复用原 link key，不强制重新配对；保留密钥已有的
+  更强认证属性。随后等待手机连接已注册的 iAP2 RFCOMM 服务。不猜测手机
+  RFCOMM channel，也不把 ACL 成功宣称为 CarPlay 已成功。
+* 20 秒内未形成 RFCOMM 时，取消本 owner 发起的待完成连接并释放引用。
+  已有入站 ACL、配对交互时不并发寻呼；入站连接赢得竞争时不取消它。
+* 将 owner 的 accept 改成 500 ms 有界轮询，使其持续检查接收器、AirPlay
+  event 和 iAP2 tunnel 状态。Wi-Fi 接管后暂停主动寻呼；同一手机已经接入
+  的 RFCOMM 不受重连定时器影响。原阻塞 accept 接口保留兼容。
+* 通过应用层日志记录 incoming Classic page，不依赖 SDK info 日志过滤设置。
+  `carplay_bt status` 增加 scan、radio error、尝试数、active ACL 数及配对状态。
+
+同时修复 SDK 的同步 HCI 并发问题：所有命令原来共用一个静态 semaphore，
+并发的扫描查询与蓝牙认证可能互相唤醒。现在每个命令池槽位使用独立等待对象，
+槽位由命令缓冲区引用生命周期保护，零初始化并复用，避免每次调用泄漏 RTOS
+对象。当前 SDK ELF 中该静态数组为 624 字节；运行时 semaphore 对象另计，
+尚无板上 CPU／射频或重连时间测量。此处没有新增工作线程。
+
+新增验证命令：
+
+```sh
+make check-lubanlite-reconnect
+cd ../luban-lite-jc-carplay-oss
+python3 packages/third-party/zephyr-bluetooth/tests/run_hci_sync.py
+```
+
+前者提取实际 adapter 函数，覆盖读回／修复／失败、停止竞争、有界 accept、
+寻呼轮询／节流、加密、Wi-Fi 暂停、入站竞争、引用平衡和时钟回绕。后者运行
+实际 HCI 同步命令函数，以两个线程倒序完成命令，验证结果、错误和引用隔离，
+连续复用槽位三次；修改前的 SDK 不能通过独立等待对象检查。
+这些是 ASan/UBSan Host 测试，尚不证明 iOS 会在 ACL 建立后自动打开 RFCOMM。
+
+启动及自动尝试的新增标记：
+
+```text
+READY radio address=... scan=0x03 (page+inquiry)
+bond reconnect enabled: first page in 2s, retry 30s; Wi-Fi handoff pauses paging
+reconnect paging bonded peer=... scan=0x03
+ACL connected peer=...
+reconnect ACL established; security request rc=0; awaiting phone RFCOMM
+```
+
+保留旧配对进行验证，结合下文的 `carplay_bt status`、`carplay_iap2 status`：
+
+| 结果 | 判断范围 |
+| --- | --- |
+| 缺少 READY radio / bond reconnect enabled 标记 | 不能据此认定运行了本轮代码，或服务启动尚未成功；先核对固件和完整启动日志 |
+| bonds=0、attempts 不增长 | 协议栈没有已恢复的 BR bond；仅存在文件不足以主动重连 |
+| scan=unknown 或 radio error 非零 | HCI 查询／配置未得到有效结果，先处理控制器和 H5 路径 |
+| active_ACL 非零且没有新 page | 存在连接／关闭中的 ACL，本轮主动策略会让路；保留前后的 ACL/HCI 日志 |
+| 有 reconnect paging，随后 HCI 0x04 | Page Timeout，尚未进入 link key 验证；检查手机可连接状态、地址和射频／共存 |
+| 有 saved-key reply，随后 HCI 0x05/0x06 | 已进入旧密钥认证，继续调查双方 bond 失配 |
+| ACL/security 成功但持续 awaiting phone RFCOMM | 仍缺 profile 建立，不能称自动 CarPlay 成功；保留手机类型、iOS 版本和完整 SDP/RFCOMM 日志继续定位 |
+| 手动 Connect 没有 incoming Classic page，但有主动 page 结果 | 使用主动方向结果缩小范围；HCI 扫描读回只证明配置值，不证明空中收发成功 |
+
+以下保留上一轮的密钥更新／持久化调查，不能把其中的候选原因直接套用到
+“连接时没有任何事件”的新现象上。
+
 本次提供的日志只到 RFCOMM channel 6 监听和 stage=1，没有 ACL 请求、认证
 或 RFCOMM 连接结果。它能证明服务启动，不能证明手机已经请求连接，也不能
 确认两端 link key 一致。Forget Device 同时清掉手机密钥和服务缓存，并触发

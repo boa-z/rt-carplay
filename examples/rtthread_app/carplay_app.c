@@ -1780,6 +1780,9 @@ static int cmd_carplay_bt(int argc, char **argv)
                    pairing.bond_count, pairing.bond_capacity, pairing.persistent,
                    pairing.storage_error, pairing.hci_error, pairing.security_error,
                    pairing.failures);
+        rt_kprintf("carplay_bt radio: scan=%s0x%02x error=%d reconnect_attempts=%u active_ACL=%u pairing=%u\n",
+                   pairing.scan_known ? "" : "unknown/", pairing.scan_enable,
+                   pairing.radio_error, pairing.reconnect_attempts, pairing.active_acls, pairing.kind);
         return 0;
     }
     rt_kprintf("usage: carplay_bt start|stop|status\n");

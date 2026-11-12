@@ -370,15 +370,25 @@ static void link_thread(void *parameter)
     while (s_serve) {
         if (!carplay_app_is_running()) {
             IAP2_LOG("receiver stopped, ending the iAP2 service");
+            result = RTCP_OK;
             break;
         }
 
+        carplay_app_iap2_info_t idle_info;
+        bool reconnect = carplay_app_iap2_info(&idle_info) == RTCP_OK &&
+                         !idle_info.airplay_connected && !s_tunnel.link_up;
+        result = rtcp_bt_lubanlite_reconnect_tick(reconnect);
+        if (result != RTCP_OK) break;
         int fd = -1;
-        result = rtcp_bt_lubanlite_rfcomm_accept(1, &fd);
+        result = rtcp_bt_lubanlite_rfcomm_accept_timeout(1, &fd, 500);
+        if (result == RTCP_ETIMEDOUT) continue;
         if (result != RTCP_OK) {
             if (s_serve) IAP2_LOG("accept stopped rc=%d", result);
             break;
         }
+        /* The accepted DLC now owns the ACL lifecycle. Drop only the
+         * reconnect reference, keeping this connection for normal iAP2. */
+        (void)rtcp_bt_lubanlite_reconnect_tick(false);
 
         link->fd = fd;
         link->link_up = true;
@@ -444,6 +454,7 @@ done:
     /* Also covers stop arriving during bt_enable()/SDP registration: do
      * not leave a freshly initialized controller discoverable after stop. */
     rtcp_bt_lubanlite_disconnect();
+    (void)rtcp_bt_lubanlite_reconnect_tick(false);
     link->fd = -1;
     link->link_up = false;
     link_reset_progress(link);

@@ -97,6 +97,7 @@
  * same 241-byte layout in gap_run_set_eir_data().  A 240-byte-only command
  * is answered with status 0x12 (Invalid HCI Command Parameters). */
 #define RTCP_BT_HCI_OP_WRITE_EIR BT_OP(BT_OGF_BASEBAND, 0x0052)
+#define RTCP_BT_HCI_OP_READ_SCAN_ENABLE BT_OP(BT_OGF_BASEBAND, 0x0019)
 #define RTCP_BT_EIR_SIZE 240U
 #define RTCP_BT_EIR_PARAM_SIZE (1U + RTCP_BT_EIR_SIZE)
 #define RTCP_BT_EIR_TYPE_UUID128_COMPLETE 0x07
@@ -264,12 +265,19 @@ static bool s_bootstrap_peer_valid;
 static unsigned s_bootstrap_generation;
 static rtcp_bt_pairing_status_t s_pair;
 static uint32_t s_pair_sequence;
+/* Only the iAP2 owner touches the outgoing connection reference. Bluetooth
+ * callbacks publish connection state through the host's get_info API. */
+static struct bt_conn *s_reconnect_conn;
+static bool s_reconnect_secure;
+static uint32_t s_reconnect_started, s_reconnect_next, s_radio_checked;
+static unsigned s_reconnect_cursor;
 
 static void count_bond(const struct bt_br_bond_info *info, void *data)
 {
     (void)info;
     ++*(unsigned *)data;
 }
+static void count_active_acl(struct bt_conn *conn, void *user);
 
 void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out)
 {
@@ -284,6 +292,8 @@ void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out)
     out->bond_count = 0;
     out->bond_capacity = CONFIG_BT_MAX_PAIRED;
     if (s_enabled) bt_br_foreach_bond(count_bond, &out->bond_count);
+    out->active_acls = 0;
+    if (s_enabled) bt_conn_foreach(BT_CONN_TYPE_BR, count_active_acl, &out->active_acls);
 }
 
 static void pairing_clear(struct bt_conn *conn)
@@ -784,10 +794,22 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
     return RTCP_OK;
 }
 
+static enum bt_br_conn_req_rsp ready_connection_request(const bt_addr_t *peer, uint32_t cod)
+{
+    RTCP_LOGI(BT_TAG, "incoming Classic page peer=%02x:%02x:%02x:%02x:%02x:%02x cod=%06x",
+              peer->val[5], peer->val[4], peer->val[3], peer->val[2], peer->val[1], peer->val[0],
+              (unsigned)cod);
+    if (s_stop) return BT_BR_CONN_REQ_REJECT_NO_RESOURCES;
+#if defined(CONFIG_BT_ACCEPT_CONN_AS_CENTRAL)
+    return BT_BR_CONN_REQ_ACCEPT_CENTRAL;
+#else
+    return BT_BR_CONN_REQ_ACCEPT_PERIPHERAL;
+#endif
+}
+
 static int publish_service(void)
 {
-    s_stop = false;
-    int err = bt_br_set_connectable(true, NULL);
+    int err = bt_br_set_connectable(true, ready_connection_request);
     if (err != 0 && err != -EALREADY) { s_stop = true; return RTCP_EIO; }
     err = bt_br_set_discoverable(true, false);
     if (err != 0 && err != -EALREADY) {
@@ -795,6 +817,174 @@ static int publish_service(void)
         (void)bt_br_set_connectable(false, NULL);
         return RTCP_EIO;
     }
+    return RTCP_OK;
+}
+
+static int read_scan_enable(void)
+{
+    struct net_buf *response = NULL;
+    int error = bt_hci_cmd_send_sync(RTCP_BT_HCI_OP_READ_SCAN_ENABLE, NULL, &response);
+    if (!error) {
+        if (!response || response->len < 2 || response->data[0] != 0)
+            error = -EIO;
+        else {
+            rt_base_t flags = rt_hw_interrupt_disable();
+            s_pair.scan_enable = response->data[1];
+            s_pair.scan_known = true;
+            rt_hw_interrupt_enable(flags);
+        }
+    }
+    if (response) net_buf_unref(response);
+    rt_base_t flags = rt_hw_interrupt_disable();
+    s_pair.radio_error = error;
+    if (error) s_pair.scan_known = false;
+    rt_hw_interrupt_enable(flags);
+    return error;
+}
+
+static int verify_ready_radio(void)
+{
+    int error = read_scan_enable();
+    if (s_stop) return RTCP_ESTATE;
+    if (!error && s_pair.scan_enable != (BT_BREDR_SCAN_PAGE | BT_BREDR_SCAN_INQUIRY)) {
+        RTCP_LOGW(BT_TAG, "READY controller scan=0x%02x; restoring page/inquiry scan",
+                  s_pair.scan_enable);
+        /* Force the public API through an off/on transition: host flags
+         * alone can otherwise return EALREADY while the controller is off. */
+        error = bt_br_set_connectable(false, NULL);
+        if (!error || error == -EALREADY) error = publish_service();
+        if (!error) error = read_scan_enable();
+        if (!error && s_pair.scan_enable != 3) error = -EIO;
+    }
+    rt_base_t flags = rt_hw_interrupt_disable();
+    s_pair.radio_error = error;
+    rt_hw_interrupt_enable(flags);
+    if (error) RTCP_LOGE(BT_TAG, "READY radio verification failed rc=%d", error);
+    return error ? RTCP_EIO : RTCP_OK;
+}
+
+struct reconnect_bonds {
+    bt_addr_t peers[CONFIG_BT_MAX_PAIRED];
+    unsigned count;
+};
+static void collect_reconnect_bond(const struct bt_br_bond_info *info, void *user)
+{
+    struct reconnect_bonds *bonds = user;
+    if (bonds->count < CONFIG_BT_MAX_PAIRED) bonds->peers[bonds->count++] = info->addr;
+}
+static void count_active_acl(struct bt_conn *conn, void *user)
+{
+    struct bt_conn_info info;
+    if (!bt_conn_get_info(conn, &info) && info.state != BT_CONN_STATE_DISCONNECTED)
+        ++*(unsigned *)user;
+}
+static void release_reconnect(bool cancel)
+{
+    if (!s_reconnect_conn) return;
+    bool accepted = false;
+    const bt_addr_t *peer = bt_conn_get_dst_br(s_reconnect_conn);
+    if (rtcp_bt_lubanlite_link_up() && peer) {
+        rt_base_t flags = rt_hw_interrupt_disable();
+        accepted = s_bootstrap_peer_valid && !memcmp(peer, &s_bootstrap_peer, sizeof(*peer));
+        rt_hw_interrupt_enable(flags);
+    }
+    struct bt_conn_info info;
+    if (cancel && !accepted &&
+        !bt_conn_get_info(s_reconnect_conn, &info) &&
+        info.state != BT_CONN_STATE_DISCONNECTED &&
+        info.state != BT_CONN_STATE_DISCONNECTING) {
+        /* Only retain central connections created by this owner. Incoming
+         * ACLs and established RFCOMM sessions never belong to this timer. */
+        int error = bt_conn_disconnect(s_reconnect_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+        RTCP_LOGI(BT_TAG, "reconnect pending ACL cancelled rc=%d", error);
+    }
+    bt_conn_unref(s_reconnect_conn);
+    s_reconnect_conn = NULL;
+    s_reconnect_secure = false;
+}
+
+int rtcp_bt_lubanlite_reconnect_tick(bool allowed)
+{
+    uint32_t now = rt_tick_get_millisecond();
+    if (!allowed || s_stop || !s_listening || rtcp_bt_lubanlite_link_up()) {
+        release_reconnect(true);
+        /* A later return to READY gets a short quiet period for the phone
+         * to reconnect first. Never page again during the Wi-Fi handoff. */
+        s_reconnect_next = now + 2000U;
+        return RTCP_OK;
+    }
+    if (s_reconnect_conn) {
+        struct bt_conn_info info;
+        if (bt_conn_get_info(s_reconnect_conn, &info) ||
+            info.state == BT_CONN_STATE_DISCONNECTED) {
+            release_reconnect(false);
+        } else if ((uint32_t)(now - s_reconnect_started) >= 20000U) {
+            RTCP_LOGW(BT_TAG, "reconnect timed out before RFCOMM; keeping saved bond");
+            release_reconnect(true);
+        } else if (info.state == BT_CONN_STATE_CONNECTED && !s_reconnect_secure) {
+            s_reconnect_secure = true;
+            /* L2 requests encryption, not force-pairing. The SDK reuses the
+             * saved key and preserves a stronger authenticated key. */
+            int error = bt_conn_set_security(s_reconnect_conn, BT_SECURITY_L2);
+            RTCP_LOGI(BT_TAG, "reconnect ACL established; security request rc=%d; awaiting phone RFCOMM", error);
+            if (error) release_reconnect(true);
+        }
+        return RTCP_OK;
+    }
+    unsigned active = 0;
+    bt_conn_foreach(BT_CONN_TYPE_BR, count_active_acl, &active);
+    if (active || s_pair.kind) return RTCP_OK;
+    if ((uint32_t)(now - s_radio_checked) >= 10000U) {
+        s_radio_checked = now;
+        if (verify_ready_radio() != RTCP_OK) return RTCP_EIO;
+    }
+    if ((int32_t)(now - s_reconnect_next) < 0) return RTCP_OK;
+    if (s_stop) return RTCP_OK;
+    struct reconnect_bonds bonds = {0};
+    bt_br_foreach_bond(collect_reconnect_bond, &bonds);
+    s_reconnect_next = now + 30000U;
+    if (!bonds.count) return RTCP_OK;
+    bt_addr_t peer = bonds.peers[s_reconnect_cursor++ % bonds.count];
+    RTCP_LOGI(BT_TAG, "reconnect paging bonded peer=%02x:%02x:%02x:%02x:%02x:%02x scan=0x%02x",
+              peer.val[5], peer.val[4], peer.val[3], peer.val[2], peer.val[1], peer.val[0],
+              s_pair.scan_enable);
+    rt_base_t flags = rt_hw_interrupt_disable();
+    ++s_pair.reconnect_attempts;
+    rt_hw_interrupt_enable(flags);
+    struct bt_conn *conn = bt_conn_create_br(&peer, BT_BR_CONN_PARAM_DEFAULT);
+    if (!conn) {
+        RTCP_LOGW(BT_TAG, "reconnect create ACL failed; retry in 30s");
+        return RTCP_OK;
+    }
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) || info.role != BT_CONN_ROLE_CENTRAL) {
+        /* An incoming connection won the race with create_br(). */
+        bt_conn_unref(conn);
+        return RTCP_OK;
+    }
+    s_reconnect_conn = conn;
+    s_reconnect_started = now;
+    s_reconnect_secure = false;
+    return RTCP_OK;
+}
+
+static int publish_ready_service(void)
+{
+    s_stop = false;
+    int result = publish_service();
+    if (result == RTCP_OK) result = verify_ready_radio();
+    if (result != RTCP_OK) {
+        s_stop = true;
+        (void)bt_br_set_connectable(false, NULL);
+        return result;
+    }
+    uint8_t address[6];
+    if (rtcp_bt_lubanlite_local_bdaddr(address) == RTCP_OK)
+        RTCP_LOGI(BT_TAG, "READY radio address=%02x:%02x:%02x:%02x:%02x:%02x scan=0x%02x (page+inquiry)",
+                  address[0], address[1], address[2], address[3], address[4], address[5], s_pair.scan_enable);
+    s_radio_checked = rt_tick_get_millisecond();
+    s_reconnect_next = s_radio_checked + 2000U;
+    RTCP_LOGI(BT_TAG, "bond reconnect enabled: first page in 2s, retry 30s; Wi-Fi handoff pauses paging");
     return RTCP_OK;
 }
 
@@ -808,7 +998,7 @@ int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
         /* Re-arm: a previous disconnect() set s_stop, and the application
          * restarting the service expects accept() to block again. */
         *out_channel = s_server.channel;
-        return publish_service();
+        return publish_ready_service();
     }
 
     uint8_t uuid[16];
@@ -851,19 +1041,19 @@ int rtcp_bt_lubanlite_rfcomm_listen(uint8_t channel, const char *name,
     *out_channel = s_server.channel;
     RTCP_LOGI(BT_TAG, "RFCOMM listening on channel %u (uuid %s)",
               s_server.channel, have_uuid ? uuid128 : "SPP");
-    return publish_service();
+    return publish_ready_service();
 }
 
-int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd)
+int rtcp_bt_lubanlite_rfcomm_accept_timeout(int lfd, int *fd, int timeout_ms)
 {
     if (lfd != 1 || fd == NULL) return RTCP_EINVAL;
     if (!s_listening) return RTCP_ESTATE;
 
-    for (;;) {
+    {
         rt_err_t err = rt_sem_take(&s_links[0].accept_sem,
-                                   rt_tick_from_millisecond(500));
+                                   timeout_ms > 0 ? rt_tick_from_millisecond(timeout_ms) : 0);
         if (s_stop) return RTCP_EIO;
-        if (err != RT_EOK) continue;
+        if (err != RT_EOK) return RTCP_ETIMEDOUT;
 
         for (size_t i = 0U; i < BT_LINK_MAX; ++i) {
             struct bt_link *link = &s_links[i];
@@ -883,6 +1073,15 @@ int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd)
             }
         }
     }
+    return RTCP_ETIMEDOUT;
+}
+
+int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd)
+{
+    int result;
+    do { result = rtcp_bt_lubanlite_rfcomm_accept_timeout(lfd, fd, 500); }
+    while (result == RTCP_ETIMEDOUT);
+    return result;
 }
 
 static int link_send_chunk(struct bt_link *link, const uint8_t *buf, size_t len)
@@ -1157,6 +1356,10 @@ int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd)
     (void)fd;
     return RTCP_ENOTSUP;
 }
+int rtcp_bt_lubanlite_rfcomm_accept_timeout(int lfd, int *fd, int timeout_ms)
+{ (void)lfd; (void)fd; (void)timeout_ms; return RTCP_ENOTSUP; }
+int rtcp_bt_lubanlite_reconnect_tick(bool allowed)
+{ (void)allowed; return RTCP_ENOTSUP; }
 
 int rtcp_bt_lubanlite_send(int fd, const void *buf, size_t len)
 {

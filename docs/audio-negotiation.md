@@ -2,7 +2,7 @@
 
 最新实机反馈仍无音频 SETUP。后续参考实现逐项复核、当前／永久资源归属解析、
 请求状态追踪及下一轮验收见 [参考实现复核](audio-routing-reference-review.md)。
-本页下方 SHA 为此前固件，iOS 27.3 的 timing 复验与 Features 对照镜像见 SDK 构建文档第 15 节。
+本页下方 SHA 为此前固件，iOS 27.3 无线 explicit 已确认，当前 SETUP 提议采集镜像见 SDK 构建文档第 16 节。
 
 本轮基线为 main `bffc3be`。实机反馈仍为 `entity=1`、`streams=0`、
 `datagrams=0`、`packets=0`，连接日志只有110/screen和130/iAP2。

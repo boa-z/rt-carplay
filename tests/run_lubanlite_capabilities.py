@@ -33,6 +33,14 @@ info = plistlib.dumps({
         for i in range(9)
     ],
 }, fmt=plistlib.FMT_BINARY)
+offer = plistlib.dumps({
+    "features": ["iAPChannel", "viewAreas", "mainBuffered", "bad\nfeature", "x" * 80, 7]
+                + [f"feature{i}" for i in range(6, 20)],
+    "osVersion": "27.3", "sourceVersion": "950.7.1\nINJECTED",
+    "timingProtocol": "NTP", "ekey": b"SECRET_MUST_NOT_LOG",
+    "deviceID": "DEVICE_MUST_NOT_LOG",
+}, fmt=plistlib.FMT_BINARY)
+invalid_offer = plistlib.dumps({"features": "not-an-array"}, fmt=plistlib.FMT_BINARY)
 txt = b""
 for entry in (b"model=ArtInChip", b"features=0x5657aee2,0x61"):
     txt += bytes([len(entry)]) + entry
@@ -82,10 +90,13 @@ static void capture(const char *tag, const char *fmt, ...)
 typedef struct { struct { const uint8_t *info_plist; size_t info_plist_len; } config; } airplay_rtsp_session_t;
 '''
 source += function("core/airplay/airplay_rtsp_session.c", "static void log_info_audio")
+source += function("core/airplay/airplay_rtsp_session.c", "static void log_setup_offer")
 source += function("examples/rtthread_app/carplay_app.c", "static bool announcement_features_match")
 source += function("examples/rtthread_app/carplay_app.c", "static uint64_t capability_features")
 source += "\nstatic const uint8_t info[] = {" + ",".join(map(str, info)) + "};\n"
 source += "static const uint8_t txt[] = {" + ",".join(map(str, txt)) + "};\n"
+source += "static const uint8_t offer[] = {" + ",".join(map(str, offer)) + "};\n"
+source += "static const uint8_t invalid_offer[] = {" + ",".join(map(str, invalid_offer)) + "};\n"
 source += r'''
 /* The writer consumes decoder availability through this seam. Exercise
  * video-only, PCM-only and compiled-compressed offers, without a codec change. */
@@ -151,8 +162,28 @@ int main(int argc, char **argv)
     uint8_t duplicate[2*sizeof(txt)];
     memcpy(duplicate, txt, sizeof(txt)); memcpy(duplicate+sizeof(txt), txt, sizeof(txt));
     assert(!announcement_features_match(info, sizeof(info), duplicate, sizeof(duplicate)));
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    assert(airplay_bplist_open(offer, sizeof(offer), &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    log_setup_offer(&doc, root);
+    assert(strstr(logs, "setup_offer feature_count=20 limit=16"));
+    assert(strstr(logs, "setup_offer index=2 name=mainBuffered"));
+    assert(strstr(logs, "setup_offer index=3 name=bad?feature"));
+    assert(strstr(logs, "setup_offer index=4 name=invalid_or_overlong"));
+    assert(strstr(logs, "setup_offer index=5 name=invalid_or_overlong"));
+    assert(strstr(logs, "setup_offer index=15 name=feature15"));
+    assert(!strstr(logs, "setup_offer index=16"));
+    assert(strstr(logs, "setup_peer osVersion=27.3"));
+    assert(strstr(logs, "setup_peer sourceVersion=950.7.1?INJECTED"));
+    assert(strstr(logs, "setup_peer timingProtocol=NTP"));
+    assert(!strstr(logs, "SECRET_MUST_NOT_LOG") && !strstr(logs, "DEVICE_MUST_NOT_LOG"));
+    assert(airplay_bplist_open(invalid_offer, sizeof(invalid_offer), &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    log_setup_offer(&doc, root);
+    assert(strstr(logs, "setup_offer features=missing_or_invalid"));
     write_profiles(argv[1]);
-    puts("Actual SDK printf + actual capability trace: 64-bit values, following counts, Bluetooth IDs and encoded TXT/plist match passed");
+    puts("Actual SDK printf + actual capability trace: 64-bit values, counts, Bluetooth IDs, TXT/plist and bounded/sanitized SETUP offers passed");
 }
 '''
 with tempfile.TemporaryDirectory(prefix="rtcp-capabilities-") as directory:

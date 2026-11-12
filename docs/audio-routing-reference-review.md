@@ -1,5 +1,49 @@
 # 无线音乐未建立音频流：参考实现逐项复核
 
+## 无线 explicit 已确认：采集初始 SETUP 的实际提议
+
+用户补充无线 WPA2 握手后的会话日志：`capabilities_profile=explicit`、
+`features=0x44540280,0x61`、`info_match=1`，会话 bluetoothID 正确且文档为
+4278 字节。结合之前仍为零的音频状态，精简掩码的尝试没有解除音频流建立
+阻塞。此前出现的 `wired mode` 只是另一段启动日志，不能再用模式或旧掩码
+未生效解释本次无线结果。已知 iOS 为 27.3，无需重复询问系统版本。
+
+继续复核 MFi-SAP 的公钥拼接次序、AES 派生/响应编码，以及初始 SETUP 和
+RECORD 的响应，未找到足以定因的新差异。catplay 远端 HEAD 已到
+`471b0114ad2344cca9cb1d775e318a6ab175547a`，相比先前 `66340ad` 仅修改
+发送端 gadget 的地址选择，相关接收端响应路径未改变。没有新的确定修复。
+
+当前 RTSP trace 只显示初始 SETUP 正文字节数，并把接收端的响应写成
+`enabled_features=iAPChannel,viewAreas`。这不是手机原始提议，不能由它推断
+iOS 没有提出其他功能，或声称手机必须启用 type103。为补齐这项证据，本轮
+仅增加初始 SETUP 的有界结构化日志：
+
+```text
+setup_offer feature_count=... limit=16
+setup_offer index=0 name=...
+setup_peer osVersion=...
+setup_peer sourceVersion=...
+setup_peer timingProtocol=...
+setup=initial ... enabled_features=iAPChannel,viewAreas
+```
+
+features 最多打印 16 项，每项最多 63 字节，非 token 字符替换为 `?`；
+非字符串及超长项显示 invalid_or_overlong。版本和 timingProtocol 仅在原始
+请求有可读取的字符串字段时显示，控制字符替换为 `?`。缺失/不合类型的
+features 显示 missing_or_invalid，不改变原有请求的接受/拒绝结果。
+日志不输出完整 SETUP、设备标识或加密字段。只在初始 SETUP 未完成的请求
+阶段输出，后续音频/视频流 SETUP 仍走原来独立的候选日志。
+
+这仅采集功能提议，未启用 mainBuffered、未改 enabledFeatures、能力文档、
+模式归属或音频后端。即使看到 mainBuffered，也只证明手机提出了该功能；
+还需和同一 iPhone 在参考接收端上的提议/响应/SETUP 比较，不能把“提出”
+当作“必须启用”，更不能用假的 type103 处理器回应。
+
+SDK 小 printf 回归直接编译实际日志函数，覆盖 20 项截断到 16、换行净化、
+非字符串/超长项、格式错误的 features、缺失版本字段，以及密钥和设备 ID
+未出现在输出中。55 项 Host 测试、boundary、SDK 集成和 D213 构建通过。
+本轮未连接实机。定位镜像及 SHA 见 SDK 构建文档第 16 节。
+
 ## iOS 27.3 实测：timing 正常，精简 Features 的单变量对照
 
 用户验证 timing 修正固件：`request_tx/response_rx` 从 34/34 增长至 41/41，

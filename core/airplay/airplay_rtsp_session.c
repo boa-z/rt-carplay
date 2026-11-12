@@ -383,6 +383,51 @@ static airplay_rtsp_session_result_t handle_teardown(
                            response, response_capacity, response_len);
 }
 
+/* Only public negotiation tokens, never the SETUP body (which may contain
+ * encryption material). Bound both item count and token length for UART. */
+static void log_setup_offer(const airplay_bplist_doc_t *doc,
+                             airplay_bplist_object_t root)
+{
+    airplay_bplist_object_t array, object;
+    airplay_bplist_type_t type;
+    uint64_t count = 0;
+    if (airplay_bplist_dict_get(doc, root, "features", &array) == AIRPLAY_BPLIST_OK &&
+        airplay_bplist_get_type(doc, array, &type, &count) == AIRPLAY_BPLIST_OK &&
+        type == AIRPLAY_BPLIST_ARRAY) {
+        RTCP_LOGI(TAG, "setup_offer feature_count=%u limit=16",
+                  (unsigned)(count > UINT32_MAX ? UINT32_MAX : count));
+        for (uint64_t i = 0; i < count && i < 16; ++i) {
+            char token[64];
+            size_t length = 0;
+            if (airplay_bplist_array_get(doc, array, i, &object) != AIRPLAY_BPLIST_OK ||
+                airplay_bplist_get_string(doc, object, token, sizeof(token), &length) != AIRPLAY_BPLIST_OK) {
+                RTCP_LOGI(TAG, "setup_offer index=%u name=invalid_or_overlong", (unsigned)i);
+                continue;
+            }
+            for (size_t k = 0; k < length; ++k) {
+                unsigned char c = (unsigned char)token[k];
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                      (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) token[k] = '?';
+            }
+            RTCP_LOGI(TAG, "setup_offer index=%u name=%s", (unsigned)i, token);
+        }
+    } else {
+        RTCP_LOGI(TAG, "setup_offer features=missing_or_invalid");
+    }
+    const char *keys[] = {"osVersion", "sourceVersion", "timingProtocol"};
+    for (unsigned i = 0; i < 3; ++i) {
+        char token[64];
+        size_t length = 0;
+        if (airplay_bplist_dict_get(doc, root, keys[i], &object) != AIRPLAY_BPLIST_OK ||
+            airplay_bplist_get_string(doc, object, token, sizeof(token), &length) != AIRPLAY_BPLIST_OK) continue;
+        for (size_t k = 0; k < length; ++k) {
+            unsigned char c = (unsigned char)token[k];
+            if (c < 0x20 || c > 0x7e) token[k] = '?';
+        }
+        RTCP_LOGI(TAG, "setup_peer %s=%s", keys[i], token);
+    }
+}
+
 static airplay_rtsp_session_result_t handle_setup(
     airplay_rtsp_session_t *session,
     const airplay_rtsp_request_t *request,
@@ -414,6 +459,7 @@ static airplay_rtsp_session_result_t handle_setup(
     airplay_bplist_result_t lookup = airplay_bplist_dict_get(
         &doc, root, "streams", &streams);
     if (lookup == AIRPLAY_BPLIST_NOT_FOUND) {
+        if (!session->initial_setup_complete) log_setup_offer(&doc, root);
         uint64_t peer_timing_port = 0U;
         airplay_bplist_result_t timing_lookup = airplay_bplist_dict_get(
             &doc, root, "timingPort", &timing_port_object);

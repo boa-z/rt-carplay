@@ -43,3 +43,7 @@ size_t airplay_txt_encode(const airplay_txt_record_t *records,
                           size_t record_count,
                           uint8_t *output,
                           size_t capacity);
+
+/* DNS-SD features use low/high 32-bit hex words, not a single 64-bit word.
+ * Pass the same effective mask used to build /info. Capacity includes NUL. */
+bool airplay_txt_format_features(uint64_t features, char *output, size_t capacity);

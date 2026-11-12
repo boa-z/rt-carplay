@@ -592,12 +592,7 @@ static uint32_t emit_root(ip_writer_t *w,
     values[0] = ip_emit_string(w, config->source_version != NULL
                                       ? config->source_version
                                       : AIRPLAY_INFO_DEFAULT_SOURCE_VERSION);
-    uint64_t features = config->features;
-    if (features == 0U) {
-        features = config->audio_output ? AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO
-                                        : AIRPLAY_INFO_DEFAULT_FEATURES;
-    }
-    values[1] = ip_emit_int(w, (int64_t)features);
+    values[1] = ip_emit_int(w, (int64_t)airplay_info_plist_features(config));
     values[2] = ip_emit_int(w, config->status_flags != 0U
                                    ? config->status_flags
                                    : AIRPLAY_INFO_DEFAULT_STATUS_FLAGS);
@@ -688,4 +683,11 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
     RTCP_LOGD(TAG, "built /info plist bytes=%u objects=%u",
               (unsigned)writer.used, (unsigned)writer.next_id);
     return true;
+}
+
+uint64_t airplay_info_plist_features(const airplay_info_plist_config_t *config)
+{
+    if (config && config->features) return config->features;
+    return config && config->audio_output ? AIRPLAY_INFO_DEFAULT_FEATURES_AUDIO
+                                         : AIRPLAY_INFO_DEFAULT_FEATURES;
 }

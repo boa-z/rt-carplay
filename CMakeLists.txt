@@ -92,7 +92,7 @@ if(RTCP_BUILD_TESTS)
     target_link_libraries(rtcp_test_support PUBLIC rtcp_core)
 
     set(RTCP_TESTS
-        test_audio_engine test_audio_input test_audio_sink test_pairing_files
+        test_rtthread_clock test_audio_engine test_audio_input test_audio_sink test_pairing_files
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
         test_iap2_parameter test_iap2_session test_iap2_stream
@@ -140,7 +140,11 @@ if(RTCP_BUILD_TESTS)
         endif()
         if(name STREQUAL "test_audio_sink" OR name STREQUAL "test_audio_input")
             target_sources(${name} PRIVATE tests/support/lubanlite_audio/rtthread_host.c)
-            target_include_directories(${name} PRIVATE tests/support/lubanlite_audio port/luban-lite/include)
+            target_include_directories(${name} PRIVATE tests/support/lubanlite_audio port/luban-lite/include port/rtthread/include)
+            target_link_libraries(${name} PRIVATE Threads::Threads)
+        endif()
+        if(name STREQUAL "test_rtthread_clock")
+            target_include_directories(${name} PRIVATE tests/support/rtthread_clock port/rtthread/include)
             target_link_libraries(${name} PRIVATE Threads::Threads)
         endif()
         if(name STREQUAL "test_audio_input")

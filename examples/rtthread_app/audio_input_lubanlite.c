@@ -5,6 +5,7 @@
 #include "audio_voice.h"
 #include "mbedtls/platform_util.h"
 #include <rtthread.h>
+#include "rtcp_rtthread.h"
 #include <rtdevice.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -26,7 +27,7 @@ typedef struct { uint64_t at; int16_t pcm[480]; } reference_t;
 static reference_t references[32];
 static unsigned reference_head;
 static rt_mutex_t reference_lock;
-static uint64_t input_now_us(void) { return (uint64_t)rt_tick_get()*1000000/RT_TICK_PER_SECOND; }
+static uint64_t input_now_us(void) { return rtcp_os_rtthread.now_us(); }
 void carplay_audio_input_reference(const int16_t *stereo,size_t frames)
 {
     if(!stereo || frames!=480 || !atomic_load(&input.alive) || !reference_lock) return;

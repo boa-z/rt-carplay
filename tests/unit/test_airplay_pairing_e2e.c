@@ -1449,6 +1449,9 @@ static void run_audio_stream(airplay_rtsp_server_t *server, client_t *client,
     assert(audio_packet_format.channels == 2U);
     assert(audio_packet_format.stream_slot_valid && audio_packet_format.stream_slot==(media ? 7U : 0U));
     assert(audio_packet_timestamp == 4800U);
+    airplay_rtsp_audio_stats_t audio_stats;
+    airplay_rtsp_server_get_audio_stats(server,&audio_stats);
+    assert(audio_stats.active_streams>=1 && audio_stats.datagrams>=1 && !audio_stats.auth_failures);
 
     rtcp_net_linux.close(fd);
     mbedtls_platform_zeroize(output_key, sizeof(output_key));

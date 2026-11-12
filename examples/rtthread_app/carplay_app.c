@@ -198,6 +198,8 @@ typedef struct {
     void *screen_context;
 
     airplay_screen_server_stats_t screen_stats;
+    airplay_rtsp_audio_stats_t audio_stats;
+    airplay_audio_modes_t audio_modes;
 #if defined(RTCARPLAY_VIDEO)
     uint32_t perf_ms;
     airplay_screen_server_stats_t perf_screen;
@@ -427,7 +429,16 @@ static void on_audio_input_stop(void *context)
 #endif
 
 static void on_audio_modes(const airplay_audio_modes_t *modes,void *context)
-{ (void)context; carplay_audio_sink_modes(modes); }
+{
+    app_state_t *app=context;
+    if (rt_mutex_take(app->lock,RT_WAITING_FOREVER)==RT_EOK) {
+        if(modes->has_main_audio) {app->audio_modes.has_main_audio=true;app->audio_modes.main_audio_entity=modes->main_audio_entity;}
+        if(modes->has_call) {app->audio_modes.has_call=true;app->audio_modes.call_active=modes->call_active;}
+        if(modes->has_speech) {app->audio_modes.has_speech=true;app->audio_modes.speech_mode=modes->speech_mode;}
+        (void)rt_mutex_release(app->lock);
+    }
+    carplay_audio_sink_modes(modes);
+}
 static bool on_audio_duck(bool ducked,float db,uint32_t duration,void *context)
 { (void)context; return carplay_audio_sink_duck(ducked,db,duration); }
 
@@ -779,6 +790,7 @@ static void poll_thread(void *argument)
         if ((uint32_t)(sample_ms - app->screen_sample_ms) >= 100U &&
             rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK) {
             airplay_rtsp_server_get_screen_stats(app->server, &app->screen_stats);
+            airplay_rtsp_server_get_audio_stats(app->server, &app->audio_stats);
             app->screen_sample_ms = sample_ms;
             (void)rt_mutex_release(app->lock);
         }
@@ -959,8 +971,8 @@ static int build_announcement_data(app_state_t *app)
     info.max_fps = 30U;
 #if defined(RTCARPLAY_AUDIO)
     if (app->audio_started) {
-        /* Publish the PCM capability arrays only when a sink can play them,
-         * so a controller never negotiates an undecodable audio format. */
+        /* The sink can decode the compiled formats. Discovery must publish
+         * this same effective capability mask, not its video-only default. */
         info.audio_output = true;
         info.audio_compressed = true;
 #if defined(RTCARPLAY_MICROPHONE)
@@ -979,9 +991,15 @@ static int build_announcement_data(app_state_t *app)
 
     hex_encode(app->keypair.public_key, AIRPLAY_ED25519_PUBLIC_KEY_BYTES,
                app->public_key_hex);
+    char feature_words[32];
+    if (!airplay_txt_format_features(airplay_info_plist_features(&info), feature_words, sizeof(feature_words)))
+        return RTCP_EIO;
+    APP_LOG("capabilities features=%s audio_output=%u compressed=%u", feature_words,
+            info.audio_output ? 1U : 0U, info.audio_compressed ? 1U : 0U);
     airplay_txt_record_t records[AIRPLAY_TXT_MAX_RECORDS];
     airplay_txt_config_t txt;
     memset(&txt, 0, sizeof(txt));
+    txt.features = feature_words;
     txt.device_id = app->device_id;
     txt.model = app->model;
     txt.source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION;
@@ -1455,6 +1473,15 @@ static int cmd_carplay_status(int argc, char **argv)
                "bytes, %u write errors\n",
                carplay_audio_sink_is_running() ? "ready" : "stopped", packets,
                replays, dropped, errors);
+    airplay_rtsp_audio_stats_t audio={0};airplay_audio_modes_t modes={0};
+    if(s_app.lock && rt_mutex_take(s_app.lock,RT_WAITING_FOREVER)==RT_EOK) {
+        audio=s_app.audio_stats;modes=s_app.audio_modes;(void)rt_mutex_release(s_app.lock);
+    }
+    rt_kprintf("carplay audio transport: streams=%u datagrams=%u auth_failures=%u\n",
+               audio.active_streams,audio.datagrams,audio.auth_failures);
+    rt_kprintf("carplay audio modes: entity=%s%u call=%u speech=%d\n",
+               modes.has_main_audio ? "" : "unknown/",modes.main_audio_entity,
+               modes.call_active ? 1U : 0U,modes.has_speech ? modes.speech_mode : -1);
     int volume = carplay_audio_sink_volume_percent();
     if (volume >= 0) {
         rt_kprintf("carplay audio speaker volume: %d%%\n", volume);

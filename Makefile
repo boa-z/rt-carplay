@@ -5,7 +5,7 @@ CFLAGS   ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -MMD -MP
 CPPFLAGS += -Iinclude -Icore -Icore/mfi \
             -Icore/iap2/include -Icore/airplay/include -Icore/crypto/include \
             -Icore/media/include -Icore/input/include -Icore/discovery/include \
-            -Icore/usb/include -Icore/audio/include \
+            -Icore/usb/include -Icore/audio/include -Iport/rtthread/include \
             -Ithird_party/ed25519 -Iport/linux/include -Itests/support
 AUDIO_CODECS ?= 1
 ifeq ($(AUDIO_CODECS),1)
@@ -37,7 +37,7 @@ PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
 PORT_LINUX_OBJS := $(PORT_LINUX_SRCS:%.c=$(BUILD)/%.o)
 PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
 
-TESTS := test_audio_input test_audio_sink test_audio_engine test_mfi2c test_pairing_files \
+TESTS := test_rtthread_clock test_audio_input test_audio_sink test_audio_engine test_mfi2c test_pairing_files \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session test_iap2_stream \
          test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
@@ -231,3 +231,10 @@ $(BUILD)/test_audio_input: tests/unit/test_audio_input.c examples/rtthread_app/a
 
 # Track header and included platform-source dependencies for incremental tests.
 -include $(wildcard $(BUILD)/core/*/*.d $(BUILD)/port/*/*.d $(BUILD)/tests/support/*.d $(BUILD)/*.d)
+
+$(BUILD)/test_rtthread_clock: tests/unit/test_rtthread_clock.c port/rtthread/rtcp_os_rtthread.c $(LIB) $(MBEDTLS_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/rtthread_clock -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
+
+.PHONY: check-audio-discovery
+check-audio-discovery: $(SIM)
+	python3 tests/run_audio_discovery.py $(SIM)

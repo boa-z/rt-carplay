@@ -4,6 +4,9 @@ Branch: `main` (audio changes integrated). Hardware baseline: wireless v30 video
 Bluetooth handoff were confirmed by the user. Audio changes on this branch
 have **not** been tested on D213 hardware.
 
+See [audio routing repair](audio-routing.md) for the subsequent discovery-mask
+and startup-clock-wrap fixes, the current image checksum and board diagnostics.
+
 ## Findings from actual code and open source references
 
 * `/info` offered only LPCM and omitted `102/media` entirely, whereas DiPlay
@@ -148,7 +151,7 @@ make check-lubanlite-demo check-lubanlite-handoff SDK_ROOT=../luban-lite-jc-carp
 ./check-boundary.sh
 ```
 
-CMake and Make each cover 54 test programs. CMake sanitizer mode instruments
+CMake and Make each cover 55 test programs. CMake sanitizer mode instruments
 core, tests and the audio dependency libraries with AddressSanitizer; core and
 tests also use UndefinedBehaviorSanitizer. Vendored fixed-point codec/Ed25519
 arithmetic retains intentional signed wrapping/shifts and is excluded from UB
@@ -246,7 +249,7 @@ additional license terms require compatibility/distribution review for this
 GPL project. There is no private Apple SDK, key, or authentication material in
 this branch. LPCM/Opus voice and AAC-LC media are the implemented paths.
 
-## Recorded SDK build results (2026-11-11)
+## Initial SDK build results (2026-11-11, before routing repair)
 
 Both configurations completed `scons -j8` without compiler warnings. GNU size
 below describes the **entire linked firmware**, not audio-only allocation:

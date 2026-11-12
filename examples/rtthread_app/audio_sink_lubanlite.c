@@ -6,6 +6,7 @@
 #include "audio_sink_lubanlite.h"
 
 #include <rtthread.h>
+#include "rtcp_rtthread.h"
 #include <rtdevice.h>
 #include <drivers/audio.h>
 
@@ -191,7 +192,7 @@ static void stop_device(audio_sink_t *sink)
 
 static uint64_t sink_now_us(void)
 {
-    return (uint64_t)rt_tick_get() * 1000000U / RT_TICK_PER_SECOND;
+    return rtcp_os_rtthread.now_us();
 }
 
 static void sink_thread(void *argument)

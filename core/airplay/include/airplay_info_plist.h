@@ -58,3 +58,6 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
                               uint8_t *output,
                               size_t output_capacity,
                               size_t *output_len);
+
+/* Effective mask shared by /info and service discovery. NULL uses video-only. */
+uint64_t airplay_info_plist_features(const airplay_info_plist_config_t *config);

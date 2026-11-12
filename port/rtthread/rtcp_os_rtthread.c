@@ -6,6 +6,7 @@
 #include "rtcp_rtthread.h"
 
 #include <rtthread.h>
+#include <rthw.h>
 
 #include "rtcp/rtcp.h"
 
@@ -13,14 +14,27 @@
 
 static uint64_t now_ms(void)
 {
-    return (uint64_t)rt_tick_get_millisecond();
+    /* Luban-Lite starts its 32-bit tick near wrap (0xffff0000). Extend
+     * modulo-32-bit milliseconds before conversion, shared by every reader.
+     * The running receiver samples much more often than one full wrap. */
+    static bool initialized;
+    static uint32_t previous;
+    static uint64_t elapsed;
+    rt_base_t irq=rt_hw_interrupt_disable();
+    uint32_t current=(uint32_t)rt_tick_get_millisecond();
+    if (initialized) elapsed+=(uint32_t)(current-previous);
+    else initialized=true;
+    previous=current;
+    uint64_t result=elapsed;
+    rt_hw_interrupt_enable(irq);
+    return result;
 }
 
 static uint64_t now_us(void)
 {
     /* RT-Thread ticks are millisecond-scale; expand them rather than inventing
      * sub-tick precision. */
-    return (uint64_t)rt_tick_get_millisecond() * 1000U;
+    return now_ms() * 1000U;
 }
 
 static void sleep_ms(uint32_t ms)

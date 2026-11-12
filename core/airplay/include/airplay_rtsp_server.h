@@ -126,3 +126,11 @@ bool airplay_rtsp_server_send_iap(airplay_rtsp_server_t *, const uint8_t *, size
 
 /* RTSP owner only; sends documented requestSiri down/up actions on event. */
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *);
+
+/* Poll-owner snapshot. datagrams precede authentication; sink packet counts
+ * separately show accepted payloads. Zero streams means no active SETUP. */
+typedef struct {
+    unsigned active_streams;
+    uint32_t datagrams, auth_failures;
+} airplay_rtsp_audio_stats_t;
+void airplay_rtsp_server_get_audio_stats(const airplay_rtsp_server_t *, airplay_rtsp_audio_stats_t *);

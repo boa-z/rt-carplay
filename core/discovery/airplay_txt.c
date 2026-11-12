@@ -7,6 +7,7 @@
 #include "airplay_txt.h"
 
 #include <string.h>
+#include <stdio.h>
 
 static bool non_empty(const char *value)
 {
@@ -68,4 +69,13 @@ size_t airplay_txt_encode(const airplay_txt_record_t *records,
         used += value_len;
     }
     return used;
+}
+
+bool airplay_txt_format_features(uint64_t features, char *output, size_t capacity)
+{
+    if (!output || !capacity) return false;
+    int n = snprintf(output, capacity, "0x%x,0x%x", (unsigned)(uint32_t)features,
+                     (unsigned)(uint32_t)(features >> 32));
+    if (n < 0 || (size_t)n >= capacity) { output[0] = '\0'; return false; }
+    return true;
 }

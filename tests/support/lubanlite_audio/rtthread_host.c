@@ -33,3 +33,8 @@ static void *entry(void *a){thread_t *t=a;t->fn(t->arg);return NULL;}
 int rt_thread_startup(rt_thread_t a) { if(host_rtthread_fail_start)return -1;thread_t *t=a;return pthread_create(&t->thread,NULL,entry,t); }
 int rt_thread_delete(rt_thread_t a) { free(a); worker=NULL;return 0; }
 void host_rtthread_join(void) { if(worker) { assert(!pthread_join(worker->thread,NULL));free(worker);worker=NULL;} }
+
+/* Virtual source and receiver arrivals share the port's monotonic epoch. */
+#include "rtcp/os.h"
+static uint64_t host_now_us(void) { return (uint64_t)rt_tick_get()*1000; }
+const struct rtcp_os rtcp_os_rtthread={.now_us=host_now_us};

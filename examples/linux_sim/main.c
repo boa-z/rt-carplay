@@ -493,8 +493,11 @@ int main(int argc, char **argv)
     char public_key_hex[AIRPLAY_ED25519_PUBLIC_KEY_BYTES * 2U + 1U];
     hex_encode(sim.keypair.public_key, AIRPLAY_ED25519_PUBLIC_KEY_BYTES,
                public_key_hex);
+    char feature_words[32];
+    if (!airplay_txt_format_features(airplay_info_plist_features(&info), feature_words, sizeof(feature_words))) return 1;
     airplay_txt_record_t records[AIRPLAY_TXT_MAX_RECORDS];
     airplay_txt_config_t txt_config = {
+        .features = feature_words,
         .device_id = device_id,
         .model = model,
         .source_version = "950.7.1",

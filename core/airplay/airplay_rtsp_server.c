@@ -1124,3 +1124,17 @@ bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *s)
 {
     return s && !s->stopping && s->event_connected && airplay_event_port_request_siri(s->event_port);
 }
+
+void airplay_rtsp_server_get_audio_stats(const airplay_rtsp_server_t *server, airplay_rtsp_audio_stats_t *stats)
+{
+    if (!stats) return;
+    memset(stats, 0, sizeof(*stats));
+    if (!server) return;
+    for (unsigned i=0; i<AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++i) {
+        const airplay_audio_stream_t *stream=server->audio[i];
+        if (!stream) continue;
+        ++stats->active_streams;
+        stats->datagrams+=airplay_audio_stream_datagrams(stream);
+        stats->auth_failures+=airplay_audio_stream_auth_failures(stream);
+    }
+}

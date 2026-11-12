@@ -5,7 +5,10 @@ Bluetooth handoff were confirmed by the user. Audio changes on this branch
 have **not** been tested on D213 hardware.
 
 See [audio routing repair](audio-routing.md) for the subsequent discovery-mask
-and startup-clock-wrap fixes, the current image checksum and board diagnostics.
+and startup-clock-wrap fixes, connection-time Bluetooth identity refresh, the
+current image checksum and board diagnostics. The user's subsequent board trace
+still had no audio SETUP after the first routing repair; the identity repair
+and new capability trace await another phone test.
 
 ## Findings from actual code and open source references
 

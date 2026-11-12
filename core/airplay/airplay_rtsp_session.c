@@ -49,6 +49,7 @@ struct airplay_rtsp_session {
     uint64_t active_screen_connection_id;
     session_audio_stream_t audio[AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS];
     bool has_info;
+    bool info_logged;
     bool event_started;
     bool timing_started;
     bool initial_setup_complete;
@@ -1117,6 +1118,41 @@ static bool parse_audio_modes(const airplay_bplist_doc_t *doc, airplay_bplist_ob
     return true;
 }
 
+/* One bounded trace per controller, using the document actually served.
+ * No pairing keys, certificates or arbitrary request bodies are logged. */
+static void log_info_audio(airplay_rtsp_session_t *session)
+{
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root, array, entry, object;
+    airplay_bplist_type_t type;
+    uint64_t count = 0, features = 0;
+    if (airplay_bplist_open(session->config.info_plist, session->config.info_plist_len, &doc) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_root(&doc, &root) != AIRPLAY_BPLIST_OK) return;
+    if (airplay_bplist_dict_get(&doc, root, "features", &object) == AIRPLAY_BPLIST_OK)
+        (void)airplay_bplist_get_uint(&doc, object, &features);
+    if (airplay_bplist_dict_get(&doc, root, "audioFormats", &array) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_get_type(&doc, array, &type, &count) != AIRPLAY_BPLIST_OK || type != AIRPLAY_BPLIST_ARRAY)
+        count = 0;
+    RTCP_LOGI(TAG, "info=served bytes=%u features=0x%llx audio_formats=%u",
+              (unsigned)session->config.info_plist_len, (unsigned long long)features, (unsigned)count);
+    for (uint64_t i = 0; i < count && i < 16; ++i) {
+        uint64_t stream_type = 0, output = 0, input = 0;
+        char role[32] = "any";
+        size_t length = 0;
+        if (airplay_bplist_array_get(&doc, array, i, &entry) != AIRPLAY_BPLIST_OK) continue;
+        if (airplay_bplist_dict_get(&doc, entry, "type", &object) == AIRPLAY_BPLIST_OK)
+            (void)airplay_bplist_get_uint(&doc, object, &stream_type);
+        if (airplay_bplist_dict_get(&doc, entry, "audioType", &object) == AIRPLAY_BPLIST_OK)
+            (void)airplay_bplist_get_string(&doc, object, role, sizeof(role), &length);
+        if (airplay_bplist_dict_get(&doc, entry, "audioOutputFormats", &object) == AIRPLAY_BPLIST_OK)
+            (void)airplay_bplist_get_uint(&doc, object, &output);
+        if (airplay_bplist_dict_get(&doc, entry, "audioInputFormats", &object) == AIRPLAY_BPLIST_OK)
+            (void)airplay_bplist_get_uint(&doc, object, &input);
+        RTCP_LOGI(TAG, "info_audio type=%u role=%s output=0x%llx input=0x%llx",
+                  (unsigned)stream_type, role, (unsigned long long)output, (unsigned long long)input);
+    }
+}
+
 airplay_rtsp_session_result_t airplay_rtsp_session_handle(
     airplay_rtsp_session_t *session,
     const airplay_rtsp_request_t *request,
@@ -1163,6 +1199,10 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
             return status_response(request, AIRPLAY_RTSP_STATUS_SESSION_NOT_READY,
                                    "Service Unavailable", response,
                                    response_capacity, response_len);
+        }
+        if (!session->info_logged) {
+            log_info_audio(session);
+            session->info_logged = true;
         }
         return build_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
                               AIRPLAY_PLIST_CONTENT_TYPE,

@@ -80,6 +80,14 @@ typedef struct {
     void (*on_iap_stop)(void *);
     airplay_rtsp_disable_bt_cb_t disable_bluetooth;
     void *iap_context;
+
+    /* Optional capability refresh before each accepted controller session.
+     * Runs on the poll owner, before the session borrows its document. The
+     * returned bytes are copied immediately and must remain valid until that
+     * copy. Failure rejects the connection rather than serving stale identity.
+     * Existing sessions keep an immutable snapshot until disconnect. */
+    bool (*get_info_plist)(const uint8_t **bytes, size_t *length, void *context);
+    void *info_context;
 } airplay_rtsp_server_config_t;
 
 int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,

@@ -371,11 +371,97 @@ static void test_argument_checks(void)
     airplay_rtsp_server_stop(NULL);
 }
 
+typedef struct {
+    uint8_t bytes[INFO_PLIST_BYTES];
+    size_t length;
+    unsigned calls;
+    unsigned failure;
+    const char *bluetooth_id;
+} live_info_t;
+
+static bool refresh_info(const uint8_t **bytes, size_t *length, void *context)
+{
+    live_info_t *live = context;
+    ++live->calls;
+    airplay_info_plist_config_t info = {
+        .device_id = "AA:BB:CC:DD:EE:FF", .bluetooth_id = live->bluetooth_id,
+        .width_pixels = 1024, .height_pixels = 600, .audio_output = true,
+    };
+    assert(airplay_info_plist_build(&info, live->bytes, sizeof(live->bytes), &live->length));
+    *bytes = live->bytes;
+    *length = live->length;
+    if (live->failure == 1) return false;
+    if (live->failure == 2) *length = INFO_PLIST_BYTES + 1;
+    if (live->failure == 3) live->bytes[0] = 0;
+    if (live->failure == 4) *bytes = NULL;
+    return true;
+}
+
+static void test_live_identity_snapshot(void)
+{
+    uint8_t startup[INFO_PLIST_BYTES];
+    size_t length = build_info_plist(startup, sizeof(startup));
+    live_info_t live = {.bluetooth_id = "66:55:44:33:22:11"};
+    airplay_rtsp_server_config_t config = {
+        .os = &rtcp_os_linux, .net = &rtcp_net_linux,
+        .info_plist = startup, .info_plist_len = length,
+        .on_screen_message = capture_screen,
+        .get_info_plist = refresh_info, .info_context = &live,
+    };
+    fill_pairing(&config.pairing);
+    airplay_rtsp_server_t *server = NULL;
+    assert(airplay_rtsp_server_start(&config, &server) == RTCP_OK);
+    const char request[] = "GET /info RTSP/1.0\r\nCSeq: 1\r\n\r\n";
+    for (unsigned reconnect = 0; reconnect < 2; ++reconnect) {
+        client_t client;
+        connect_client(server, &client);
+        assert(live.calls == reconnect + 1);
+        /* The provider's scratch buffer may be reused. Active sessions must
+         * retain their own bytes, even if Bluetooth identity later changes. */
+        memset(live.bytes, 0, sizeof(live.bytes));
+        const char *expected = live.bluetooth_id;
+        live.bluetooth_id = "11:22:33:44:55:77";
+        for (unsigned repeat = 0; repeat < 2; ++repeat) {
+            client.len = 0;
+            assert(client_send(&client, request, sizeof(request) - 1));
+            expect_response(server, &client, expected);
+            assert(contains(client.bytes, client.len, "audioFormats"));
+            assert(live.calls == reconnect + 1);
+        }
+        rtcp_net_linux.close(client.client_fd);
+        for (unsigned i = 0; i < 100 && airplay_rtsp_server_is_connected(server); ++i)
+            airplay_rtsp_server_poll(server, 10);
+        assert(!airplay_rtsp_server_is_connected(server));
+    }
+    for (unsigned failure = 1; failure <= 4; ++failure) {
+        live.failure = failure;
+        unsigned previous = live.calls;
+        client_t client;
+        assert(client_connect(&client, airplay_rtsp_server_get_port(server)));
+        for (unsigned i = 0; i < 100 && live.calls == previous; ++i)
+            airplay_rtsp_server_poll(server, 10);
+        assert(live.calls == previous + 1);
+        assert(!airplay_rtsp_server_is_connected(server));
+        assert(client_has_data(client.client_fd, 100));
+        assert(!client_read(&client));
+        rtcp_net_linux.close(client.client_fd);
+    }
+    /* A provider failure must leave the listener usable. */
+    live.failure = 0;
+    client_t recovered;
+    connect_client(server, &recovered);
+    assert(client_send(&recovered, request, sizeof(request) - 1));
+    expect_response(server, &recovered, live.bluetooth_id);
+    rtcp_net_linux.close(recovered.client_fd);
+    airplay_rtsp_server_stop(server);
+}
+
 int main(void)
 {
     test_plaintext_routing();
     test_ipv6_listener();
     test_argument_checks();
+    test_live_identity_snapshot();
     assert(screen_messages == 0U);
     puts("airplay RTSP server host test passed");
     return 0;

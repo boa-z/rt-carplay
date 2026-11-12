@@ -33,6 +33,30 @@ worker 已启动，不代表收到 Audio SETUP/RTP。静态画面下视频 `rx=0
 
 本次不靠强行发送 MainAudio Take 改变手机资源归属，也不改已有音频格式集合。
 
+## 第二次实机反馈：仍无音频 SETUP
+
+用户刷入 discovery/clock 修复后，`carplay_status` 仍为
+`streams=0 datagrams=0`，音频 sink 为0 packets；完整连接日志只出现130/iAP2
+及110/screen，没有100/101/102候选。`modesChanged` 已被200接受，无线交接成功。
+所以前次修复没有使这台手机恢复音频路由，不能把问题归因于解码速度、
+喇叭、UDP丢包或扩大缓冲就能解决；当前证据定位在音频流建立之前。
+
+继续审查发现应用从未把真实蓝牙地址传给 `/info`，`bluetoothIDs` 总是空数组。
+iAP2 Identification 已读取真实 BR/EDR 地址，两处关联身份不一致。原因是
+AirPlay先启动、蓝牙后启动，而server在启动时就复制了能力文档。
+
+现在server支持可选的连接时能力provider。RT-Thread应用在每次接受控制连接时，
+读取与iAP2相同的 `rtcp_bt_lubanlite_local_bdaddr()`，重新生成 `/info`，server
+验证并复制后才创建session。会话存续期间不改变借用的文档；重连会重新取值。
+provider失败时关闭本次连接，保留listener供下次重试。未启用蓝牙/有线模式
+仍可使用空蓝牙ID，不硬编码用户日志中的MAC，也不改变现有音频格式集合。
+这修复了确定的身份宣告遗漏，但没有实机证据证明它是音频不路由的唯一原因。
+
+每个session第一次收到 `/info` 请求时，还会从真正返回的plist中记录
+features、音频条目数量及每个type/role的输入输出位图。这样可以区分：应用配置
+声称开启音频、手机实际读取了带AAC的宣告、以及随后是否发起SETUP。
+日志不输出配对密钥、证书或任意请求正文。
+
 ## 验证
 
 ```sh
@@ -53,6 +77,13 @@ TXT 与 RTSP `/info`，分别验证音频开启/关闭，两者逐位相等。�
 SDK 默认 D213 配置 `scons -j8` 构建成功，无编译警告。这些结果不能替代手机
 音频路由、声卡输出和声学实机验证。
 
+身份修复后重新通过上述55项、PCM-only、ASan/UBSan CTest、discovery、
+LVGL/handoff及SDK构建。真实RTSP socket测试增加了：晚到的蓝牙身份进入
+`/info`、provider缓冲复用不改变当前session、重复GET不刷新、重连后更新、
+provider失败/超长/损坏/空指针拒绝，以及失败后listener恢复。Host的两套
+socket测试使用相同默认端口，须顺序运行 `make check` 与CTest/PCM测试，
+避免不同测试进程争用7000端口。
+
 ## 实机步骤与判读
 
 使用 app `main` 与 SDK `poc/carplay-oss`，SDK 根目录执行 `scons -j8`。
@@ -64,6 +95,18 @@ SDK 默认 D213 配置 `scons -j8` 构建成功，无编译警告。这些结果
 ```text
 [carplay] capabilities features=0x5653aee2,0x61 audio_output=1 compressed=1
 ```
+
+连接时应新增（蓝牙地址以板端实际值为准）：
+
+```text
+[carplay] session capabilities bluetoothID=66:55:44:33:22:11 bytes=...
+I/airplay_rtsp_session: info=served bytes=... features=0x615653aee2 audio_formats=9
+I/airplay_rtsp_session: info_audio type=102 role=media output=0x400000 input=0x0
+```
+
+默认宣告44.1 kHz AAC-LC，因此type102的位图为 `0x400000`；显式48 kHz配置
+对应 `0x800000`。`info=served` 是收到实际 `/info` 请求才输出，并非启动时
+假定手机已经读取。没有此行时请保留从连接开始的日志继续定位。
 
 从开始连接到手机点击播放保留完整日志，然后执行：
 
@@ -91,6 +134,6 @@ carplay audio modes: entity=1 call=0 speech=-1
 应以手机实际协商为准。
 
 本次生成镜像的 SHA-256：
-`ebd17f03c10d20e9013944ce6fdc3f40285e55393ce73b72c594f8fc51261222`。
+`1af7ab53f843e58e8fd6d35a851760e36338fd0995020334561906f0e95dbdd7`。
 路径仍为 SDK `output/d21x_demo128-nand_rt-thread_rtcarplay/images/` 下的
 `d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img`。

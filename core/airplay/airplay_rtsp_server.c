@@ -769,6 +769,26 @@ static void server_accept(airplay_rtsp_server_t *server)
     server->connection.tx_frames = 0U;
     server->connection.requests = 0U;
 
+    if (server->config.get_info_plist != NULL) {
+        const uint8_t *bytes = NULL;
+        size_t length = 0U;
+        airplay_bplist_doc_t doc;
+        airplay_bplist_object_t root;
+        airplay_bplist_type_t type;
+        if (!server->config.get_info_plist(&bytes, &length, server->config.info_context) ||
+            bytes == NULL || length == 0U || length > sizeof(server->info_plist) ||
+            airplay_bplist_open(bytes, length, &doc) != AIRPLAY_BPLIST_OK ||
+            airplay_bplist_root(&doc, &root) != AIRPLAY_BPLIST_OK ||
+            airplay_bplist_get_type(&doc, root, &type, NULL) != AIRPLAY_BPLIST_OK ||
+            type != AIRPLAY_BPLIST_DICTIONARY) {
+            RTCP_LOGE(TAG, "rtsp_session=info_refresh_failed");
+            server_teardown_connection(server, "info_refresh_failed");
+            return;
+        }
+        memmove(server->info_plist, bytes, length);
+        server->info_plist_len = length;
+    }
+
     airplay_rtsp_session_config_t session_config = {0};
     session_config.pairing = server->config.pairing;
     session_config.info_plist = server->info_plist;

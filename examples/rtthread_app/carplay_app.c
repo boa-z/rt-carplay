@@ -143,6 +143,7 @@ typedef struct {
     char pairing_code[PAIR_CODE_DIGITS + 1U];
 
     char device_id[18];
+    char bluetooth_id[18];
     char host_name[32];
     char seed_path[64];
     char store_path[80];
@@ -964,6 +965,7 @@ static int build_announcement_data(app_state_t *app)
     airplay_info_plist_config_t info;
     memset(&info, 0, sizeof(info));
     info.device_id = app->device_id;
+    info.bluetooth_id = app->bluetooth_id;
     info.name = app->name;
     info.model = app->model;
     info.width_pixels = app->width;
@@ -1015,6 +1017,29 @@ static int build_announcement_data(app_state_t *app)
         return RTCP_EIO;
     }
     return RTCP_OK;
+}
+
+/* The receiver starts before Bluetooth. Refresh on the protocol owner once
+ * the controller attaches, when the BR/EDR identity is available. The server
+ * copies this result; no active session's borrowed document is modified. */
+static bool refresh_info_plist(const uint8_t **bytes, size_t *length, void *context)
+{
+    app_state_t *app = context;
+#if defined(LPKG_RT_CARPLAY_LUBANLITE_BT)
+    uint8_t address[6];
+    if (!app->wired && rtcp_bt_lubanlite_local_bdaddr(address) == RTCP_OK) {
+        rt_snprintf(app->bluetooth_id, sizeof(app->bluetooth_id),
+                    "%02X:%02X:%02X:%02X:%02X:%02X", address[0], address[1],
+                    address[2], address[3], address[4], address[5]);
+    }
+#endif
+    if (build_announcement_data(app) != RTCP_OK) return false;
+    APP_LOG("session capabilities bluetoothID=%s bytes=%u",
+            app->bluetooth_id[0] ? app->bluetooth_id : "none",
+            (unsigned)app->info_plist_len);
+    *bytes = app->info_plist;
+    *length = app->info_plist_len;
+    return true;
 }
 
 int carplay_app_start(const carplay_app_config_t *config)
@@ -1119,6 +1144,8 @@ int carplay_app_start(const carplay_app_config_t *config)
     fill_pairing(app, &server_config.pairing);
     server_config.info_plist = app->info_plist;
     server_config.info_plist_len = app->info_plist_len;
+    server_config.get_info_plist = refresh_info_plist;
+    server_config.info_context = app;
     server_config.port = AIRPLAY_RTSP_DEFAULT_PORT;
     server_config.family = app->wired ? RTCP_AF_INET6 : RTCP_AF_INET;
     server_config.on_screen_message = on_screen_message;

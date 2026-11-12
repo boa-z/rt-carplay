@@ -542,6 +542,13 @@ device test matrix and limits of host validation.
 
 ### CarPlay audio stage diagnostics
 
+Periodic performance output defaults **off**. Use `carplay_perf on` to enable
+`[carplay-perf]`, `[screen-wait]`, USB performance/probe reports and the screen
+frame message every 120 frames; use `carplay_perf off` to silence them again.
+`carplay_perf` queries the current setting. The choice survives receiver
+stop/start and resets to off on reboot. Statistics still accumulate while muted;
+`carplay_status`, audio diagnostics, connection events and errors remain available.
+
 When offline PCM/AAC tests pass but music still clicks, use `carplay_status` to
 inspect per-lane decoded frames, empty output, decoder errors, PCM peak, negative
 timestamps, inserted silence, mixer drops and jitter counters. Output statistics

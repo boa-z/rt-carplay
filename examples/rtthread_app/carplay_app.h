@@ -147,7 +147,8 @@ int carplay_app_pairing_storage_error(void);
 
 void carplay_app_debug_counters(unsigned *received, unsigned *hid_sent, unsigned *hid_failed);
 
-/* Low-priority lifecycle owner only, while not starting/stopping the app. */
+/* Low-priority lifecycle owner only, while not starting/stopping the app.
+ * Periodic output defaults off; the shell controls it with carplay_perf. */
 void carplay_app_performance_report(void);
 
 /* RTSP owner only: tunneled iAP2 writes use encrypted event /command. */

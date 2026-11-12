@@ -13,6 +13,7 @@
 #include <rtthread.h>
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -53,6 +54,24 @@
 #endif
 
 #define APP_LOG(fmt, ...) rt_kprintf("[carplay] " fmt "\n", ##__VA_ARGS__)
+
+/* Shell and receiver/demo threads share this flag; independent of sessions. */
+static atomic_bool s_perf_logging = ATOMIC_VAR_INIT(false);
+
+static int cmd_carplay_perf(int argc, char **argv)
+{
+    if (argc == 2 && (!strcmp(argv[1], "on") || !strcmp(argv[1], "off"))) {
+        atomic_store(&s_perf_logging, !strcmp(argv[1], "on"));
+    } else if (argc != 1) {
+        rt_kprintf("Usage: carplay_perf [on|off]\n");
+        return RTCP_EINVAL;
+    }
+    rt_kprintf("carplay performance logging: %s\n",
+               atomic_load(&s_perf_logging) ? "on" : "off");
+    return RTCP_OK;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_perf, carplay_perf,
+                     Periodic performance logging: on|off);
 
 /* carplay_start uses the same geometry as the SDK autostart path.  In app
  * mode the board's Kconfig values (which must match the panel) win; a caller
@@ -395,7 +414,8 @@ static int on_screen_message(airplay_screen_message_type_t type,
     bool configuration = type == AIRPLAY_SCREEN_MESSAGE_CONFIG_H264;
     if (!configuration) {
         ++app->screen_frames;
-        if (app->screen_frames == 1U || app->screen_frames % 120U == 0U) {
+        if (app->screen_frames == 1U ||
+            (atomic_load(&s_perf_logging) && app->screen_frames % 120U == 0U)) {
             APP_LOG("screen frames=%u last=%u bytes", app->screen_frames,
                     (unsigned)annex_b_len);
         }
@@ -1978,9 +1998,12 @@ extern void rtcp_lubanlite_usb_probe_report(void) __attribute__((weak));
 extern void carplay_usb_mux_probe_report(void) __attribute__((weak));
 void carplay_app_performance_report(void)
 {
-    if (ipheth_performance_report) ipheth_performance_report();
-    if (rtcp_lubanlite_usb_probe_report) rtcp_lubanlite_usb_probe_report();
-    if (carplay_usb_mux_probe_report) carplay_usb_mux_probe_report();
+    bool enabled = atomic_load(&s_perf_logging);
+    if (enabled) {
+        if (ipheth_performance_report) ipheth_performance_report();
+        if (rtcp_lubanlite_usb_probe_report) rtcp_lubanlite_usb_probe_report();
+        if (carplay_usb_mux_probe_report) carplay_usb_mux_probe_report();
+    }
 #if defined(RTCARPLAY_VIDEO)
     app_state_t *app = &s_app;
     if (!app->running || !app->lock) return;
@@ -1992,7 +2015,8 @@ void carplay_app_performance_report(void)
     uint32_t now = (uint32_t)rt_tick_get_millisecond();
     carplay_video_perf_t video;
     carplay_video_sink_perf(&video);
-    if (!app->perf_ms) {
+    /* Keep the baseline fresh while muted; enabling starts a new window. */
+    if (!enabled || !app->perf_ms) {
         app->perf_ms = now;
         app->perf_screen = rx; app->perf_video = video;
         return;

@@ -37,7 +37,7 @@ PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
 PORT_LINUX_OBJS := $(PORT_LINUX_SRCS:%.c=$(BUILD)/%.o)
 PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
 
-TESTS := test_rtthread_clock test_audio_input test_audio_sink test_audio_engine test_mfi2c test_pairing_files \
+TESTS := test_audio_diagnostics test_rtthread_clock test_audio_input test_audio_sink test_audio_engine test_mfi2c test_pairing_files \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session test_iap2_stream \
          test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
@@ -189,7 +189,7 @@ check-lubanlite-touch:
 check-lubanlite-demo:
 	@test -n "$(SDK_ROOT)" || (echo 'set SDK_ROOT to Luban-Lite checkout'; exit 1)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -DRTCARPLAY_AUDIO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -Itests/support/lubanlite_demo -Iport/luban-lite/include \
 	  -I$(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl \
 	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c examples/rtthread_app/pairing_manager.c \
@@ -230,6 +230,10 @@ check-lubanlite-reconnect:
 .PHONY: check-lubanlite-capabilities
 check-lubanlite-capabilities:
 	python3 tests/run_lubanlite_capabilities.py $(SDK_ROOT)
+
+# Offline speaker/microphone test worker against virtual devices.
+$(BUILD)/test_audio_diagnostics: tests/unit/test_audio_diagnostics.c examples/rtthread_app/audio_test_lubanlite.c examples/rtthread_app/audio_test_fixture.h $(LIB) $(MBEDTLS_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MICROPHONE -Itests/support/lubanlite_audio -Iport/luban-lite/include -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS)
 
 # Actual board sink with a pthread-backed RT-Thread/device seam.
 $(BUILD)/test_audio_sink: tests/unit/test_audio_sink.c examples/rtthread_app/audio_sink_lubanlite.c tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(MBEDTLS_LIB)

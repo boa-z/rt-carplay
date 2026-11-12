@@ -109,6 +109,13 @@ int carplay_app_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y) {
     assert(receiver_running && (status.stage == DEMO_LIVE || status.stage == DEMO_CONNECT));
     ++reports; return RTCP_OK;
 }
+static unsigned test_starts, test_stops;
+static int test_stop_error;
+int carplay_audio_test_start(const audio_test_config_t *c)
+{ assert(c && !receiver_running && !session_live);++test_starts;return 0; }
+int carplay_audio_test_stop(void) {++test_stops;return test_stop_error;}
+void carplay_audio_test_gain(unsigned v,bool m) {(void)v;(void)m;}
+void carplay_audio_test_status(audio_test_status_t *s) {memset(s,0,sizeof(*s));}
 int main(void) {
     for (mode = 0; mode < 4; ++mode) {
         starts = pairs = closes = stops = net_checks = pictures = failed_waits = 0;
@@ -165,6 +172,18 @@ int main(void) {
         if (radio_mode == 2) assert(status.stage == DEMO_LIVE && now_ms == 1400);
         if (radio_mode == 3) assert(!receiver_running && !manager_open);
     }
+    /* Audio page reserves connection ownership, stops receiver before sound0,
+     * and cannot resume the receiver while a test fails to stop. */
+    mode=4;status.wireless=requested_wireless=false;status.stage=DEMO_WAIT;
+    receiver_running=true;session_live=false;audio_open=manager_open=true;
+    audio_ready=false;audio_exit=false;audio_action=1;
+    assert(!claim_connection());
+    assert(!idle_actions());assert(!receiver_running && audio_ready && test_starts==1);
+    audio_exit=true;test_stop_error=RTCP_ETIMEDOUT;
+    assert(!idle_actions());assert(audio_open && manager_open && !receiver_running);
+    test_stop_error=0;
+    assert(idle_actions());assert(!audio_open && !manager_open && receiver_running);
+    assert(status.stage==DEMO_WAIT && test_stops>=3);
     puts("Actual demo worker: pairing/storage failure, replug, network/first-frame wait, quiescent close, pointer routing/overflow and manager exclusion passed");
     puts("Wireless owner: asynchronous failure, mode switch, BT-to-WiFi handover, first-frame gating, manager pause and timeouts passed");
 }

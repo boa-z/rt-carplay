@@ -33,6 +33,8 @@ if GetDepend('RTCARPLAY_VIDEO'):
 # Kconfig also needs CONFIG_AIC_USING_AUDIO (which selects RT_USING_AUDIO).
 if GetDepend('RTCARPLAY_AUDIO'):
     src += Glob('audio_sink_lubanlite.c')
+    if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
+        src += Glob('audio_test_lubanlite.c')
 
 if GetDepend('RTCARPLAY_MICROPHONE'):
     src += Glob('audio_input_lubanlite.c')

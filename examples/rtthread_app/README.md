@@ -539,3 +539,45 @@ make check-rtthread-multicast
 
 See [wireless-bringup.md](../../docs/wireless-bringup.md) for the code findings,
 device test matrix and limits of host validation.
+
+### Offline audio test page
+
+On the LVGL launch page, tap **Audio tests** while READY or after a failed
+connection. An iPhone is not needed. The session owner closes the receiver
+before the test worker opens `sound0`/`dmic0`; incoming connections are paused
+until Back completes. GUI callbacks only post requests. Stop/Back must finish
+device cleanup before receiver startup is allowed; a stop timeout retains
+ownership and displays the error.
+
+The page provides:
+
+- **PCM tone**: direct 1 kHz stereo S16 output, selectable 44.1/48 kHz and
+  Both/Left/Right. Bypasses network, AAC, jitter queues and CarPlay mixer.
+- **PCM silence**: the same output path with zero samples, to distinguish a
+  sound-dependent artifact from clicks still present with digital silence.
+- **AAC tone**: a short, built-in synthetic 997 Hz AAC-LC fixture decoded at
+  44.1 kHz through the actual decoder, then sent directly to sound0. Tap
+  Start again to replay. No file or phone is needed.
+- **Mic meter**: real dmic0 capture at 48 kHz stereo, input L/R peaks and bars;
+  does not open the speaker.
+- **Mic loopback**: real dmic0 input directly to sound0. Begin at low volume.
+- Volume +/- (linear test gain in 10% steps, default 20%), mute, Start/restart,
+  Stop, Back, frame/byte/write counters, input peaks and actual error codes.
+
+Runs last at most 10 seconds; the AAC fixture ends sooner. Mode/rate/channel
+selection applies on Start; volume and mute apply during playback. AAC is
+fixed at 44.1 kHz, microphone modes at 48 kHz, all device audio is S16 stereo.
+Unsupported AAC/microphone buttons are disabled. Test gain is separate from
+CarPlay's dB volume control. Output-only tests do not open the microphone.
+
+For a Speaker connector which only clicks, start with PCM Both at 48 kHz,
+then 44.1 kHz, then digital silence. A clean direct tone but failed AAC test
+narrows the issue toward decoder/codec operation on the board. Clean PCM and
+AAC tests with broken CarPlay playback narrow it toward network/jitter/mixer
+integration. Clicks even with direct PCM/silence leave the device/DMA/clock,
+amplifier and physical Speaker path to verify. A connector name alone does
+not establish the output-channel mapping; compare Left/Right as well.
+
+Host tests exercise the real test worker using virtual audio/capture devices
+and the real AAC decoder, plus launcher ownership and stop-timeout handling.
+They do not establish audible output or physical mic capture on the board.

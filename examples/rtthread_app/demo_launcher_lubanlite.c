@@ -15,6 +15,9 @@
 #include "touch_panel_lubanlite.h"
 #include "iap2_link_lubanlite.h"
 #include "rtcp_lubanlite.h"
+#if defined(RTCARPLAY_AUDIO)
+#include "audio_test_lubanlite.h"
+#endif
 
 #if defined(RTCARPLAY_IAP2) && defined(LPKG_RT_CARPLAY_LUBANLITE_WIFI)
 #define DEMO_HAS_WIRELESS 1
@@ -70,6 +73,49 @@ static demo_pointer_t pointer_queue[32], pointer_state;
 static unsigned pointer_head, pointer_tail;
 static bool pointer_active;
 static uint16_t pointer_id;
+
+#if defined(RTCARPLAY_AUDIO)
+static void close_session(void);
+static int start_receiver(void);
+static void publish(demo_stage_t, int);
+static bool audio_open, audio_ready, audio_exit;
+static unsigned audio_action; /* 1 play, 2 stop; consumed by demo worker */
+static int audio_result;
+static audio_test_config_t audio_config={AUDIO_TEST_TONE,48000,0};
+static unsigned audio_volume=20;
+static bool audio_muted;
+static lv_obj_t *audio_button, *audio_panel, *audio_note, *audio_settings;
+static lv_obj_t *audio_play, *audio_mode_buttons[5], *audio_meters[2];
+/* The session owner alone closes/restarts CarPlay and starts/stops tests. */
+static bool audio_service(void)
+{
+    (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+    bool open=audio_open, exit=audio_exit, ready=audio_ready;
+    unsigned action=audio_action;audio_action=0;
+    audio_test_config_t config=audio_config;
+    (void)rt_mutex_release(status_lock);
+    if(!open)return false;
+    if(!ready) {
+        close_session();
+        (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+        audio_ready=true;
+        (void)rt_mutex_release(status_lock);
+    }
+    int result=RTCP_OK;
+    if(action || exit)result=carplay_audio_test_stop();
+    if(result==RTCP_OK && action==1 && !exit)result=carplay_audio_test_start(&config);
+    (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+    if(action || exit)audio_result=result;
+    if(exit && result==RTCP_OK) {
+        audio_open=audio_ready=audio_exit=false;manager_open=false;
+    }
+    (void)rt_mutex_release(status_lock);
+    if(exit && result==RTCP_OK && !status.wireless) {
+        int start=start_receiver();publish(start==RTCP_OK?DEMO_WAIT:DEMO_FAILED,start);
+    }
+    return true;
+}
+#endif
 
 static bool mode_changed(void)
 {
@@ -233,6 +279,14 @@ static void close_session(void)
  * reader remains usable even if receiver startup/storage loading failed. */
 static bool idle_actions(void)
 {
+#if defined(RTCARPLAY_AUDIO)
+    if(audio_service()) {
+        (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+        bool closed=!audio_open;
+        (void)rt_mutex_release(status_lock);
+        return closed;
+    }
+#endif
     char name[CARPLAY_PAIR_FILENAME_MAX];
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
     file_action_t action = file_action;
@@ -468,6 +522,69 @@ static lv_obj_t *button(lv_obj_t *parent, const char *text, int x, int y,
     return obj;
 }
 
+#if defined(RTCARPLAY_AUDIO)
+static void audio_open_page(lv_event_t *event)
+{
+    (void)event;
+    (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+    bool idle=(status.stage==DEMO_WAIT || status.stage==DEMO_FAILED) && !manager_open && file_action==FILE_NONE;
+    if(idle) {manager_open=audio_open=true;audio_ready=audio_exit=false;audio_action=0;audio_result=0;}
+    (void)rt_mutex_release(status_lock);
+    if(idle)lv_obj_remove_flag(audio_panel,LV_OBJ_FLAG_HIDDEN);
+}
+static void audio_select(lv_event_t *event)
+{
+    unsigned id=(unsigned)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(event));
+    (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+    if(id<5)audio_config.mode=(audio_test_mode_t)id;
+    else if(id==10)audio_config.rate=44100;
+    else if(id==11)audio_config.rate=48000;
+    else if(id>=20 && id<=22)audio_config.channel=id-20;
+    else if(id==30)audio_volume=audio_volume<10?0:audio_volume-10;
+    else if(id==31)audio_volume=audio_volume>90?100:audio_volume+10;
+    else if(id==32)audio_muted=!audio_muted;
+    else if(id==40 && audio_ready && !audio_exit)audio_action=1;
+    else if(id==41)audio_action=2;
+    else if(id==42) {audio_exit=true;audio_action=2;}
+    unsigned volume=audio_volume;bool mute=audio_muted;
+    (void)rt_mutex_release(status_lock);
+    carplay_audio_test_gain(volume,mute);
+}
+static lv_obj_t *audio_control(lv_obj_t *parent,const char *text,int x,int y,int w,unsigned id)
+{
+    lv_obj_t *b=button(parent,text,x,y,w,audio_select);
+    lv_obj_set_user_data(b,(void *)(uintptr_t)id);return b;
+}
+static void audio_update(void)
+{
+    (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+    bool open=audio_open,ready=audio_ready,exiting=audio_exit;
+    audio_test_config_t config=audio_config;int result=audio_result;
+    (void)rt_mutex_release(status_lock);
+    if(!open) {lv_obj_add_flag(audio_panel,LV_OBJ_FLAG_HIDDEN);return;}
+    audio_test_status_t s;carplay_audio_test_status(&s);
+    const char *names[]={"PCM tone","PCM silence","AAC fixture","Mic level","Mic loopback"};
+    lv_label_set_text_fmt(audio_settings,"Selected: %s | %u Hz | %s | Volume %u%% %s",
+      names[config.mode],config.mode==AUDIO_TEST_AAC?44100:
+      config.mode>=AUDIO_TEST_MIC_LEVEL?48000:config.rate,
+      config.channel==1?"Left":config.channel==2?"Right":"Both",s.volume,s.muted?"MUTED":"");
+    lv_label_set_text_fmt(audio_note,
+      "%s | Frames %u | Bytes %u | Writes %u\nInput peak L/R: %u / %u (0..32768) | Error %d\n%s",
+      exiting?"Stopping / returning":!ready?"Releasing CarPlay audio...":s.running?"TEST RUNNING":"STOPPED / READY",
+      s.frames,s.bytes,s.writes,s.peak_left,s.peak_right,result?result:s.error,
+      config.mode==AUDIO_TEST_AAC?"Short synthetic AAC clip; tap Start to replay.":
+      config.mode==AUDIO_TEST_MIC_LEVEL?"Speak near the microphone; input peaks should change.":
+      config.mode==AUDIO_TEST_MIC_LOOP?"Microphone to speaker, max 10 s. Start at low volume.":
+      "Direct PCM -> sound0 -> Speaker. Tone/silence lasts up to 10 s.");
+    if(ready && !exiting)lv_obj_remove_state(audio_play,LV_STATE_DISABLED);
+    else lv_obj_add_state(audio_play,LV_STATE_DISABLED);
+    lv_bar_set_value(audio_meters[0],(int)s.peak_left,LV_ANIM_OFF);
+    lv_bar_set_value(audio_meters[1],(int)s.peak_right,LV_ANIM_OFF);
+    for(unsigned i=0;i<5;++i)lv_obj_set_style_bg_color(audio_mode_buttons[i],
+        lv_color_hex(config.mode==i?0x287D68:0x245C80),0);
+}
+#endif
+
 static void files_back(lv_event_t *event)
 {
     (void)event;
@@ -588,6 +705,9 @@ static void update_page(lv_timer_t *timer)
 {
     (void)timer;
     update_files();
+#if defined(RTCARPLAY_AUDIO)
+    audio_update();
+#endif
     static int last_stage = -1;
     static int last_mode = -1;
     demo_status_t snapshot;
@@ -652,6 +772,10 @@ static void update_page(lv_timer_t *timer)
     }
     lv_label_set_text(step_labels[0], snapshot.wireless ? "01  Pair Bluetooth" : "01  Connect USB");
     lv_label_set_text(step_labels[1], snapshot.wireless ? "02  Join CarPlay Wi-Fi" : "02  Trust your display");
+#if defined(RTCARPLAY_AUDIO)
+    if(snapshot.stage==DEMO_WAIT || snapshot.stage==DEMO_FAILED)lv_obj_remove_state(audio_button,LV_STATE_DISABLED);
+    else lv_obj_add_state(audio_button,LV_STATE_DISABLED);
+#endif
     if (snapshot.stage == DEMO_WAIT || snapshot.stage == DEMO_FAILED)
         lv_obj_remove_state(manage_button, LV_STATE_DISABLED);
     else lv_obj_add_state(manage_button, LV_STATE_DISABLED);
@@ -780,6 +904,44 @@ void carplay_demo_launcher_init(void)
     retry_button = button(screen, "Retry connection", 252, height - 145, 200, retry_connection);
     lv_obj_add_state(manage_button, LV_STATE_DISABLED);
     lv_obj_add_state(retry_button, LV_STATE_DISABLED);
+#if defined(RTCARPLAY_AUDIO)
+    audio_button=button(screen,"Audio tests",470,height-145,170,audio_open_page);
+    lv_obj_add_state(audio_button,LV_STATE_DISABLED);
+    audio_panel=lv_obj_create(screen);
+    lv_obj_set_pos(audio_panel,30,25);lv_obj_set_size(audio_panel,width-60,height-50);
+    lv_obj_set_style_bg_color(audio_panel,lv_color_hex(0x142238),0);
+    lv_obj_remove_flag(audio_panel,LV_OBJ_FLAG_SCROLLABLE);
+    label(audio_panel,"SPEAKER & MICROPHONE TEST",10,0,width-130,0xFFFFFF,true);
+    const char *test_modes[]={"PCM tone","PCM silence","AAC tone","Mic meter","Mic loopback"};
+    for(unsigned i=0;i<5;++i)audio_mode_buttons[i]=audio_control(audio_panel,test_modes[i],10+i*176,55,164,i);
+#if !defined(LPKG_RT_CARPLAY_AUDIO_CODECS) && !defined(RTCP_AUDIO_CODECS)
+    lv_obj_add_state(audio_mode_buttons[2],LV_STATE_DISABLED);
+#endif
+#if !defined(RTCARPLAY_MICROPHONE)
+    lv_obj_add_state(audio_mode_buttons[3],LV_STATE_DISABLED);lv_obj_add_state(audio_mode_buttons[4],LV_STATE_DISABLED);
+#endif
+    audio_control(audio_panel,"44.1 kHz",10,115,140,10);
+    audio_control(audio_panel,"48 kHz",165,115,140,11);
+    audio_control(audio_panel,"Both",335,115,130,20);
+    audio_control(audio_panel,"Left",480,115,130,21);
+    audio_control(audio_panel,"Right",625,115,130,22);
+    audio_control(audio_panel,"Volume -",10,175,150,30);
+    audio_control(audio_panel,"Volume +",175,175,150,31);
+    audio_control(audio_panel,"Mute / unmute",340,175,180,32);
+    audio_settings=label(audio_panel,"",10,235,width-130,0x38D9A9,false);
+    audio_note=label(audio_panel,"Preparing audio tests...",10,275,width-130,0xB3C4DA,false);
+    label(audio_panel,"Input L",10,370,80,0x91A7C0,false);
+    label(audio_panel,"Input R",450,370,80,0x91A7C0,false);
+    for(unsigned i=0;i<2;++i) {
+        audio_meters[i]=lv_bar_create(audio_panel);
+        lv_obj_set_pos(audio_meters[i],95+(int)i*440,372);
+        lv_obj_set_size(audio_meters[i],305,16);lv_bar_set_range(audio_meters[i],0,32768);
+    }
+    audio_play=audio_control(audio_panel,"Start / restart",10,height-170,185,40);
+    audio_control(audio_panel,"Stop",215,height-170,150,41);
+    audio_control(audio_panel,"Back",385,height-170,150,42);
+    lv_obj_add_flag(audio_panel,LV_OBJ_FLAG_HIDDEN);
+#endif
     file_panel = lv_obj_create(screen);
     lv_obj_set_pos(file_panel, 30, 25); lv_obj_set_size(file_panel, width - 60, height - 50);
     lv_obj_set_style_bg_color(file_panel, lv_color_hex(0x142238), 0);

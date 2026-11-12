@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Luban-Lite audio worker: bounded independent RTP queues -> AAC/Opus/LPCM
  * decode -> stereo mixer/resampler -> sound0. The network callback only copies
- * one authenticated payload under a nonblocking lock; all decoding and device
+ * one authenticated payload under a bounded queue lock; all decoding and device
  * writes belong to the worker. */
 #include "audio_sink_lubanlite.h"
 
@@ -36,10 +36,13 @@
  * inaudible, so [-45, 0] maps linearly onto the codec's 0..100 mixer range. */
 #define SINK_VOLUME_FLOOR_DB (-45.0f)
 #define SINK_VOLUME_MAX_DB 0.0f
+#define PROBE_MAX_FRAMES (48000U * 2U)
+enum { PROBE_IDLE, PROBE_CAPTURE, PROBE_READY, PROBE_REPLAY };
+enum { PROBE_CMD_CAPTURE=1, PROBE_CMD_REPLAY, PROBE_CMD_STOP, PROBE_CMD_CLEAR };
 
 typedef struct {
     atomic_uint decoded, frames, empty, init_errors, decode_errors;
-    atomic_uint negative, gap_frames, resets, mix_drops, queued;
+    atomic_uint negative, gap_frames, resets, mix_drops, queued, queue_busy;
     atomic_uint peak_pcm, decode_max_us, arrival_max_ms;
 } lane_diagnostics_t;
 
@@ -84,6 +87,12 @@ typedef struct {
     lane_diagnostics_t diag[RTCP_AUDIO_LANES];
     atomic_uint output_frames, output_peak, device_errors, write_max_us;
     atomic_bool direct_requested, direct_active;
+    /* Optional two-second decoded-PCM probe. Buffer and cursor are writer
+     * owned; shell/producer threads only exchange commands and snapshots. */
+    int16_t *probe_pcm;
+    size_t probe_cursor;
+    unsigned probe_generation;
+    atomic_uint probe_command, probe_state, probe_frames, probe_rate, probe_ignored;
     /* Writer-owned workspace; never copied onto the nested codec stack. */
     uint8_t packet[RTCP_AUDIO_PACKET_MAX];
     int16_t pcm[5760], silence[960], chunk[960];
@@ -262,6 +271,72 @@ static bool media_only(audio_sink_t *sink)
     return alone;
 }
 
+static bool output_media(audio_sink_t *sink,int16_t *pcm,size_t frames,
+                         unsigned rate,unsigned media_gain)
+{
+    if(sink->device_started && sink->device_rate!=rate)stop_device(sink);
+    if(!sink->device_started && !start_device(sink,rate,2)) {
+        ++sink->write_errors;++sink->device_errors;return false;
+    }
+    unsigned master=sink->applied_volume<0?32768:sink->applied_volume==0?0:
+        (unsigned)(powf(10,((float)sink->applied_volume-100)*0.45f/20)*32768);
+    unsigned gain=(unsigned)((uint64_t)media_gain*master/32768);
+    for(size_t i=0;i<frames*2;++i)pcm[i]=(int16_t)((int64_t)pcm[i]*gain/32768);
+    atomic_store(&sink->direct_active,true);
+    return output_samples(sink,pcm,frames,rate,2);
+}
+
+static void probe_request(audio_sink_t *sink)
+{
+    unsigned cmd=atomic_exchange(&sink->probe_command,0);
+    if(!cmd)return;
+    if(cmd==PROBE_CMD_CAPTURE) {
+        if(!sink->probe_pcm)sink->probe_pcm=malloc(PROBE_MAX_FRAMES*2*sizeof(int16_t));
+        sink->probe_frames=0;sink->probe_rate=0;sink->probe_ignored=0;
+        sink->probe_state=sink->probe_pcm?PROBE_CAPTURE:PROBE_IDLE;
+        rt_kprintf("[carplay-aud] probe %s\n",sink->probe_pcm?"capturing decoded media (2 seconds)":"allocation failed");
+    } else if(cmd==PROBE_CMD_REPLAY) {
+        if(sink->probe_state!=PROBE_READY || !sink->probe_frames) {
+            rt_kprintf("[carplay-aud] probe replay requires a ready capture\n");return;
+        }
+        /* Discard live media during replay; do not replay a stale backlog
+         * afterwards. A fresh decoder is created on the next live packet. */
+        (void)rt_mutex_take(sink->lock,RT_WAITING_FOREVER);
+        sink->probe_state=PROBE_REPLAY;
+        rtcp_audio_jitter_flush(sink->queue[2]);++sink->generation[2];
+        (void)rt_mutex_release(sink->lock);
+        rtcp_audio_mixer_flush(sink->mixer,2);sink->probe_cursor=0;
+        rt_kprintf("[carplay-aud] probe replay frames=%u rate=%u\n",sink->probe_frames,sink->probe_rate);
+    } else {
+        sink->probe_state=sink->probe_frames?PROBE_READY:PROBE_IDLE;
+        if(cmd==PROBE_CMD_CLEAR) {
+            free(sink->probe_pcm);sink->probe_pcm=NULL;
+            sink->probe_frames=0;sink->probe_rate=0;sink->probe_state=PROBE_IDLE;
+        }
+    }
+}
+
+static void probe_capture(audio_sink_t *sink,const int16_t *pcm,size_t frames,
+                          unsigned rate,unsigned gen)
+{
+    if(sink->probe_state!=PROBE_CAPTURE || rate<8000 || rate>48000)return;
+    unsigned have=sink->probe_frames;
+    if(!have) {sink->probe_rate=rate;sink->probe_generation=gen;}
+    if(rate!=sink->probe_rate || gen!=sink->probe_generation) {
+        sink->probe_state=PROBE_READY;
+        rt_kprintf("[carplay-aud] probe capture ended: media stream changed\n");return;
+    }
+    unsigned target=rate*2;
+    if(target>PROBE_MAX_FRAMES)target=PROBE_MAX_FRAMES;
+    if(frames>target-have)frames=target-have;
+    memcpy(sink->probe_pcm+have*2,pcm,frames*2*sizeof(int16_t));
+    sink->probe_frames=have+(unsigned)frames;
+    if(sink->probe_frames==target) {
+        sink->probe_state=PROBE_READY;
+        rt_kprintf("[carplay-aud] probe ready frames=%u rate=%u\n",sink->probe_frames,sink->probe_rate);
+    }
+}
+
 static void sink_thread(void *argument)
 {
     audio_sink_t *sink = argument;
@@ -281,8 +356,9 @@ static void sink_thread(void *argument)
         /* Drain decoded audio under sound0 backpressure. A network wake is
          * not a playback clock: waiting every chunk adds gaps, while rendering
          * an incomplete chunk inserts silence at AAC packet boundaries. */
-        if (rtcp_audio_mixer_buffered(sink->mixer) < 480)
+        if (sink->probe_state!=PROBE_REPLAY && rtcp_audio_mixer_buffered(sink->mixer) < 480)
             (void)rt_sem_take(sink->wake, rt_tick_from_millisecond(10));
+        probe_request(sink);
         service_volume(sink);
         bool requested=atomic_load(&sink->direct_requested);
         if(requested!=previous_path) {
@@ -315,6 +391,24 @@ static void sink_thread(void *argument)
         if(focus.critical_active)for(unsigned i=0;i<AIRPLAY_AUDIO_MAX_STREAMS;++i)gains[i]=0;
         for(unsigned i=0;i<RTCP_AUDIO_LANES;++i)if(gains[i]!=last_gain[i]) {
             rtcp_audio_mixer_gain(sink->mixer,i,gains[i],focus.critical_active ? 0 : ramp*48U);last_gain[i]=gains[i];
+        }
+        if(sink->probe_state==PROBE_REPLAY) {
+            if(focus.call_active || focus.siri_active || critical || !media_only(sink)) {
+                sink->probe_state=PROBE_READY;
+                rt_kprintf("[carplay-aud] probe replay interrupted by other audio\n");
+            } else {
+                size_t n=(size_t)sink->probe_frames-sink->probe_cursor;
+                if(n>1024)n=1024;
+                memcpy(sink->pcm,sink->probe_pcm+sink->probe_cursor*2,n*2*sizeof(int16_t));
+                bool complete=output_media(sink,sink->pcm,n,sink->probe_rate,gains[2]);
+                sink->probe_cursor+=n;
+                if(!complete || sink->probe_cursor==sink->probe_frames) {
+                    stop_device(sink); /* flush the final partial replay block */
+                    sink->probe_state=PROBE_READY;
+                    rt_kprintf("[carplay-aud] probe replay %s\n",complete?"done":"write failed");
+                }
+                continue;
+            }
         }
         for (unsigned lane = 0; lane < RTCP_AUDIO_LANES && !sink->stop; ++lane) {
             for (unsigned budget = 0; budget < 8; ++budget) {
@@ -365,20 +459,13 @@ static void sink_thread(void *argument)
                 /* FAAD priming may emit no samples; it does not establish a
                  * decoded timeline and must not synthesize a following gap. */
                 if(!samples) {++d->empty;continue;}
+                if(lane==2 && format.channels==2)
+                    probe_capture(sink,pcm,samples/2,format.sample_rate,gen);
                 bool direct=requested && lane==2 && format.channels==2 &&
                     !focus.call_active && !focus.siri_active && !critical && media_only(sink);
                 if(direct) {
                     rtcp_audio_mixer_flush(sink->mixer,2);timeline[2]=false;
-                    if(sink->device_started && sink->device_rate!=format.sample_rate)stop_device(sink);
-                    if(!sink->device_started && !start_device(sink,format.sample_rate,2)) {
-                        ++sink->write_errors;++sink->device_errors;continue;
-                    }
-                    unsigned master=sink->applied_volume<0?32768:sink->applied_volume==0?0:
-                        (unsigned)(powf(10,((float)sink->applied_volume-100)*0.45f/20)*32768);
-                    unsigned gain=(unsigned)((uint64_t)gains[2]*master/32768);
-                    for(size_t i=0;i<samples;++i)pcm[i]=(int16_t)((int64_t)pcm[i]*gain/32768);
-                    atomic_store(&sink->direct_active,true);
-                    (void)output_samples(sink,pcm,samples/2,format.sample_rate,2);
+                    (void)output_media(sink,pcm,samples/2,format.sample_rate,gains[2]);
                     if(sink->packets>=stack_report_packets+200) {
                         carplay_audio_stack_report(TAG);stack_report_packets=sink->packets;
                     }
@@ -438,6 +525,7 @@ static void sink_thread(void *argument)
     }
     for (unsigned i = 0; i < RTCP_AUDIO_LANES; ++i) rtcp_audio_decoder_destroy(decoders[i]);
     stop_device(sink);
+    free(sink->probe_pcm);sink->probe_pcm=NULL;sink->probe_state=PROBE_IDLE;
     carplay_audio_stack_report(TAG);
     rt_kprintf("[" TAG "] stopped: %u packets, %u replay(s), %u dropped bytes, %u errors\n",
                sink->packets, sink->replays, sink->dropped_bytes, sink->write_errors);
@@ -579,7 +667,18 @@ int carplay_audio_sink_packet(uint16_t type, const rtcp_audio_format_t *format,
         (format->channels != 1 && format->channels != 2) || !data || !len) return RTCP_EINVAL;
     unsigned i = format->stream_slot_valid ? format->stream_slot : (unsigned)(type-100);
     if(i>=AIRPLAY_AUDIO_MAX_STREAMS || airplay_audio_slot_type(i)!=type)return RTCP_EINVAL;
-    if (rt_mutex_take(sink->lock, 0) != RT_EOK) return RTCP_ETIMEDOUT;
+    /* A high-priority network thread can preempt the writer while it holds
+     * this short copy-only lock. Give priority inheritance a bounded chance
+     * to release it instead of silently dropping every such datagram. No
+     * decoding/device I/O is allowed while holding the queue lock. */
+    if (rt_mutex_take(sink->lock, rt_tick_from_millisecond(2)) != RT_EOK) {
+        ++sink->diag[i].queue_busy;sink->dropped_bytes+=(unsigned)len;
+        return RTCP_ETIMEDOUT;
+    }
+    if(i==2 && sink->probe_state==PROBE_REPLAY) {
+        ++sink->probe_ignored;
+        (void)rt_mutex_release(sink->lock);return RTCP_OK;
+    }
     if ((sink->last_arrival[i] && arrival > sink->last_arrival[i] && arrival-sink->last_arrival[i] > 500000) ||
         sink->format[i].sample_rate != format->sample_rate || sink->format[i].channels != format->channels ||
         sink->format[i].codec != format->codec || sink->format[i].clock_rate != format->clock_rate) {
@@ -729,6 +828,35 @@ usage:
 }
 MSH_CMD_EXPORT_ALIAS(volume_command,carplay_volume,CarPlay output volume 0..100);
 
+static void probe_status(void)
+{
+    static const char *names[]={"idle","capturing","ready","replaying"};
+    unsigned state=s_sink.probe_state;
+    rt_kprintf("audio probe: state=%s frames=%u rate=%u ignored_live=%u\n",
+      names[state],s_sink.probe_frames,s_sink.probe_rate,s_sink.probe_ignored);
+}
+static void audio_probe_command(int argc,char **argv)
+{
+    if(!s_sink.running) {rt_kprintf("[carplay-aud] receiver audio not running\n");return;}
+    unsigned cmd=0;
+    if(argc==2) {
+        if(!strcmp(argv[1],"capture"))cmd=PROBE_CMD_CAPTURE;
+        else if(!strcmp(argv[1],"replay"))cmd=PROBE_CMD_REPLAY;
+        else if(!strcmp(argv[1],"stop"))cmd=PROBE_CMD_STOP;
+        else if(!strcmp(argv[1],"clear"))cmd=PROBE_CMD_CLEAR;
+        else if(strcmp(argv[1],"status"))goto usage;
+    } else if(argc!=1)goto usage;
+    if(cmd) {
+        atomic_store(&s_sink.probe_command,cmd);
+        (void)rt_sem_release(s_sink.wake);
+        rt_kprintf("[carplay-aud] probe request queued: %s\n",argv[1]);
+    } else probe_status();
+    return;
+usage:
+    rt_kprintf("Usage: carplay_audio_probe [capture|replay|stop|clear|status]\n");
+}
+MSH_CMD_EXPORT_ALIAS(audio_probe_command,carplay_audio_probe,Capture decoded media and replay from RAM);
+
 void carplay_audio_sink_diagnostics(void)
 {
     audio_sink_t *s=&s_sink;
@@ -739,9 +867,10 @@ void carplay_audio_sink_diagnostics(void)
       s->direct_requested?"direct":"mixer",s->direct_active?"direct":"mixer");
     rt_kprintf("audio output: frames=%u peak=%u device_errors=%u write_max_us=%u\n",
       s->output_frames,s->output_peak,s->device_errors,s->write_max_us);
+    if(s->probe_state!=PROBE_IDLE)probe_status();
     for(unsigned i=0;i<RTCP_AUDIO_LANES;++i) {
         lane_diagnostics_t *d=&s->diag[i];
-        if(!d->decoded && !d->decode_errors && !d->init_errors)continue;
+        if(!d->decoded && !d->decode_errors && !d->init_errors && !d->queue_busy)continue;
         rtcp_audio_jitter_stats_t q={0};
         (void)rt_mutex_take(s->lock,RT_WAITING_FOREVER);
         rtcp_audio_jitter_stats(s->queue[i],&q);
@@ -752,6 +881,7 @@ void carplay_audio_sink_diagnostics(void)
         rt_kprintf("audio lane=%u negative_ts=%u silence_frames=%u arrival_max_ms=%u\n",
           i,d->negative,d->gap_frames,d->arrival_max_ms);
         rt_kprintf("audio lane=%u resets=%u mix_drop=%u mix_queue=%u\n",i,d->resets,d->mix_drops,d->queued);
+        rt_kprintf("audio lane=%u queue_busy=%u\n",i,d->queue_busy);
         rt_kprintf("audio lane=%u jitter_queue=%u late=%u duplicate=%u overflow=%u\n",i,
           (unsigned)q.queued,(unsigned)q.late,(unsigned)q.duplicates,(unsigned)q.overflow);
     }

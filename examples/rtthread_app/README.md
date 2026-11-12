@@ -573,6 +573,46 @@ raw audio or keys are printed. Each lane generation also logs up to eight
 nonzero timestamp gaps with expected/actual timestamps and decoded frames.
 Diagnostic output is split to fit the SDK console buffer. See [the investigation record](../../docs/audio-routing-reference-review.md).
 
+### Replay the actual decoded music from RAM
+
+If direct music is still abnormal while offline PCM/AAC tests pass, compare the
+same decoded samples with and without real-time packet delivery:
+
+1. Keep music playing, select `carplay_audio_path direct`, and use
+   `carplay_volume 70` for both live playback and replay. This is about 21% PCM
+   amplitude, close to the offline test's default 20%; an unset CarPlay volume
+   otherwise defaults to unity. Note whether lowering volume alone helps.
+2. Run `carplay_audio_probe capture`. Wait for `probe ready frames=88200
+   rate=44100` (or 96000 frames at 48 kHz). The limit is two seconds of decoded
+   PCM, so slow delivery can take longer than two wall-clock seconds. Query
+   `carplay_audio_probe status`; use `carplay_audio_probe stop` to keep a partial
+   capture if needed. A stream/rate change ends capture at the existing prefix.
+3. Pause music on the phone while keeping CarPlay connected, then run
+   `carplay_audio_probe replay`. The captured segment plays once; repeat the
+   command to listen again. `probe replay done` follows the final buffer drain.
+4. Run `carplay_audio_probe clear` to release memory and restore
+   `carplay_audio_path mixer` when finished.
+
+The probe copies stereo type102 PCM immediately after successful decoding,
+before timestamp repair, resampling, mixing or gain. It allocates at most
+384000 bytes on demand, does not write files or send captured audio elsewhere,
+and is freed on clear/receiver stop. Replay uses the same media output/gain
+function as direct playback, continuously writes the captured segment at its
+native rate, and does not wait for new packets. Live media is deliberately
+ignored during replay (`ignored_live` counts it), pending media is flushed, and
+the live decoder is reset before resuming. Calls, Siri and other audio interrupt
+replay. `capture`, `replay`, `stop`, and `clear` are asynchronous writer requests;
+`status` shows the completed/current state. Receiver restart clears the probe.
+
+A clean buffered replay points toward delivery/playout timing or starvation;
+an abnormal replay requires checking the decoded content and common output path.
+Neither result alone proves an individual component is faulty. The short offline
+AAC tone does not exercise every tool used by real music. SDK audio queue
+starvation emits zeros without incrementing the sink's `write_errors` counter.
+Packet enqueue waits up to two milliseconds (rounded to OS ticks) for its short
+queue lock; a timeout increments `queue_busy` and `dropped_bytes`. Earlier builds
+discarded immediately on lock contention without counting that loss.
+
 ### Offline audio test page
 
 On the LVGL launch page, tap **Audio tests** while READY or after a failed

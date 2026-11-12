@@ -19,6 +19,10 @@ static atomic_bool check_samples;
 static atomic_bool allow_native;
 static atomic_uint actual_rate;
 static atomic_uint mixed_bytes;
+static void wait_probe(unsigned state) {
+ for(unsigned i=0;i<300 && s_sink.probe_state!=state;++i)rt_thread_mdelay(10);
+ assert(s_sink.probe_state==state);
+}
 rt_device_t rt_device_find(const char *n) { assert(!strcmp(n,"sound0"));return (void *)1; }
 int rt_device_open(rt_device_t d,int f) {(void)d;(void)f;++opened;return 0;}
 int rt_device_close(rt_device_t d) {(void)d;++closed;return 0;}
@@ -118,9 +122,52 @@ int main(void) {
  for(unsigned i=0;i<4;++i)assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),512*i,sink_now_us())==0);
  rt_thread_mdelay(400);carplay_audio_sink_stop();host_rtthread_join();
  assert(s_sink.diag[2].negative==2 && s_sink.diag[2].decoded==4 && s_sink.write_errors==0);
+ /* A queue-lock timeout is a dropped packet, not a successful zero-error
+  * receive. The host mutex must honor the same bounded wait as RT-Thread. */
+ assert(carplay_audio_sink_start()==0);
+ assert(rt_mutex_take(s_sink.lock,RT_WAITING_FOREVER)==0);
+ assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==RTCP_ETIMEDOUT);
+ assert(s_sink.diag[2].queue_busy==1 && s_sink.dropped_bytes==sizeof(native_pcm) && s_sink.packets==0);
+ rt_mutex_release(s_sink.lock);
+ assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==0);
+ rt_thread_mdelay(350);carplay_audio_sink_stop();host_rtthread_join();
+ /* Capture pre-gain PCM, cap at two seconds, then replay continuously with
+  * no new network packets. Live media is deliberately ignored during replay. */
+ assert(carplay_audio_sink_start()==0);audio_path_command(2,direct_args);
+ char *capture_args[]={"carplay_audio_probe","capture"};
+ char *replay_args[]={"carplay_audio_probe","replay"};
+ char *clear_args[]={"carplay_audio_probe","clear"};
+ carplay_audio_sink_set_volume_db(-144);expected_sample=0;check_samples=true;
+ audio_probe_command(2,capture_args);wait_probe(PROBE_CAPTURE);
+ for(unsigned i=0;i<90;++i) {
+  int rc;do {rc=carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),1024*i,sink_now_us());
+   if(rc==RTCP_ETIMEDOUT || rc==RTCP_ENOMEM)rt_thread_mdelay(10);
+  } while(rc==RTCP_ETIMEDOUT || rc==RTCP_ENOMEM);assert(rc==0);rt_thread_mdelay(10);
+ }
+ wait_probe(PROBE_READY);rt_thread_mdelay(250);
+ assert(s_sink.probe_frames==88200 && s_sink.probe_rate==44100);
+ for(unsigned i=0;i<88200*2;++i)assert(s_sink.probe_pcm[i]==1000);
+ unsigned before_probe=output_bytes;
+ carplay_audio_sink_set_volume_db(0);expected_sample=1000;
+ audio_probe_command(2,replay_args);wait_probe(PROBE_REPLAY);
+ assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==0);
+ wait_probe(PROBE_READY);
+ assert(output_bytes-before_probe==88200*4 && s_sink.probe_ignored==1 && actual_rate==44100);
+ check_samples=false;
+ /* Critical local audio preempts the probe, then normal mixing resumes. */
+ audio_probe_command(2,replay_args);wait_probe(PROBE_REPLAY);
+ before_mixed=mixed_bytes;
+ assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_OK);
+ wait_probe(PROBE_READY);
+ for(unsigned i=0;i<300 && mixed_bytes==before_mixed;++i)rt_thread_mdelay(10);
+ assert(mixed_bytes>before_mixed);
+ audio_probe_command(2,clear_args);wait_probe(PROBE_IDLE);
+ assert(!s_sink.probe_pcm && !s_sink.probe_frames);
+ carplay_audio_sink_stop();host_rtthread_join();
 #ifdef RTCP_AUDIO_CODECS
  /* Real AAC -> actual board worker -> native-rate output, no mixer/timeline. */
  assert(carplay_audio_sink_start()==0);audio_path_command(2,direct_args);
+ audio_probe_command(2,capture_args);wait_probe(PROBE_CAPTURE);
  assert(rtcp_audio_format_parse(0x400000,&native));
  FILE *file=fopen("tests/fixtures/audio/sine-44k.aac","rb");assert(file);
  uint8_t aac[4096];size_t length=fread(aac,1,sizeof(aac),file);fclose(file);
@@ -132,8 +179,14 @@ int main(void) {
    if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
   } while(rc==RTCP_ETIMEDOUT);assert(rc==0);off+=n;ts+=1024;
  }
- rt_thread_mdelay(500);carplay_audio_sink_stop();host_rtthread_join();
- assert(actual_rate==44100 && s_sink.output_frames==s_sink.diag[2].frames);
+ rt_thread_mdelay(500);
+ assert(s_sink.probe_frames==s_sink.diag[2].frames && s_sink.probe_frames>0);
+ char *stop_args[]={"carplay_audio_probe","stop"};audio_probe_command(2,stop_args);wait_probe(PROBE_READY);
+ before_probe=output_bytes;audio_probe_command(2,replay_args);wait_probe(PROBE_REPLAY);wait_probe(PROBE_READY);
+ assert(output_bytes-before_probe==s_sink.probe_frames*4);
+ unsigned live_frames=s_sink.diag[2].frames,probe_frames=s_sink.probe_frames;
+ carplay_audio_sink_stop();host_rtthread_join();
+ assert(actual_rate==44100 && s_sink.output_frames==live_frames+probe_frames && !s_sink.probe_pcm);
  assert(s_sink.diag[2].decoded>=5 && s_sink.diag[2].peak_pcm>0 && !s_sink.diag[2].decode_errors);
 #endif
  puts("actual RT-Thread audio sink: worker playback, failed startup, selective stop and repeated cleanup passed");

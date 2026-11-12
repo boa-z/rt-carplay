@@ -27,7 +27,7 @@ int carplay_audio_sink_pcm(uint32_t sample_rate, uint8_t channels,
                            const uint8_t *data, size_t len);
 
 /* Counters since start; any output pointer may be NULL.  dropped_bytes counts
- * encoded or PCM bytes discarded by bounded queues. */
+ * encoded or PCM bytes discarded by bounded queues, including lock timeout. */
 void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
                               unsigned *write_errors, unsigned *replays);
 

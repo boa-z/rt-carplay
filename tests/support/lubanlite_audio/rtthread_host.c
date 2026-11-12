@@ -15,7 +15,13 @@ rt_tick_t rt_tick_get(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&
 rt_tick_t rt_tick_from_millisecond(int n) { return (rt_tick_t)n; }
 void rt_thread_mdelay(int ms) { struct timespec t={ms/1000,(ms%1000)*1000000L}; nanosleep(&t,NULL); }
 rt_mutex_t rt_mutex_create(const char *n,int f) { (void)n;(void)f; pthread_mutex_t *m=malloc(sizeof(*m)); assert(!pthread_mutex_init(m,NULL)); return m; }
-int rt_mutex_take(rt_mutex_t m,int wait) { return wait==0 ? pthread_mutex_trylock(m) : pthread_mutex_lock(m); }
+int rt_mutex_take(rt_mutex_t m,int wait) {
+ if(wait==0)return pthread_mutex_trylock(m);
+ if(wait<0)return pthread_mutex_lock(m);
+ struct timespec t;clock_gettime(CLOCK_REALTIME,&t);t.tv_nsec+=(long)wait*1000000;
+ t.tv_sec+=t.tv_nsec/1000000000;t.tv_nsec%=1000000000;
+ return pthread_mutex_timedlock(m,&t);
+}
 int rt_mutex_release(rt_mutex_t m) { return pthread_mutex_unlock(m); }
 int rt_mutex_delete(rt_mutex_t m) { assert(!pthread_mutex_destroy(m));free(m);return 0; }
 rt_sem_t rt_sem_create(const char *n,unsigned v,int f) { (void)n;(void)f;sem_t *s=malloc(sizeof(*s));assert(!sem_init(s,0,v));return s; }

@@ -13,7 +13,8 @@
   page/inquiry scan 均已开启（0x03）才发布 READY。发现 host 缓存与控制器
   不一致时，通过公开接口 off/on 修复并再次读回，失败则返回错误。
 * 仅在无线 iAP2 owner 空闲时，启动后等待 2 秒主动寻呼已恢复的 BR bond。
-  多个 bond 轮询，每次尝试间隔至少 30 秒；不执行额外的 inquiry 搜索。
+  多个 bond 轮询，常规失败重试间隔 30 秒；从暂停状态恢复时重新等待 2 秒。
+  不执行额外的 inquiry 搜索。
 * ACL 成功后请求 L2 加密，复用原 link key，不强制重新配对；保留密钥已有的
   更强认证属性。随后等待手机连接已注册的 iAP2 RFCOMM 服务。不猜测手机
   RFCOMM channel，也不把 ACL 成功宣称为 CarPlay 已成功。

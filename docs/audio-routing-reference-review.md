@@ -1,5 +1,33 @@
 # 无线音乐未建立音频流：参考实现逐项复核
 
+## 麦克风开启对照：验证输入能力是否影响音乐路由
+
+用户要求启用真实麦克风输入，验证其缺失是否导致 iOS 27.3 音乐不能切换到
+CarPlay。D213 defconfig 已打开 `RTCARPLAY_MICROPHONE`，依赖的
+`AIC_AUDIO_DMIC` 原本已启用；AEC 保持关闭。沿用现有 `dmic0` 采集、
+48 kHz 立体声转单声道、语音处理及 PCM/Opus 加密 UDP 上行实现。
+不需要在音乐播放时强制启动录音，手机协商输入后才打开采集设备。
+
+独立 plistlib 对照真实 writer 的输出，确认麦克风开启后只增加以下四项
+`audioInputFormats=0x70004554`：type100 的 compatibility、default、
+telephony、speechRecognition。Features 仍为 `0x6144540280`，9 条输出格式
+和其余文档字段完全相同。该测试覆盖可用麦克风的能力生成；实机仍须通过
+`carplay_audio_input_available()` 的设备存在、未占用检查。若实际 `/info`
+输入掩码仍为零，本轮没有成功向手机提供输入能力，不能判定假设成立与否。
+
+D213 `scons -j8` 构建通过，无编译 warning/error，ELF 已确认包含输入启动、
+DMIC capture open/read 及 `carplay_mic` 命令。启用压缩 codec 的 55 项 Host
+测试与 boundary 通过，其中实际麦克风 worker 使用虚拟采集源验证 DSP、
+PCM/Opus 编码、加密 UDP 收发和停止重启。SDK formatter/能力文档检查通过。
+这些检查不验证板端物理麦克风，也不证明 iPhone 已建立音乐路由。
+
+当前未连接板卡，尚未得到实机验证结果。固定的 on/off 镜像、哈希和完整
+验收步骤见 SDK `doc/rt-carplay-build.md` 第 17 节。保留手机配对，用 on
+镜像确认非零输入声明后播放音乐，记录音频 SETUP、选择器及音频计数。
+若出现音频 SETUP，再用 off 镜像按相同步骤复测，确认差异能重复出现。
+若输入声明已非零而仍无音频 SETUP，就不支持“仅缺少麦克风能力导致阻塞”
+这个解释。`carplay_mic` 显示 running=0 在尚未请求麦克风时属于正常状态。
+
 ## 无线 explicit 已确认：采集初始 SETUP 的实际提议
 
 用户补充无线 WPA2 握手后的会话日志：`capabilities_profile=explicit`、

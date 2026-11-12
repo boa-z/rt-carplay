@@ -105,15 +105,16 @@ uint64_t rtcp_audio_output_formats(void) { return compiled_formats; }
 
 static void write_profiles(const char *directory)
 {
-    for (unsigned mode = 0; mode < 3; ++mode) {
-        compiled_formats = mode == 2 ? UINT64_C(0x70c0cffc) : UINT64_C(0xcffc);
+    for (unsigned mode = 0; mode < 4; ++mode) {
+        compiled_formats = mode >= 2 ? UINT64_C(0x70c0cffc) : UINT64_C(0xcffc);
         for (unsigned legacy = 0; legacy < 2; ++legacy) {
             airplay_info_plist_config_t config = {0};
             config.device_id = "98:03:CF:66:65:9B";
             config.bluetooth_id = "66:55:44:33:22:11";
             config.width_pixels = 1024; config.height_pixels = 600;
             config.audio_output = mode != 0;
-            config.audio_compressed = mode == 2;
+            config.audio_compressed = mode >= 2;
+            config.audio_input = mode == 3;
             config.features = capability_features(airplay_info_plist_features(&config), legacy != 0);
             uint8_t bytes[AIRPLAY_INFO_PLIST_MAX_BYTES], encoded[64];
             size_t length = 0;
@@ -197,7 +198,7 @@ with tempfile.TemporaryDirectory(prefix="rtcp-capabilities-") as directory:
                     str(root / "core/airplay/airplay_hid_descriptor.c"),
                     str(root / "core/discovery/airplay_txt.c"), "-lm", "-o", str(path / "test")], check=True)
     subprocess.run([str(path / "test"), str(path)], check=True)
-    for mode, expected in enumerate((0x6140000080, 0x6144440280, 0x6144540280)):
+    for mode, expected in enumerate((0x6140000080, 0x6144440280, 0x6144540280, 0x6144540280)):
         explicit = plistlib.loads((path / f"{mode}-0.bplist").read_bytes())
         legacy = plistlib.loads((path / f"{mode}-1.bplist").read_bytes())
         assert explicit.pop("features") == expected
@@ -205,5 +206,18 @@ with tempfile.TemporaryDirectory(prefix="rtcp-capabilities-") as directory:
         assert explicit == legacy, "profile changed something other than Features"
         formats = explicit.get("audioFormats", [])
         assert len(formats) == (0 if mode == 0 else 8 if mode == 1 else 9)
-        assert all("audioInputFormats" not in entry for entry in formats)
+        if mode < 3:
+            assert all("audioInputFormats" not in entry for entry in formats)
+    mic_off = plistlib.loads((path / "2-0.bplist").read_bytes())
+    mic_on = plistlib.loads((path / "3-0.bplist").read_bytes())
+    roles = []
+    for entry in mic_on["audioFormats"]:
+        bits = entry.pop("audioInputFormats", None)
+        if bits is not None:
+            assert bits == 0x70004554
+            roles.append((entry["type"], entry["audioType"]))
+    assert roles == [(100, "compatibility"), (100, "default"),
+                     (100, "telephony"), (100, "speechRecognition")]
+    assert mic_on == mic_off, "microphone experiment changed fields other than input offers"
     print("Independent plistlib: explicit/legacy profiles differ only in Features; video/PCM/compressed offers and encoded TXT match passed")
+    print("Independent plistlib: microphone-on adds four nonempty input offers; all other capability fields and output formats remain identical")

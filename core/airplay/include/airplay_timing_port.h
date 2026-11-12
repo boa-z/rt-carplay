@@ -12,6 +12,14 @@
  * sends a PT=210 request once per second and consumes the PT=211 reply. */
 typedef struct airplay_timing_port airplay_timing_port_t;
 
+/* Exchange counters, not a claim that the playback clock is synchronized. */
+typedef struct {
+    bool active;
+    uint32_t requests_sent, responses_received;
+    uint32_t requests_received, responses_sent;
+    uint32_t rejected, send_errors, timeouts;
+} airplay_timing_stats_t;
+
 typedef struct {
     /* Peer address; IPv4 or IPv6.  peer.port == 0 disables periodic
      * requests.  An IPv6 link-local peer needs peer.scope_id set to the
@@ -26,6 +34,8 @@ int airplay_timing_port_start(const struct rtcp_os *os,
 
 uint16_t airplay_timing_port_get_port(const airplay_timing_port_t *port);
 int airplay_timing_port_get_fd(const airplay_timing_port_t *port);
+void airplay_timing_port_get_stats(const airplay_timing_port_t *port,
+                                  airplay_timing_stats_t *stats);
 
 /* Call from the application loop.  socket_readable must reflect poll() on
  * airplay_timing_port_get_fd(). */

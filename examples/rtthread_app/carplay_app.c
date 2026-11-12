@@ -201,6 +201,7 @@ typedef struct {
 
     airplay_screen_server_stats_t screen_stats;
     airplay_rtsp_audio_stats_t audio_stats;
+    airplay_timing_stats_t timing_stats;
     airplay_audio_modes_t audio_modes;
 #if defined(RTCARPLAY_VIDEO)
     uint32_t perf_ms;
@@ -796,6 +797,7 @@ static void poll_thread(void *argument)
             rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK) {
             airplay_rtsp_server_get_screen_stats(app->server, &app->screen_stats);
             airplay_rtsp_server_get_audio_stats(app->server, &app->audio_stats);
+            airplay_rtsp_server_get_timing_stats(app->server, &app->timing_stats);
             app->screen_sample_ms = sample_ms;
             (void)rt_mutex_release(app->lock);
         }
@@ -1537,9 +1539,17 @@ static int cmd_carplay_status(int argc, char **argv)
                carplay_audio_sink_is_running() ? "ready" : "stopped", packets,
                replays, dropped, errors);
     airplay_rtsp_audio_stats_t audio={0};airplay_audio_modes_t modes={0};
+    airplay_timing_stats_t timing = {0};
     if(s_app.lock && rt_mutex_take(s_app.lock,RT_WAITING_FOREVER)==RT_EOK) {
-        audio=s_app.audio_stats;modes=s_app.audio_modes;(void)rt_mutex_release(s_app.lock);
+        audio=s_app.audio_stats;modes=s_app.audio_modes;
+        timing = s_app.timing_stats;
+        (void)rt_mutex_release(s_app.lock);
     }
+    rt_kprintf("carplay timing: active=%u request_tx=%u response_rx=%u request_rx=%u response_tx=%u rejected=%u send_errors=%u timeouts=%u\n",
+               timing.active ? 1U : 0U, (unsigned)timing.requests_sent,
+               (unsigned)timing.responses_received, (unsigned)timing.requests_received,
+               (unsigned)timing.responses_sent, (unsigned)timing.rejected,
+               (unsigned)timing.send_errors, (unsigned)timing.timeouts);
     rt_kprintf("carplay audio transport: streams=%u datagrams=%u auth_failures=%u\n",
                audio.active_streams,audio.datagrams,audio.auth_failures);
     rt_kprintf("carplay audio modes: entity=%s%u call=%u speech=%d\n",

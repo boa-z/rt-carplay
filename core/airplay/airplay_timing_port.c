@@ -23,6 +23,7 @@ struct airplay_timing_port {
     uint64_t pending_timestamp;
     uint64_t next_request_us;
     uint64_t next_sample_log_us;
+    airplay_timing_stats_t stats;
 };
 
 static uint64_t monotonic_us(const airplay_timing_port_t *port)
@@ -51,28 +52,9 @@ static bool same_peer(const rtcp_addr_t *address, const rtcp_addr_t *peer)
     return false;
 }
 
-void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
+static void receive_packet(airplay_timing_port_t *port)
 {
-    if (port == NULL || port->socket_fd < 0) return;
-
-    uint8_t packet[AIRPLAY_TIMING_PACKET_BYTES];
     uint64_t now_us = monotonic_us(port);
-    if (port->peer.port != 0U && now_us >= port->next_request_us) {
-        size_t request_len = 0U;
-        uint64_t timestamp = timing_now_ntp(port);
-        port->request_pending = false;
-        if (airplay_timing_build_request(timestamp, packet, sizeof(packet),
-                                         &request_len) &&
-            port->net->udp_sendto(port->socket_fd, &port->peer, packet,
-                                  request_len) == (int)request_len) {
-            port->pending_timestamp = timestamp;
-            port->request_pending = true;
-        }
-        port->next_request_us = now_us + TIMING_REQUEST_INTERVAL_US;
-    }
-
-    if (!socket_readable) return;
-
     uint8_t incoming[AIRPLAY_TIMING_PACKET_BYTES + 1U];
     rtcp_addr_t source;
     memset(&source, 0, sizeof(source));
@@ -81,6 +63,7 @@ void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
     if (received < 0) return;
     if (received != (int)AIRPLAY_TIMING_PACKET_BYTES ||
         !same_peer(&source, &port->peer)) {
+        ++port->stats.rejected;
         return;
     }
 
@@ -93,9 +76,12 @@ void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
                                           receive_timestamp,
                                           transmit_timestamp, response,
                                           sizeof(response), &response_len)) {
-            (void)port->net->udp_sendto(port->socket_fd, &source, response,
-                                        response_len);
-        }
+            ++port->stats.requests_received;
+            if (port->net->udp_sendto(port->socket_fd, &source, response,
+                                      response_len) == (int)response_len)
+                ++port->stats.responses_sent;
+            else ++port->stats.send_errors;
+        } else ++port->stats.rejected;
     } else if (incoming[1] == AIRPLAY_TIMING_PT_RESPONSE &&
                port->request_pending) {
         double round_trip_seconds = 0.0;
@@ -103,6 +89,7 @@ void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
         if (airplay_timing_parse_response(
                 incoming, (size_t)received, port->pending_timestamp,
                 timing_now_ntp(port), &round_trip_seconds, &offset_seconds)) {
+            ++port->stats.responses_received;
             /* Keep sampling each second; UART needs only an occasional
              * successful sample, especially while decoding live video. */
             if (now_us >= port->next_sample_log_us) {
@@ -120,7 +107,34 @@ void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
                 port->next_sample_log_us = now_us + UINT64_C(30000000);
             }
             port->request_pending = false;
-        }
+        } else ++port->stats.rejected;
+    } else ++port->stats.rejected;
+}
+
+void airplay_timing_port_poll(airplay_timing_port_t *port, bool socket_readable)
+{
+    if (port == NULL || port->socket_fd < 0) return;
+
+    /* Consume the pending response before replacing its originate timestamp.
+     * Crypto or scheduling can delay this poll beyond the next send deadline. */
+    if (socket_readable) receive_packet(port);
+
+    uint64_t now_us = monotonic_us(port);
+    if (port->peer.port != 0U && now_us >= port->next_request_us) {
+        uint8_t packet[AIRPLAY_TIMING_PACKET_BYTES];
+        size_t request_len = 0U;
+        uint64_t timestamp = timing_now_ntp(port);
+        if (port->request_pending) ++port->stats.timeouts;
+        port->request_pending = false;
+        if (airplay_timing_build_request(timestamp, packet, sizeof(packet),
+                                         &request_len) &&
+            port->net->udp_sendto(port->socket_fd, &port->peer, packet,
+                                  request_len) == (int)request_len) {
+            port->pending_timestamp = timestamp;
+            port->request_pending = true;
+            ++port->stats.requests_sent;
+        } else ++port->stats.send_errors;
+        port->next_request_us = now_us + TIMING_REQUEST_INTERVAL_US;
     }
 }
 
@@ -170,6 +184,17 @@ uint16_t airplay_timing_port_get_port(const airplay_timing_port_t *port)
 int airplay_timing_port_get_fd(const airplay_timing_port_t *port)
 {
     return port == NULL ? -1 : port->socket_fd;
+}
+
+void airplay_timing_port_get_stats(const airplay_timing_port_t *port,
+                                  airplay_timing_stats_t *stats)
+{
+    if (stats == NULL) return;
+    memset(stats, 0, sizeof(*stats));
+    if (port != NULL) {
+        *stats = port->stats;
+        stats->active = port->socket_fd >= 0;
+    }
 }
 
 void airplay_timing_port_stop(airplay_timing_port_t *port,

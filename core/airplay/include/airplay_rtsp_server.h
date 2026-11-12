@@ -10,6 +10,7 @@
 #include "airplay_rtsp_session.h"
 #include "airplay_screen.h"
 #include "airplay_screen_server.h"
+#include "airplay_timing_port.h"
 #include "rtcp/net.h"
 #include "rtcp/os.h"
 
@@ -142,3 +143,4 @@ typedef struct {
     uint32_t datagrams, auth_failures;
 } airplay_rtsp_audio_stats_t;
 void airplay_rtsp_server_get_audio_stats(const airplay_rtsp_server_t *, airplay_rtsp_audio_stats_t *);
+void airplay_rtsp_server_get_timing_stats(const airplay_rtsp_server_t *, airplay_timing_stats_t *);

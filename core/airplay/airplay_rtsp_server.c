@@ -1171,3 +1171,9 @@ void airplay_rtsp_server_get_audio_stats(const airplay_rtsp_server_t *server, ai
         stats->auth_failures+=airplay_audio_stream_auth_failures(stream);
     }
 }
+
+void airplay_rtsp_server_get_timing_stats(const airplay_rtsp_server_t *server,
+                                        airplay_timing_stats_t *stats)
+{
+    airplay_timing_port_get_stats(server != NULL ? server->timing_port : NULL, stats);
+}

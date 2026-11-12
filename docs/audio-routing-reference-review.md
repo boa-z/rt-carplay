@@ -1,5 +1,81 @@
 # 无线音乐未建立音频流：参考实现逐项复核
 
+## 最新实机结果：资源正常，仍没有音频协商
+
+用户随后验证了 `6d0b2a5` 固件：MainAudio 的 current/permanent 均为 1，
+MainScreen 的 current/permanent 也均为 1，HID_sent=2395、HID_failed=0。
+视频持续接收，iAP2 隧道 identified/authenticated/handoff_complete 均为 1，
+音频仍 streams/datagrams/packets 全为 0。这不支持附件抢占 MainAudio 或触摸
+没有送达的解释。Owner=1 是资源实体，不能当作 iPhone 已选择 CarPlay 输出。
+所示主控制请求为 200，但日志只记录前 32 个请求及后续有限错误，不等于
+抓取了整段会话的所有请求与 event 通道请求。所有 SETUP 候选另有独立日志。
+
+本次进一步检查：
+
+* DiPlay `AirPlaySession.kt::runEventRead` 对 event 通道入站请求返回空 200，
+  本项目相同；不能仅因没有语义分发就认定这里吞掉了必须的音频路由指令。
+* 实际 Linux 应用 DNS-SD 与 RTSP `/info` 再用 Python `plistlib` 独立解析，
+  音频开启、关闭均与编码后的 TXT Features 相符。本地 sim 当前为 PCM-only
+  构建，开启时为 `0x615647aee2`，不能冒充 D213 压缩启用的 `0x615657aee2`
+  实机线上抓包；后者由用户前轮日志确认。
+* 参考的 PCM/AAC/Opus 位号与当前格式表一致。44.1/48 kHz、宽格式集合与
+  参考的差异尚不足以解释完全没有音频 SETUP，不新增 codec 或强制资源 Take。
+* 需要收窄此前无麦克风对照的结论：DiPlay 的配置默认 false，但实际
+  `CarPlayHostActivity.kt` 传入 `microphoneAvailable`。源码允许无麦克风不等于
+  该组合已在同一款 iOS 上实测；同样不能因此宣告虚假的输入能力。
+* DiPlay `docs/ISSUE-AUDIT-2026-10-03.md` 的 #29 本身记录过所有声音留在
+  手机、缺少音频 SETUP 证据的未定因报告。参考实现成功支持部分设备不代表
+  它已解决所有同类路由问题。
+
+### Timing 的可复现缺陷与修正范围
+
+继续对照 DiPlay `NtpClock.kt` 和 catplay `clock/rtcp_timesync.rs`，两者在
+会话建立后使用 UDP 210/211 的双向 timing 交换。本项目也有该交换，但此前
+`timing_setup=ready` 只表明端口创建，成功 sample 在 DEBUG 级别，普通串口
+记录无法判断是否收到有效应答。视频正常和 RTSP `/feedback` 空 200 都不能
+代替 UDP timing 交换的证据。
+
+发现一个能独立复现的实现错误：poll 同时遇到 socket 可读与一秒发送周期
+到期时，原先先发送新探测并替换 `pending_timestamp`，再读取旧应答；原本
+有效的 originate timestamp 随后匹配失败。现在先消费可读应答，再处理到期
+发送。没有改变时间基准、校时算法、音频声明、AAC、Mixer 或 sound0。
+
+新增 timing 快照在 RTSP owner 线程采集，通过应用现有 mutex 交给 shell：
+
+```text
+carplay timing: active=1 request_tx=... response_rx=... request_rx=... response_tx=... rejected=... send_errors=... timeouts=...
+```
+
+`response_rx` 只计来源地址、包形状、originate timestamp 和 RTT 校验通过的
+应答，不是 UDP 收到任意包；`timeouts` 是下次探测时上一探测仍未完成。
+`rejected` 包括错误来源、形状、重复/过期应答及未知类型；计数不能单独
+区分这些情况。计数属于当前 timing endpoint，会话关闭后快照清零。
+`response_rx>0` 证明往返交换完成，不证明完整播放时钟已经同步。本项目目前
+仅采样偏差，没有像 DiPlay 那样将偏差应用于共享媒体时钟；在音频 SETUP
+完全缺失时不把后续播放时钟工作冒充路由修复。
+
+Host 用固定时钟及真实 loopback UDP 覆盖一秒边界的应答、重复应答拒绝和
+未完成探测超时。把源码中的发送/接收恢复成旧顺序后，新测试在
+`requests_sent == 2 && responses_received == 1` 断言处失败；新顺序通过。
+55 项 Host 测试、boundary、SDK formatter/demo/handoff 和 D213 构建通过。
+**未连接实机，本缺陷与这台 iPhone 不发音频 SETUP 的因果关系未被证实。**
+
+### 这次实机只需补充的关键证据
+
+保留配对，使用新镜像连接并播放，间隔 5 秒执行两次 `carplay_status`，看
+timing 计数是否增长；同时记录 iOS 版本，以及 iPhone 音频输出选择器中
+是否存在并选中此 CarPlay 接收端。无需再反复提供静态画面性能输出。
+
+* `response_rx` 持续增长而没有音频 SETUP：不能继续归因于无 timing 往返；
+  应转向同一 iPhone 的输出路由是否注册/选中，与参考接收端作同条件比较。
+* 选中 CarPlay 后立刻出现音频 SETUP：说明路由选择是触发条件，不说明
+  timing 修正就是原因；需记录自动选择和手动选择各自的行为。
+* `request_tx` 增长、`response_rx=0`：才有依据进一步抓 timing UDP 或查看
+  rejected/send_errors/timeouts，仍不能直接断言它阻止了 iOS 的 SETUP。
+
+最新固件和 SHA 见 SDK `doc/rt-carplay-build.md` 第 14 节。本轮不是已经通过
+实机验证的音乐接入修复；验收目标仍为真实 iPhone 发出 100/101/102 SETUP。
+
 ## 本轮实机证据和结论边界
 
 本轮用户日志来自含 H5 修复标记的固件，保存的 link key 认证成功，RFCOMM、

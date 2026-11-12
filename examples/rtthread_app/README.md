@@ -401,8 +401,14 @@ MFi.
   Build-only: the codec has not played a sample; the first board run with a
   controller should log `[carplay-aud] playback <rate> Hz <ch> ch 16-bit`,
   `carplay_status` should show growing packet counters, and moving the
-  phone's volume slider should log `[carplay-aud] sender volume -<x>.<y> dB
-  -> <pct>%`.
+  phone's volume slider logs `[carplay-aud] output volume -<x>.<y> dB
+  -> <pct>%` only if iOS sends SET_PARAMETER. CarPlay can leave volume
+  control with the vehicle: use `carplay_volume 30`, `carplay_volume 0`
+  (mute), or `carplay_volume` (query) to check local software gain. The
+  0..100 scale uses the existing -45..0 dB mapping; 100 is unity. Local
+  critical alerts bypass entertainment mute. Later board feedback has now
+  confirmed type102 music routing with microphone enabled; current playback
+  fixes and remaining hardware checks are in `docs/audio-routing-reference-review.md`.
 - **Touch panel (2026-11-08)**: `touch_panel_lubanlite.c` opens the
   RT-Thread CTP device named by `CONFIG_AIC_TOUCH_PANEL_NAME` (`gt911` on
   demo128-nand-carplay), takes points on the panel interrupt (the rx

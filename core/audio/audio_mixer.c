@@ -81,6 +81,19 @@ void rtcp_audio_mixer_auto_duck(rtcp_audio_mixer_t *m, bool enabled) { if(m)m->a
 void rtcp_audio_mixer_duck(rtcp_audio_mixer_t *m, bool duck) { if (m) m->duck = duck; }
 void rtcp_audio_mixer_master(rtcp_audio_mixer_t *m, unsigned gain, bool mute)
 { if (m) { m->master = gain > 32768 ? 32768 : gain; m->mute = mute; } }
+size_t rtcp_audio_mixer_buffered(const rtcp_audio_mixer_t *m)
+{
+    if (!m) return 0;
+    size_t longest = 0;
+    for (unsigned i = 0; i < RTCP_AUDIO_LANES; ++i) {
+        const lane_t *l = &m->lanes[i];
+        uint64_t duration = (uint64_t)l->count * RTCP_AUDIO_MIX_RATE;
+        if (!l->rate || duration <= l->phase) continue;
+        size_t frames = (size_t)((duration - l->phase) / l->rate);
+        if (frames > longest) longest = frames;
+    }
+    return longest;
+}
 size_t rtcp_audio_mixer_render(rtcp_audio_mixer_t *m, int16_t *out, size_t frames)
 {
     if (!m || !out || frames > SIZE_MAX/2) return 0;

@@ -302,7 +302,7 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
     const uint32_t timestamp = read_be32(wire + 4U);
     if (!stream->first_packet_logged) {
         stream->first_packet_logged = true;
-        RTCP_LOGI(TAG, "stream=%u first_packet pcm_bytes=%u seq=%u timestamp=%u",
+        RTCP_LOGI(TAG, "stream=%u first_packet payload_bytes=%u seq=%u timestamp=%u",
                   (unsigned)stream->stream_type, (unsigned)cipher_len,
                   (unsigned)read_be16(wire + 2U), (unsigned)timestamp);
     }

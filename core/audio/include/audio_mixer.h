@@ -28,5 +28,7 @@ void rtcp_audio_mixer_auto_duck(rtcp_audio_mixer_t *, bool enabled);
 void rtcp_audio_mixer_duck(rtcp_audio_mixer_t *, bool ducked);
 /* A safety alert cannot be muted by entertainment volume or remote ducking. */
 void rtcp_audio_mixer_master(rtcp_audio_mixer_t *, unsigned q15, bool mute);
+/* Longest queued lane duration in nominal output frames (rounded down). */
+size_t rtcp_audio_mixer_buffered(const rtcp_audio_mixer_t *);
 size_t rtcp_audio_mixer_render(rtcp_audio_mixer_t *, int16_t *stereo, size_t frames);
 void rtcp_audio_mixer_stats(const rtcp_audio_mixer_t *, unsigned lane, rtcp_audio_lane_stats_t *);

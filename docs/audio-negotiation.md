@@ -1,8 +1,8 @@
 # 无线 CarPlay 无音频 SETUP：协商核验与修复
 
-最新实机反馈仍无音频 SETUP。后续参考实现逐项复核、当前／永久资源归属解析、
-请求状态追踪及下一轮验收见 [参考实现复核](audio-routing-reference-review.md)。
-本页下方 SHA 为此前固件，iOS 27.3 无线 explicit 已确认，当前已启用真实麦克风进行输入能力对照，on/off 镜像和验收步骤见 SDK 构建文档第 17 节；尚未实机确认音乐路由。
+最新 mic-on 实测已出现 type102 AAC 音频 SETUP，控制中心可见并默认切换到
+CarPlay；现转入声音异常及本地音量控制排查。详情见[参考实现复核](audio-routing-reference-review.md)。
+本页下方 SHA 为历史固件；当前播放修正镜像及验收步骤见 SDK 构建文档第 18 节。
 
 本轮基线为 main `bffc3be`。实机反馈仍为 `entity=1`、`streams=0`、
 `datagrams=0`、`packets=0`，连接日志只有110/screen和130/iAP2。

@@ -63,6 +63,25 @@ static void mixing(void)
     assert(rtcp_audio_mixer_render(m,out,480)==480 && out[0]==32767);
     rtcp_audio_mixer_destroy(m);
 }
+/* AAC-sized 44.1 kHz bursts must not produce padded 10 ms tails. */
+static void packet_boundaries(void)
+{
+    rtcp_audio_mixer_t *m = rtcp_audio_mixer_create(4096); assert(m);
+    int16_t pcm[2048], out[960];
+    for (unsigned i=0; i<2048; ++i) pcm[i]=1000;
+    size_t rendered=0;
+    for (size_t sent=0; sent<44100;) {
+        size_t n=44100-sent; if(n>1024)n=1024;
+        assert(rtcp_audio_mixer_push(m,2,pcm,n,44100,2)==0); sent+=n;
+        while(rtcp_audio_mixer_buffered(m)>=480) {
+            assert(rtcp_audio_mixer_render(m,out,480)==480);
+            for(unsigned i=0;i<960;++i)assert(out[i]==1000);
+            rendered+=480;
+        }
+    }
+    assert(rendered==48000 && rtcp_audio_mixer_buffered(m)==0);
+    rtcp_audio_mixer_destroy(m);
+}
 /* Simulate a source that gains/loses 100 ppm against the output clock.
  * The bounded servo must retain occupancy without drops over 120 seconds. */
 static void drift(void)
@@ -191,6 +210,7 @@ static void uplink(void)
 }
 int main(void)
 {
+    packet_boundaries();
     jitter(); mixing(); drift(); uplink(); voice(); focus();
 #ifdef RTCP_AUDIO_CODECS
     aac("tests/fixtures/audio/sine-48k.aac",0x800000);

@@ -11,6 +11,7 @@
 #include <drivers/audio.h>
 
 #include <string.h>
+#include <stdlib.h>
 #include <stdatomic.h>
 #include <math.h>
 #include "audio_jitter.h"
@@ -206,7 +207,11 @@ static void sink_thread(void *argument)
     bool timeline[RTCP_AUDIO_LANES] = {false};
     rt_kprintf("[" TAG "] writer running: independent streams, 48kHz stereo mixer\n");
     while (!sink->stop) {
-        (void)rt_sem_take(sink->wake, rt_tick_from_millisecond(10));
+        /* Drain decoded audio under sound0 backpressure. A network wake is
+         * not a playback clock: waiting every chunk adds gaps, while rendering
+         * an incomplete chunk inserts silence at AAC packet boundaries. */
+        if (rtcp_audio_mixer_buffered(sink->mixer) < 480)
+            (void)rt_sem_take(sink->wake, rt_tick_from_millisecond(10));
         service_volume(sink);
         rtcp_audio_focus_t focus;
         bool ducked,critical; float duck_db; uint32_t ramp;
@@ -288,10 +293,18 @@ static void sink_thread(void *argument)
                     sink->dropped_bytes += (unsigned)(samples * 2);
             }
         }
+        if (rtcp_audio_mixer_buffered(sink->mixer) < 480) {
+            /* A short, finite local alert must not wait for another packet.
+             * Preserve its existing padded playback behavior. */
+            rtcp_audio_lane_stats_t pending_local;
+            rtcp_audio_mixer_stats(sink->mixer, RTCP_AUDIO_LOCAL_LANE, &pending_local);
+            if (!pending_local.queued_frames) continue;
+        }
+        /* Apply a queued volume before rendering the first samples too. */
+        if (!sink->device_started && !start_device(sink, 48000, 2)) { ++sink->write_errors; continue; }
         int16_t chunk[480 * 2];
         size_t frames = rtcp_audio_mixer_render(sink->mixer, chunk, 480);
         if (!frames) continue;
-        if (!sink->device_started && !start_device(sink, 48000, 2)) { ++sink->write_errors; continue; }
         rt_size_t bytes = frames * 4;
         rt_size_t offset = 0;
         while (offset < bytes && !sink->stop) {
@@ -511,9 +524,9 @@ void carplay_audio_sink_set_volume_db(float volume_db)
         /* rt_kprintf has no float support: print tenths of a dB by hand. */
         int tenths = (int)(-volume_db * 10.0f + 0.5f);
         if (tenths == 0) {
-            rt_kprintf("[" TAG "] sender volume 0 dB -> %d%%\n", level);
+            rt_kprintf("[" TAG "] output volume 0 dB -> %d%%\n", level);
         } else {
-            rt_kprintf("[" TAG "] sender volume -%d.%d dB -> %d%%\n",
+            rt_kprintf("[" TAG "] output volume -%d.%d dB -> %d%%\n",
                        tenths / 10, tenths % 10, level);
         }
     }
@@ -571,3 +584,24 @@ int carplay_audio_sink_local_pcm(const uint8_t *data,size_t len,uint32_t rate,ui
     if(rc==RTCP_OK) { sink->local_timestamp+=(uint32_t)(len/(channels*2));sink->local_critical=critical; }
     (void)rt_mutex_release(sink->lock);if(rc==0)(void)rt_sem_release(sink->wake);return rc;
 }
+
+/* CarPlay may leave volume ownership with the vehicle. This also permits
+ * checking software gain independently of a phone SET_PARAMETER request. */
+static void volume_command(int argc, char **argv)
+{
+    if (argc == 2) {
+        char *end;
+        if (!argv[1][0] || strlen(argv[1]) > 3) goto usage;
+        long percent = strtol(argv[1], &end, 10);
+        if (*end || percent < 0 || percent > 100) goto usage;
+        carplay_audio_sink_set_volume_db(percent == 0 ? -144.0f :
+                                        -45.0f + (float)percent * 0.45f);
+    } else if (argc != 1) goto usage;
+    int percent = carplay_audio_sink_volume_percent();
+    if (percent < 0) rt_kprintf("[carplay-aud] volume unset (default unity), or sink stopped\n");
+    else rt_kprintf("[carplay-aud] output volume %d%%\n", percent);
+    return;
+usage:
+    rt_kprintf("Usage: carplay_volume [0..100]\n");
+}
+MSH_CMD_EXPORT_ALIAS(volume_command,carplay_volume,CarPlay output volume 0..100);

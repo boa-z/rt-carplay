@@ -1,5 +1,58 @@
 # 无线音乐未建立音频流：参考实现逐项复核
 
+## iOS 27.3 实测：timing 正常，精简 Features 的单变量对照
+
+用户验证 timing 修正固件：`request_tx/response_rx` 从 34/34 增长至 41/41，
+`rejected/send_errors/timeouts` 全为 0，音频 streams/datagrams/packets 仍为 0。
+iPhone 控制中心音频选择器未出现接收端。MainAudio 起初 current/permanent=2，
+随后都变成 1；视频一直为 1。这是资源变化记录，不是卡在附件 owner。
+本记录已证明 timing 往返完成，也证明上一轮补丁尚未解决音乐接入。
+不能继续把 timing 丢应答当作当前现象的解释。
+
+选择器缺少条目是路由调查的重要观察，但它本身不等价于 iOS 内部路由注册
+失败的直接证据：CarPlay 资源通知、音频 SETUP 和通用 AirPlay 选择器也不是
+同一层状态。不能凭这个观察添加未实现的 RAOP 服务、麦克风或 type103。
+
+本轮将 RT-Thread 应用默认 Features 从继承的宽掩码切换为显式功能集合，
+用于在同一手机上与旧镜像作受控对照。这修正能力声明的范围，**不是已证实
+导致 iOS 27.3 音频路由失败的根因修复**。catplay 的
+`AirPlayReceiver::features(CarPlay)` 和 LIVI 的 `livi-core-proto/src/features.rs`
+均显式组合 Screen、Rotate、Audio、PCM、AAC、Unencrypted、MFi、UnifiedBonjour、
+Car、CarPlayControl、HKPairingAndEncrypt；本应用仅取当前已提供位的交集，
+不新增本来就未宣告的 Rotate，也不改 core 公共默认值或其他集成方。
+
+| 项目 | 旧 RT-Thread 宣告 | 本轮 RT-Thread 宣告 |
+| --- | --- | --- |
+| 压缩音频启用 | `0x5657aee2,0x61` | `0x44540280,0x61` |
+| PCM-only | `0x5647aee2,0x61` | `0x44440280,0x61` |
+| 无音频输出 | `0x5203a4e2,0x61` | `0x40000080,0x61` |
+
+保留 Screen、Audio、PCM、AAC-LC、未加密/MFi 音频、UnifiedBonjour、Car、
+CarPlayControl、加密配对中原来实际提供的位。移除 Photo/Slideshow/PhotoCaching
+(1/5/13)、metadata(15/16/17)、iTunes encryption(25)、未解释位(6/10/28)、
+RedundantAudio(11)。这是与上述两个参考的明确集合对齐，不证明其中某一位
+是当前故障原因。RedundantAudio 位的移除不等于关闭音频传输的容错处理。
+
+Features 是功能声明，格式表仍为相同的 9 条（压缩启用），PCM/AAC/Opus 位图、
+延迟、蓝牙身份、配对文件、modes、SETUP 响应、AAC/Mixer/sound0 均保持原协议
+行为。`/info` 与 TXT 共用同一经过收窄的掩码，并继续校验编码后的一致性。
+
+构建日志标记 `capabilities_profile=explicit`。可定义
+`CARPLAY_APP_LEGACY_FEATURES=1` 构建旧掩码；本次已保留用户测试过的旧镜像，
+无需为回退重新构建。两份镜像及 SHA 见 SDK 构建文档第 15 节。
+
+新增测试使用真实 plist writer 生成两组文档，经 Python plistlib 独立读取，
+逐项断言除 Features 外整份字典相同，覆盖无音频、PCM-only、压缩音频三种
+情况；同时核对各组编码后的 TXT/plist，验证不会给无音频构建添加音频，
+不会给 PCM-only 构建添加 AAC。测试中的 decoder-availability seam 可控，
+不把它算作实际 codec 运行或 iOS 验证。
+
+实机先验证新镜像的实际 `/info` 为 `features=0x0000006144540280`，
+音频格式仍为 9 条，再观察输出选择器和 100/101/102 SETUP。
+若出现音频 SETUP，需用原镜像复测一次确认可重复差异，再缩小到具体位；
+只凭一轮成功不能认定是哪一位引起。若仍然没有，便说明这个功能集合差异
+未解决现象，不能再把 Features 一致性或 timing 端口反复当作主因排查。
+
 ## 最新实机结果：资源正常，仍没有音频协商
 
 用户随后验证了 `6d0b2a5` 固件：MainAudio 的 current/permanent 均为 1，

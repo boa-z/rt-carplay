@@ -86,6 +86,11 @@
 #define CARPLAY_APP_AUDIO_SAMPLE_RATE 0U
 #endif
 
+/* Compatibility escape hatch for an otherwise identical legacy-mask build. */
+#ifndef CARPLAY_APP_LEGACY_FEATURES
+#define CARPLAY_APP_LEGACY_FEATURES 0
+#endif
+
 #define DEFAULT_NAME "rt-carplay"
 #define DEFAULT_MODEL "ArtInChip"
 #define DEFAULT_SSID "ArtInChip CarPlay"
@@ -966,6 +971,27 @@ static int start_wifi(app_state_t *app)
 }
 #endif /* LPKG_RT_CARPLAY_LUBANLITE_WIFI */
 
+static uint64_t capability_features(uint64_t offered, bool legacy)
+{
+    if (legacy) return offered;
+    /* catplay/LIVI's explicit CarPlay capabilities, restricted to our offer.
+     * Do not add Rotate (bit 8): this receiver uses a fixed display.
+     * Omit inherited Photo/Slideshow/PhotoCaching, metadata, iTunes encryption,
+     * undocumented bits and redundant-audio discovery claims. Audio formats,
+     * microphone, pairing identities and initial modes are independent. */
+    const uint64_t supported = (UINT64_C(1) << 7)  /* Screen */
+        | (UINT64_C(1) << 9)                     /* Audio */
+        | (UINT64_C(1) << 18)                    /* PCM */
+        | (UINT64_C(1) << 20)                    /* AAC-LC, only if offered */
+        | (UINT64_C(1) << 22)                    /* unencrypted audio */
+        | (UINT64_C(1) << 26)                    /* MFi-SAP audio */
+        | (UINT64_C(1) << 30)                    /* unified Bonjour */
+        | (UINT64_C(1) << 32)                    /* Car */
+        | (UINT64_C(1) << 37)                    /* CarPlay Control */
+        | (UINT64_C(1) << 38);                   /* encrypted pairing */
+    return offered & supported;
+}
+
 /* Compare the encoded buffers, not only the configuration used to build them. */
 static bool announcement_features_match(const uint8_t *info, size_t info_length,
                                         const uint8_t *txt, size_t txt_length)
@@ -1016,6 +1042,8 @@ static int build_announcement_data(app_state_t *app)
         info.audio_sample_rate = CARPLAY_APP_AUDIO_SAMPLE_RATE;
     }
 #endif
+    info.features = capability_features(airplay_info_plist_features(&info),
+                                        CARPLAY_APP_LEGACY_FEATURES != 0);
     if (!airplay_info_plist_build(&info, app->info_plist,
                                   sizeof(app->info_plist),
                                   &app->info_plist_len) ||
@@ -1031,6 +1059,7 @@ static int build_announcement_data(app_state_t *app)
         return RTCP_EIO;
     APP_LOG("capabilities features=%s audio_output=%u compressed=%u", feature_words,
             info.audio_output ? 1U : 0U, info.audio_compressed ? 1U : 0U);
+    APP_LOG("capabilities_profile=%s", CARPLAY_APP_LEGACY_FEATURES ? "legacy" : "explicit");
     airplay_txt_record_t records[AIRPLAY_TXT_MAX_RECORDS];
     airplay_txt_config_t txt;
     memset(&txt, 0, sizeof(txt));

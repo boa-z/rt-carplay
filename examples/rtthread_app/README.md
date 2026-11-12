@@ -4,6 +4,15 @@
 top of the Luban-Lite port.  It is RT-Thread specific; the reusable pieces
 stay in `core/` and `port/`.
 
+The RT-Thread app now limits Features to the explicitly used CarPlay capability
+set, intersected with the actual audio offer. With compressed audio enabled,
+TXT and `/info` both use `0x44540280,0x61`. Define
+`CARPLAY_APP_LEGACY_FEATURES=1` at compile time for the previous broad mask.
+This is a controlled compatibility comparison for an iOS 27.3 phone that never
+requests audio SETUP; it is not yet a hardware-validated routing fix. Audio
+formats, initial modes and backend playback behavior are unchanged. See
+[the reference review](../../docs/audio-routing-reference-review.md).
+
 | Step | What happens |
 |------|--------------|
 | Entropy | `rtcp_lubanlite_random()` (CE TRNG) replaces the NULL RT-Thread RNG |

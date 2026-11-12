@@ -1,19 +1,22 @@
+#define _POSIX_C_SOURCE 200809L
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include "../../examples/rtthread_app/audio_test_lubanlite.c"
 static struct host_audio_device speaker;
 static unsigned time_ms, total_frames, peak[2], open_count, close_count;
 static unsigned configured_rate, controls, startup_fail, write_fail, configure_fail;
 static void (*entry)(void *);
+static unsigned requested_stack;
 static bool capture_open;
 rt_tick_t rt_tick_get(void) { return time_ms; }
 rt_tick_t rt_tick_from_millisecond(int n) { return (unsigned)n; }
 void rt_thread_mdelay(int n) { time_ms+=(unsigned)n; }
 int rt_kprintf(const char *f,...) {(void)f;return 0;}
 rt_thread_t rt_thread_create(const char *name,void (*fn)(void *),void *arg,unsigned stack,unsigned prio,unsigned tick)
-{(void)name;(void)arg;(void)stack;(void)prio;(void)tick;entry=fn;return (void *)1;}
+{(void)name;(void)arg;requested_stack=stack;(void)prio;(void)tick;entry=fn;return (void *)1;}
 int rt_thread_startup(rt_thread_t t) {(void)t;return startup_fail?-1:0;}
 int rt_thread_delete(rt_thread_t t) {(void)t;return 0;}
 rt_device_t rt_device_find(const char *name) {assert(!strcmp(name,"sound0"));return &speaker;}
@@ -45,13 +48,24 @@ int rtcp_audio_capture_read(rtcp_audio_capture_t *c,int16_t *pcm,size_t n) {
  return (int)n;
 }
 void rtcp_audio_capture_close(rtcp_audio_capture_t *c) {if(c){assert(capture_open);capture_open=false;}}
+/* Unlike the original synchronous seam, enforce the requested worker stack.
+ * This runs the real FAAD fixture with an OS guard page and ASan/UBSan too. */
+static void *bounded_entry(void *arg) {(void)arg;entry(NULL);return NULL;}
+static void run_entry(void)
+{
+ pthread_attr_t attr;pthread_t worker;
+ assert(!pthread_attr_init(&attr));
+ assert(!pthread_attr_setstacksize(&attr,requested_stack));
+ assert(!pthread_create(&worker,&attr,bounded_entry,NULL));
+ assert(!pthread_attr_destroy(&attr));assert(!pthread_join(worker,NULL));
+}
 static void run(audio_test_mode_t mode,unsigned rate,unsigned channel,unsigned gain,bool mute)
 {
  audio_test_config_t c={mode,rate,channel};carplay_audio_test_gain(gain,mute);
  total_frames=peak[0]=peak[1]=0;time_ms=0;
  assert(carplay_audio_test_start(&c)==0);
  assert(carplay_audio_test_start(&c)==RTCP_ESTATE);
- entry(NULL);
+ run_entry();
  audio_test_status_t s;carplay_audio_test_status(&s);
  assert(!s.running && !s.error && !speaker.ref_count && !capture_open);
  assert(s.frames>0 && (mode==AUDIO_TEST_MIC_LEVEL?s.bytes==0:s.bytes==total_frames*4));
@@ -70,11 +84,11 @@ int main(void)
  assert(s.peak_left==1000 && s.peak_right==2000 && !s.bytes);
  run(AUDIO_TEST_MIC_LOOP,48000,0,20,false);assert(peak[0]==200 && peak[1]==400);
  audio_test_config_t c={AUDIO_TEST_TONE,48000,0};
- assert(carplay_audio_test_start(&c)==0);assert(carplay_audio_test_stop()==RTCP_ETIMEDOUT);entry(NULL);
+ assert(carplay_audio_test_start(&c)==0);assert(carplay_audio_test_stop()==RTCP_ETIMEDOUT);run_entry();
  carplay_audio_test_status(&s);assert(!s.running && !s.bytes && !s.frames);
- speaker.ref_count=1;assert(carplay_audio_test_start(&c)==0);entry(NULL);carplay_audio_test_status(&s);assert(s.error==RTCP_ESTATE);speaker.ref_count=0;
- write_fail=1;assert(carplay_audio_test_start(&c)==0);entry(NULL);carplay_audio_test_status(&s);assert(s.error==RTCP_EIO);write_fail=0;
- configure_fail=1;assert(carplay_audio_test_start(&c)==0);entry(NULL);carplay_audio_test_status(&s);assert(s.error==RTCP_EIO);configure_fail=0;
+ speaker.ref_count=1;assert(carplay_audio_test_start(&c)==0);run_entry();carplay_audio_test_status(&s);assert(s.error==RTCP_ESTATE);speaker.ref_count=0;
+ write_fail=1;assert(carplay_audio_test_start(&c)==0);run_entry();carplay_audio_test_status(&s);assert(s.error==RTCP_EIO);write_fail=0;
+ configure_fail=1;assert(carplay_audio_test_start(&c)==0);run_entry();carplay_audio_test_status(&s);assert(s.error==RTCP_EIO);configure_fail=0;
  startup_fail=1;assert(carplay_audio_test_start(&c)==RTCP_ENOMEM);
  assert(open_count==close_count);
  puts("offline audio worker: tone/silence/AAC, rates/channels/gain/mute, microphone meter/loopback, busy/failure/cleanup passed");

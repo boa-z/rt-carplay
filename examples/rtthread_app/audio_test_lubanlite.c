@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "audio_test_lubanlite.h"
 #include "audio_codec.h"
+#include "audio_worker_stack.h"
 #include "rtcp/rtcp.h"
 #include <rtthread.h>
 #include <rtdevice.h>
@@ -16,6 +17,8 @@ static atomic_bool alive, stopping, muted;
 static atomic_uint volume=20, frames, bytes, peak_left, peak_right, writes;
 static atomic_int last_error;
 static audio_test_config_t config;
+/* One test worker at a time. Keep caller scratch out of FAAD's stack chain. */
+static int16_t test_pcm[2048];
 
 void carplay_audio_test_gain(unsigned percent, bool mute)
 { atomic_store(&volume,percent>100?100:percent);atomic_store(&muted,mute); }
@@ -74,7 +77,7 @@ static void test_worker(void *arg)
     rt_tick_t began=rt_tick_get();
     while(!atomic_load(&stopping) && captured<rate*10U &&
           (rt_tick_t)(rt_tick_get()-began)<rt_tick_from_millisecond(10000)) {
-        int16_t pcm[2048];size_t n=480;
+        int16_t *pcm=test_pcm;size_t n=480;
         if(mic) {
 #if defined(RTCARPLAY_MICROPHONE)
             int got=rtcp_audio_capture_read(capture,pcm,480);
@@ -127,6 +130,7 @@ done:
     rtcp_audio_capture_close(capture);
 #endif
     rtcp_audio_decoder_destroy(decoder);
+    carplay_audio_stack_report("audio-test");
     atomic_store(&last_error,error);
     rt_kprintf("[audio-test] done mode=%u frames=%u bytes=%u error=%d\n",
                (unsigned)config.mode,atomic_load(&frames),atomic_load(&bytes),error);
@@ -140,7 +144,7 @@ int carplay_audio_test_start(const audio_test_config_t *c)
     config=*c;atomic_store(&stopping,false);atomic_store(&last_error,0);
     atomic_store(&frames,0);atomic_store(&bytes,0);atomic_store(&writes,0);
     atomic_store(&peak_left,0);atomic_store(&peak_right,0);atomic_store(&alive,true);
-    rt_thread_t t=rt_thread_create("audio-test",test_worker,NULL,24*1024,18,10);
+    rt_thread_t t=rt_thread_create("audio-test",test_worker,NULL,CARPLAY_AUDIO_WORKER_STACK_BYTES,18,10);
     if(!t || rt_thread_startup(t)!=RT_EOK) {
         if(t)rt_thread_delete(t);
         atomic_store(&alive,false);atomic_store(&last_error,RTCP_ENOMEM);return RTCP_ENOMEM;

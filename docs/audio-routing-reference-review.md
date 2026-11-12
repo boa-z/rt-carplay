@@ -1,5 +1,29 @@
 # 无线音乐未建立音频流：参考实现逐项复核
 
+## PCM 正常、AAC 测试栈溢出：修正线程栈与调用方工作区
+
+用户确认开发板 Speaker 的直接 PCM tone 正常，AAC 测试却打印
+`thread:audio-test stack overflow`。原测试线程仅 24 KiB。D213 旧 ELF 中
+`test_worker` 栈帧 4304 字节，FAAD 的 `reconstruct_channel_pair` 8304、
+`ifilter_bank` 8384、`faad_imdct` 4240；嵌套合计下界 25232，已经超过
+24576 字节，还未计入中间调用及 RTOS/libc。此前 Host 同步模拟未限制该栈，
+未覆盖实际 RTOS 预算。这是测试卡死的明确原因，不需要额外音乐文件复现。
+
+本轮统一离线/CarPlay 输出 worker 栈为 96 KiB，并把调用方 PCM、压缩包、
+零帧和输出块放入各自单 worker 所有的工作区。D213 新 ELF 的离线 worker
+栈帧降到 224 字节，播放 worker 从 18320 降到 784 字节。第三方 decoder
+内部临时数组保持原样；不改变格式、速率、功放或 Speaker 路由。
+
+离线线程结束时、CarPlay 每 200 包及结束时打印 RTOS stack total/used_peak/
+free_min，按 RT-Thread '#' 栈填充值测量水位，只表示已执行内容。Host 测试
+改为按请求的 96 KiB 建立 native pthread 栈，实际运行 AAC fixture，56 项
+ASan/UBSan 测试及 boundary 通过，D213 构建通过。尚未复测实机；本证据不能
+直接证明之前的 CarPlay 点击声也由栈造成，需用修正镜像先重测离线 AAC。
+
+当前无需 WAV/MP3。若内置 AAC 正常后实际音乐仍异常，后续可比较相同内容
+的 AAC-LC 与 PCM WAV；MP3 不能直接覆盖正在使用的 AAC decoder 路径。
+镜像及哈希见 SDK 构建记录第 20 节。
+
 ## Speaker 仍只有点击声：增加离线 LVGL 音频测试
 
 用户复测播放修正镜像后仍只有“哒哒声”，使用开发板 Speaker 接口；上一轮

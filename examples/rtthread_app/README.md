@@ -581,3 +581,16 @@ not establish the output-channel mapping; compare Left/Right as well.
 Host tests exercise the real test worker using virtual audio/capture devices
 and the real AAC decoder, plus launcher ownership and stop-timeout handling.
 They do not establish audible output or physical mic capture on the board.
+
+
+AAC stack follow-up: board PCM tone worked, but the original 24 KiB test
+worker overflowed on AAC. RV64 disassembly showed a lower bound of 25,232
+bytes across the caller and three nested FAAD frames alone. Both offline
+and CarPlay output workers now reserve 96 KiB; large caller I/O buffers are
+worker-owned workspace instead of stack arrays. Offline tests report RTOS
+stack watermarks at completion; CarPlay reports after each 200 packets and
+on exit. `used_peak/free_min` use the RT-Thread '#' fill pattern and are
+observations for the exercised content, not a proof for all AAC inputs.
+The Host diagnostic regression now enforces the worker's requested native
+thread stack, in addition to ASan/UBSan. Earlier synchronous Host tests did
+not cover the RTOS stack budget. Physical AAC playback remains to be retested.

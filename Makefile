@@ -233,7 +233,7 @@ check-lubanlite-capabilities:
 
 # Offline speaker/microphone test worker against virtual devices.
 $(BUILD)/test_audio_diagnostics: tests/unit/test_audio_diagnostics.c examples/rtthread_app/audio_test_lubanlite.c examples/rtthread_app/audio_test_fixture.h $(LIB) $(MBEDTLS_LIB)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MICROPHONE -Itests/support/lubanlite_audio -Iport/luban-lite/include -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MICROPHONE -Itests/support/lubanlite_audio -Iport/luban-lite/include -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
 
 # Actual board sink with a pthread-backed RT-Thread/device seam.
 $(BUILD)/test_audio_sink: tests/unit/test_audio_sink.c examples/rtthread_app/audio_sink_lubanlite.c tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(MBEDTLS_LIB)

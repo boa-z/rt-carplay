@@ -17,6 +17,7 @@
 #include "audio_jitter.h"
 #include "audio_mixer.h"
 #include "audio_codec.h"
+#include "audio_worker_stack.h"
 #include "audio_focus.h"
 #if defined(RTCARPLAY_MICROPHONE)
 #include "audio_input_lubanlite.h"
@@ -27,7 +28,7 @@
 #define TAG "carplay-aud"
 #define SINK_DEVICE_NAME "sound0"
 
-#define SINK_THREAD_STACK_BYTES (64U * 1024U)
+#define SINK_THREAD_STACK_BYTES CARPLAY_AUDIO_WORKER_STACK_BYTES
 #define SINK_THREAD_PRIORITY 18U
 #define SINK_THREAD_TICK 20U
 #define SINK_AMP_SETTLE_MS 200U /* aplay's power-amplifier settle value */
@@ -74,6 +75,9 @@ typedef struct {
     atomic_uint write_errors;
     atomic_uint replays;
     atomic_uint config_errors;
+    /* Writer-owned workspace; never copied onto the nested codec stack. */
+    uint8_t packet[RTCP_AUDIO_PACKET_MAX];
+    int16_t pcm[5760], silence[960], chunk[960];
 } audio_sink_t;
 
 static audio_sink_t s_sink;
@@ -201,6 +205,7 @@ static void sink_thread(void *argument)
     audio_sink_t *sink = argument;
     rtcp_audio_decoder_t *decoders[RTCP_AUDIO_LANES] = {0};
     unsigned generation[RTCP_AUDIO_LANES] = {0};
+    unsigned stack_report_packets=0;
     unsigned last_gain[RTCP_AUDIO_LANES];
     for(unsigned i=0;i<RTCP_AUDIO_LANES;++i)last_gain[i]=32768;
     uint32_t expected[RTCP_AUDIO_LANES] = {0};
@@ -243,7 +248,7 @@ static void sink_thread(void *argument)
         }
         for (unsigned lane = 0; lane < RTCP_AUDIO_LANES && !sink->stop; ++lane) {
             for (unsigned budget = 0; budget < 8; ++budget) {
-                uint8_t packet[RTCP_AUDIO_PACKET_MAX];
+                uint8_t *packet=sink->packet;
                 rtcp_audio_format_t format;
                 uint32_t timestamp;
                 unsigned gen;
@@ -259,7 +264,7 @@ static void sink_thread(void *argument)
                 if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK) break;
                 gen = sink->generation[lane];
                 format = sink->format[lane];
-                got = rtcp_audio_jitter_pop(sink->queue[lane], packet, sizeof(packet), &timestamp, sink_now_us());
+                got = rtcp_audio_jitter_pop(sink->queue[lane], packet, RTCP_AUDIO_PACKET_MAX, &timestamp, sink_now_us());
                 (void)rt_mutex_release(sink->lock);
                 if (gen != generation[lane]) {
                     rtcp_audio_decoder_destroy(decoders[lane]); decoders[lane] = NULL;
@@ -269,7 +274,7 @@ static void sink_thread(void *argument)
                 if (!decoders[lane] && rtcp_audio_decoder_create(&format, &decoders[lane]) != RTCP_OK) {
                     ++sink->write_errors; continue;
                 }
-                int16_t pcm[5760]; size_t samples = 0;
+                int16_t *pcm=sink->pcm; size_t samples = 0;
                 if (rtcp_audio_decoder_decode(decoders[lane], packet, (size_t)got, pcm, 5760, &samples) != RTCP_OK) {
                     ++sink->write_errors; continue;
                 }
@@ -277,7 +282,7 @@ static void sink_thread(void *argument)
                     int32_t gap = (int32_t)(timestamp - expected[lane]);
                     if (gap < 0) continue;
                     if (gap > 0 && (uint64_t)gap * 1000 / format.clock_rate <= 100) {
-                        int16_t silence[960] = {0};
+                        int16_t *silence=sink->silence;
                         size_t missing = (size_t)((uint64_t)gap * format.sample_rate / format.clock_rate);
                         while (missing) {
                             size_t n = missing > 480 ? 480 : missing;
@@ -302,7 +307,10 @@ static void sink_thread(void *argument)
         }
         /* Apply a queued volume before rendering the first samples too. */
         if (!sink->device_started && !start_device(sink, 48000, 2)) { ++sink->write_errors; continue; }
-        int16_t chunk[480 * 2];
+        if(sink->packets>=stack_report_packets+200) {
+            carplay_audio_stack_report(TAG);stack_report_packets=sink->packets;
+        }
+        int16_t *chunk=sink->chunk;
         size_t frames = rtcp_audio_mixer_render(sink->mixer, chunk, 480);
         if (!frames) continue;
         rt_size_t bytes = frames * 4;
@@ -318,6 +326,7 @@ static void sink_thread(void *argument)
     }
     for (unsigned i = 0; i < RTCP_AUDIO_LANES; ++i) rtcp_audio_decoder_destroy(decoders[i]);
     stop_device(sink);
+    carplay_audio_stack_report(TAG);
     rt_kprintf("[" TAG "] stopped: %u packets, %u replay(s), %u dropped bytes, %u errors\n",
                sink->packets, sink->replays, sink->dropped_bytes, sink->write_errors);
     sink->thread_running = false;

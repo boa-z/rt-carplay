@@ -1,5 +1,48 @@
 # 已配对 iPhone 在 READY 状态重连失败
 
+
+## 最新实机反馈：旧配对自动连接成功，继续修复 H5
+
+最新用户日志确认上一轮 READY 修复已实际生效：BR bond 恢复，2 秒后主动 paging，
+两次连接均使用保存的 link key 认证成功（status=0x00）。第一次手机以 `0x14`
+（远端资源不足）结束 ACL；30 秒后的重试建立 RFCOMM，完成 MFi、Wi-Fi、
+认证后的 iAP2 tunnel 和视频首帧 stage=5。不能再将该次连接描述为配对密钥失效。
+BR 地址 `DC:B5:4F:7B:E3:20` 与 Wi-Fi 私有地址不同是正常现象。
+
+日志还出现 H5 序号重试和 `HOST_NUM_COMPLETED_PACKETS status 0x12`。SDK
+提交 `351d2ec9d` 修复了两类独立问题：
+
+* UART 整帧发送缺少互斥、未遵守发送窗口、重传搬动队列及回退序号与 ACK
+  并发；窗口外 ACK 还可能导致计数下溢的无限循环。改为串行整帧发送、
+  按原序号原队列重传、有界 ACK 校验和窗口唤醒；SLIP 转义支持分段到达。
+* 接收缓冲区默认 index=0/handle=0，重复／残缺 H5 ACL 在交付 Host 前被丢弃，
+  释放回调会误报连接 0 的接收完成计数。分配时改为无效索引，未被 Host 接受的
+  帧不产生新 credit，并校验连接 handle，防止索引复用。
+
+Host 测试编译实际 H5、ACL 分配器和完成回调，复现了修改前的错误完成计数。
+修复后并发 ACK/重传、200 帧并发 UART、窗口、序号回绕、重复及残缺 ACL、
+编码与释放平衡测试通过，ASan/UBSan 通过。已有 reconnect、bond、LVGL、handoff、
+capabilities 回归及 D213 SDK 构建通过。以上不等于新修复已实机验证，也没有
+证明手机第一次的 0x14 是这些 H5 缺陷引起。
+
+新镜像、SHA-256、构建命令和完整复测清单见 SDK
+[构建文档第 12 节](../../luban-lite-jc-carplay-oss/doc/rt-carplay-build.md)。
+保留配对，冷启动选择 Wireless，确认启动标记：
+
+```text
+H5 transport: serialized frames, bounded window, in-place retransmission
+```
+
+保存 READY 后至少 90 秒及 Wi-Fi 接管前后日志，运行 `carplay_bt status`、
+`carplay_iap2 status`、`carplay_status`。重点看自动重试后能否到 stage=5，
+`H5 sequence retry` 累计是否持续增长，以及 `HOST_NUM_COMPLETED_PACKETS 0x12`
+是否仍存在。序号重试按 1、2、4、8…累计次数输出，不能因旧日志文本消失就
+宣称故障消失。接管主动断开时的 RFCOMM -110 不单独判失败。
+
+本日志 `/info` 的 bluetoothIDs、身份与 TXT/plist Features 已吻合，仍没有
+音频 SETUP。这里的修复不代表音乐输出问题已解决；下一步音频诊断仍需关注
+是否出现 type=100/101/102，不能转而归咎 AAC、Mixer 或 sound0。
+
 ## READY 自动重连与“手动 Connect 无日志”的后续修正
 
 产品行为上，已经配对并允许无线 CarPlay 的手机，在双方蓝牙／Wi-Fi 开启、

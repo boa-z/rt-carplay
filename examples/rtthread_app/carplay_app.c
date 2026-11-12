@@ -1774,6 +1774,12 @@ static int cmd_carplay_bt(int argc, char **argv)
                    (unsigned)rtcp_bt_lubanlite_channel(),
                    rtcp_bt_lubanlite_link_up() ? "up" : "down",
                    rtcp_bt_lubanlite_rx_dropped());
+        rtcp_bt_pairing_status_t pairing;
+        rtcp_bt_lubanlite_pairing_status(&pairing);
+        rt_kprintf("carplay_bt bonds=%u/%u persistent=%u storage_error=%d HCI=0x%02x security=%u failures=%u\n",
+                   pairing.bond_count, pairing.bond_capacity, pairing.persistent,
+                   pairing.storage_error, pairing.hci_error, pairing.security_error,
+                   pairing.failures);
         return 0;
     }
     rt_kprintf("usage: carplay_bt start|stop|status\n");

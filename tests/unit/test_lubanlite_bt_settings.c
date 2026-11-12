@@ -30,10 +30,13 @@ rt_mutex_t rt_mutex_create(const char *name, int flags) { (void)name; (void)flag
 int rt_mutex_take(rt_mutex_t m, int wait) { (void)m; (void)wait; assert(!locked); locked = true; return 0; }
 int rt_mutex_release(rt_mutex_t m) { (void)m; assert(locked); locked = false; return 0; }
 static unsigned loaded, committed;
+static int commit_error;
+static bool reject_restore;
 static int load_key(const char *name, size_t len, settings_read_cb read_cb, void *arg)
 {
     unsigned char value[256], direct[256];
     assert(!locked && name && len <= sizeof(value));
+    if (reject_restore) return -ENOENT;
     assert(read_cb(arg, value, len) == (ssize_t)len);
     /* The host's h_set is allowed to call back into the settings core. */
     char path[64]; snprintf(path, sizeof(path), "bt/link_key/%s", name);
@@ -41,7 +44,7 @@ static int load_key(const char *name, size_t len, settings_read_cb read_cb, void
     assert(!memcmp(value, direct, len)); ++loaded;
     return 0;
 }
-static int commit_keys(void) { assert(!locked); ++committed; return 0; }
+static int commit_keys(void) { assert(!locked); ++committed; return commit_error; }
 SETTINGS_STATIC_HANDLER_DEFINE(test_keys, "bt/link_key", NULL, load_key, commit_keys, NULL);
 static void restart(void)
 {
@@ -87,6 +90,17 @@ int main(int argc, char **argv)
     restart();
     assert(settings_load_one("bt/link_key/phone2", read, 16) == -ENOENT);
     assert(settings_load_one("bt/id", read, 16) == 16);
+    /* A rejected BR record must not be reported as restored. */
+    assert(!settings_save_one("bt/link_key/phone", key, 16));
+    reject_restore = true;
+    assert(settings_load() == -ENOENT);
+    assert(rtcp_bt_settings_error() == -ENOENT);
+    assert(settings_load_one("bt/link_key/phone", read, 16) == 16);
+    reject_restore = false;
+    commit_error = -EIO;
+    assert(settings_load() == -EIO && rtcp_bt_settings_error() == -EIO);
+    commit_error = 0;
+    restart();
     /* An actual read error still prevents init and preserves the file.
      * Retrying after recovery must restore the existing local identity. */
     s_ready = s_file_loaded = false;
@@ -96,6 +110,25 @@ int main(int argc, char **argv)
     fail_read = false;
     assert(!settings_subsys_init() && !settings_load());
     assert(settings_load_one("bt/id", read, 16) == 16);
+    /* A store made by a larger configuration must not be silently
+     * truncated/compacted when this firmware has fewer table entries. */
+    file = fopen(store, "wb"); assert(file);
+    for (unsigned i = 0; i < SETTINGS_MAX_ENTRIES + 1; ++i) {
+        char name[64]; uint8_t header[6];
+        snprintf(name, sizeof(name), "bt/link_key/peer%u", i);
+        size_t n = record_encode(header, name, 16);
+        assert(fwrite(header, 1, 6, file) == 6);
+        assert(fwrite(name, 1, n, file) == n);
+        assert(fwrite(key, 1, 16, file) == 16);
+    }
+    long original_size = ftell(file);
+    assert(!fclose(file));
+    s_ready = s_file_loaded = false;
+    memset(s_entries, 0, sizeof(s_entries));
+    assert(settings_subsys_init() == -EIO && !s_ready);
+    file = fopen(store, "rb"); assert(file);
+    assert(!fseek(file, 0, SEEK_END) && ftell(file) == original_size);
+    assert(!fclose(file));
     unlink(store); unlink(temporary); unlink(backup); assert(!rmdir(directory));
     puts("Actual BT settings: reboot restore, reentrant handlers, compaction, torn suffix repair, I/O propagation, backup recovery and deletion passed");
     printf("First-boot missing files and actual I/O failure/retry passed with %s errno\n",

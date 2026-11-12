@@ -208,6 +208,7 @@ check-lubanlite-bonds:
 	  -Wl,-T,tests/support/lubanlite_demo/settings_sections.ld -o $(BUILD)/test_lubanlite_bt_settings
 	$(BUILD)/test_lubanlite_bt_settings
 	$(BUILD)/test_lubanlite_bt_settings negative-errno
+	SDK_ROOT=$(SDK_ROOT) python3 tests/run_lubanlite_br_restore.py
 
 .PHONY: check-rtthread-multicast
 check-rtthread-multicast:

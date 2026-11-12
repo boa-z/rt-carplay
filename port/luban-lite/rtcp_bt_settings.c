@@ -376,7 +376,13 @@ static bool file_load(void)
         if (len == SETTINGS_TOMBSTONE) {
             entry_delete(name);
         } else {
-            (void)entry_set(name, value, len);
+            if (!entry_set(name, value, len)) {
+                /* Never compact an incomplete RAM snapshot over the store:
+                 * doing so permanently loses bonds beyond the table limit. */
+                RTCP_LOGE(TAG, "settings table full while replaying %s", name);
+                fclose(file);
+                return false;
+            }
         }
     }
     fclose(file);
@@ -642,11 +648,18 @@ int settings_load(void)
         if (handler != NULL && handler->h_set != NULL) {
             int rc = handler->h_set(next, snapshot.len, read_cb_from_mem, &snapshot);
             if (rc && !result) result = rc;
+            if (rc) RTCP_LOGE(TAG, "restore failed key=%s bytes=%u rc=%d",
+                             snapshot.name, (unsigned)snapshot.len, rc);
+        } else if (!strncmp(snapshot.name, "bt/link_key/", strlen("bt/link_key/"))) {
+            /* A linker/configuration error must not look like a restored
+             * bond. iOS still holds the matching key on its side. */
+            RTCP_LOGE(TAG, "BR bond handler missing key=%s", snapshot.name);
+            if (!result) result = -ENOENT;
         }
     }
 
     int committed = settings_commit_all();
-    if (result) s_storage_error = result;
+    if (result || committed) s_storage_error = result ? result : committed;
     return result ? result : committed;
 }
 

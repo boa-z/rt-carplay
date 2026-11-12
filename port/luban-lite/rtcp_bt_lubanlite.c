@@ -355,11 +355,25 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 }
 static void acl_connected(struct bt_conn *conn, uint8_t error)
 {
-    (void)conn;
     rt_base_t flags = rt_hw_interrupt_disable();
     s_pair.hci_error = error;
     rt_hw_interrupt_enable(flags);
     if (error) RTCP_LOGW(BT_TAG, "ACL connection failed hci_reason=0x%02x", error);
+    else {
+        const bt_addr_t *peer = bt_conn_get_dst_br(conn);
+        if (peer) RTCP_LOGI(BT_TAG, "ACL connected peer=%02x:%02x:%02x:%02x:%02x:%02x",
+                           peer->val[5], peer->val[4], peer->val[3],
+                           peer->val[2], peer->val[1], peer->val[0]);
+    }
+}
+static void acl_security_changed(struct bt_conn *conn, bt_security_t level,
+                                 enum bt_security_err error)
+{
+    (void)conn;
+    rt_base_t flags = rt_hw_interrupt_disable();
+    s_pair.security_error = (uint8_t)error;
+    rt_hw_interrupt_enable(flags);
+    RTCP_LOGI(BT_TAG, "ACL security level=%u error=%u", (unsigned)level, (unsigned)error);
 }
 static void acl_disconnected(struct bt_conn *conn, uint8_t reason)
 {
@@ -378,6 +392,7 @@ static struct bt_conn_auth_info_cb pairing_info = {
 };
 static struct bt_conn_cb acl_callbacks = {
     .connected = acl_connected, .disconnected = acl_disconnected,
+    .security_changed = acl_security_changed,
 };
 static bool pairing_callbacks_registered;
 
@@ -727,13 +742,18 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
      * call verifies it before dispatching the restored records to the host. */
     err = settings_subsys_init();
     if (err != 0) {
-        RTCP_LOGW(BT_TAG, "settings_subsys_init failed (%d)", err);
+        RTCP_LOGE(BT_TAG, "settings_subsys_init failed (%d); service not published", err);
+        return RTCP_EIO;
     }
     err = settings_load();
     if (err != 0) {
-        RTCP_LOGW(BT_TAG, "settings_load failed (%d)", err);
+        RTCP_LOGE(BT_TAG, "settings_load failed (%d); service not published", err);
+        return RTCP_EIO;
     } else {
-        RTCP_LOGI(BT_TAG, "Bluetooth settings loaded");
+        unsigned restored = 0;
+        bt_br_foreach_bond(count_bond, &restored);
+        RTCP_LOGI(BT_TAG, "Bluetooth settings loaded: BR bonds=%u/%u storage_error=%d",
+                  restored, (unsigned)CONFIG_BT_MAX_PAIRED, rtcp_bt_settings_error());
     }
 #endif
 

@@ -1,5 +1,8 @@
 # D213 无线 CarPlay 与新 iPhone 配对验证
 
+已配对手机在 READY 状态重连失败的最新检查和保留旧配对的复测步骤，见
+[Bluetooth bond reconnect](bluetooth-bond-reconnect.md)。
+
 本次改动接通双模式 LVGL 启动流程，并修复已找到的蓝牙交互、密钥持久化和
 无线地址发布缺口。主机测试和完整 SDK 构建通过不等于新 iPhone 已实测稳定；
 尚没有这版固件在板上的蓝牙认证、Wi-Fi 接管日志。

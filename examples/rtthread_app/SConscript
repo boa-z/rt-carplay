@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+raise RuntimeError('The Luban-Lite application moved to luban-lite-carplay/application/rt-thread/rtcarplay; use the SDK root SConscript for the portable library.')

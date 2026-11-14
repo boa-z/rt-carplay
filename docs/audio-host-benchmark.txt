@@ -1,0 +1,10 @@
+Host optimized single-thread benchmark; not D213 timing. Heap excludes libc, thread stacks and device DMA.
+AAC-LC-48k-stereo-decode p50_us=103.61 p95_us=169.13 max_us=331.54 host_core_percent=0.553 heap_peak_bytes=27992
+Opus-48k-mono-encode p50_us=304.05 p95_us=760.87 max_us=978.90 host_core_percent=1.817 heap_peak_bytes=42512
+Opus-48k-mono-decode p50_us=39.88 p95_us=91.62 max_us=147.38 host_core_percent=0.242 heap_peak_bytes=42512
+NS-AGC-48k-mono p50_us=65.03 p95_us=73.32 max_us=83.93 host_core_percent=0.659 heap_peak_bytes=51720
+NS-AGC-AEC-48k-mono p50_us=273.27 p95_us=289.86 max_us=308.95 host_core_percent=2.766 heap_peak_bytes=181342
+9-lane-mix-plus-allocated-jitter p50_us=59.67 p95_us=67.30 max_us=78.48 host_core_percent=0.604 heap_peak_bytes=840640
+Linux version 6.12.113+deb13-amd64 (debian-kernel@lists.debian.org) (x86_64-linux-gnu-gcc-14 (Debian 14.2.0-19) 14.2.0, GNU ld (GNU Binutils for Debian) 2.44) #1 SMP PREEMPT_DYNAMIC Debian 6.12.113-1 (2026-10-15)
+CPU: AMD EPYC 7402 24-Core Processor, x86_64 KVM guest
+300 iterations; Release; no sanitizers; all codec sources fixed-point/generic.

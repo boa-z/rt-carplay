@@ -1,0 +1,71 @@
+rt-carplay
+Copyright (C) 2026 rt-carplay contributors
+
+rt-carplay is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.  See LICENSE for the full text.
+
+Third-party notices
+-------------------
+
+Third-party code currently included:
+
+- `third_party/ed25519/` vendors orlp/ed25519 (zlib license, Copyright (c)
+  2015 Orson Peters <orsonpeters@gmail.com>); the unmodified sources and the
+  license text are kept alongside.  It provides the software Ed25519 identity
+  used by Pair-Setup/Pair-Verify; it is not Apple MFi material.
+
+Third-party protocol code currently included:
+
+- The modules in `core/iap2/` (`iap2_core`, `iap2_identity`, `iap2_carplay`,
+  `iap2_mfi_auth`) and the ported AirPlay modules in `core/airplay/`
+  (plist/RTSP/TLV8/screen/DataStream, Pair-Setup/Pair-Verify/SRP-6a,
+  MFiSAP and the Bonjour TXT defaults)
+  are ported from ESP32 CarPlay Web Relay (GPL-3.0-or-later, Copyright
+  (C) 2026 ESP32 CarPlay Web Relay contributors).  Its iAP2 and AirPlay
+  structure follows DiPlay (GPL-3.0, Copyright (C) 2025-2026 DiPlay
+  contributors).  The original notices are retained at the top of every
+  ported file.
+
+- The AirPlay audio receive path (`core/airplay/airplay_audio_stream.c`, the
+  audio declarations in `core/airplay/airplay_info_plist.c` and the
+  `airplay_audio.h` interface) is a C translation of the GPL-3.0
+  `youcci/playport` project (Kotlin: `AudioStream.kt`, `AirPlayInfoPlist.kt`,
+  `AirPlaySession.kt`, `CarPlayMediaEngine.kt`, `web/src/audio.ts`), used
+  with attribution under the same license.  The reproduced behaviour: audio
+  stream types 100/101/102, the `DataStream-Salt<id>` HKDF-SHA512 output
+  key, the RTP layout (12-byte header + ChaCha20-Poly1305 ciphertext +
+  16-byte tag + 8-byte little-endian nonce tail, AAD = header bytes 4..12),
+  the int16 little-endian PCM payload and the `audioFormats` /
+  `audioLatencies` /info declarations.  playport ships no per-file copyright
+  header; the upstream repository and its GPL-3.0 license are the attribution
+  reference.
+
+When further modules are ported, keep their notices here and in the source
+files.  In particular:
+
+- esp32-carplay-web-relay (GPL-3.0-or-later): retain the copyright and
+  license notices of every ported file.
+- LIVI (GPL-3.0-or-later, Copyright (C) 2025-2026 Lasse Heitgres), whose
+  NOTICE adds a GPL-3.0 section 7(b) attribution requirement covering
+  translations: any work containing or translating LIVI code must retain
+  "Based on LIVI by Lasse Heitgres".
+- Realtek Wi-Fi/BT binaries, Realtek firmware blobs, and Apple MFi identity
+  material are not part of this repository and must not be added.
+
+Portable CarPlay audio codecs:
+FAAD2 2.11.2, GPL-2.0-or-later, upstream knik0/faad2.
+Code from FAAD2 is copyright (c) Nero AG, www.nero.com.
+Opus 1.5.2, BSD-3-Clause, upstream xiph/opus.
+See third_party/audio/README.md and the retained COPYING/file notices.
+
+SpeexDSP 1.2.1, BSD-3-Clause, upstream xiph/speexdsp.
+See third_party/audio/speexdsp/COPYING for copyright and license.
+
+Documentation tooling:
+scripts/check-docs.py and scripts/test-check-docs.py reuse the Apache-2.0
+checker from boa-z/cherryusb-ipheth at
+2c87b69fda0d2dbeeb9df5180dd10157791d7371.
+Their license is retained in scripts/LICENSE; the project GPL license
+continues to apply to its separately marked project sources.

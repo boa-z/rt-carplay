@@ -1,0 +1,1616 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/*
+ * End-to-end pairing test.
+ *
+ * A real controller implementation drives airplay_rtsp_server over its TCP
+ * socket: Pair-Setup (SRP-6a, Ed25519), Pair-Verify (X25519, Ed25519) and
+ * then an RTSP request encrypted with the ControlCipher keys.  The module
+ * tests cover each state machine with fake signatures; this one proves the
+ * server's socket framing, cipher transition and key derivation agree with an
+ * independent implementation of the controller side.
+ */
+#include "airplay_rtsp_server.h"
+#include "rtcp/receiver.h"
+#include "rtcp/receiver_compat.h"
+
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "airplay_bplist.h"
+#include "airplay_control_cipher.h"
+#include "airplay_ed25519.h"
+#include "airplay_info_plist.h"
+#include "airplay_screen.h"
+#include "airplay_srp6a.h"
+#include "airplay_srp6a_test_client.h"
+#include "airplay_tlv8.h"
+#include "mbedtls/chachapoly.h"
+#include "mbedtls/ecdh.h"
+#include "mbedtls/ecp.h"
+#include "mbedtls/hkdf.h"
+#include "mbedtls/md.h"
+#include "mbedtls/platform_util.h"
+#include "rtcp/rtcp.h"
+#include "rtcp_linux.h"
+
+#define WAIT_LIMIT_MS 5000U
+#define PAIRING_CODE "3939"
+#define CONTROLLER_ID "rt-carplay-e2e-controller"
+#define ACCESSORY_ID "02:00:00:00:00:01"
+#define KEY_BYTES 32U
+#define PAIRING_TYPE "application/pairing+tlv8"
+#define PLIST_TYPE "application/x-apple-binary-plist"
+#define INFO_PLIST_BYTES AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES
+
+/* Exercise the public Receiver lifecycle with the real encrypted controller. */
+static rtcp_receiver_t *e2e_receiver;
+static int receiver_poll(rtcp_receiver_t *server, int timeout)
+{
+    assert(server == e2e_receiver);
+    return rtcp_receiver_poll(e2e_receiver, timeout);
+}
+static bool receiver_connected(const rtcp_receiver_t *receiver)
+{
+    rtcp_receiver_state_t state;
+    assert(rtcp_receiver_get_state(receiver, &state) == RTCP_OK);
+    return state.transport_connected;
+}
+static bool receiver_authenticated(const rtcp_receiver_t *receiver)
+{
+    rtcp_receiver_state_t state;
+    assert(rtcp_receiver_get_state(receiver, &state) == RTCP_OK);
+    return state.authenticated;
+}
+static void expect_receiver_state(bool transport, bool authenticated,
+                                  bool session, bool video, bool audio)
+{
+    rtcp_receiver_state_t state;
+    assert(rtcp_receiver_get_state(e2e_receiver, &state) == RTCP_OK);
+    assert(state.transport_connected == transport);
+    assert(state.authenticated == authenticated);
+    assert(state.session_established == session);
+    assert(state.video_ready == video);
+    assert(state.audio_ready == audio);
+}
+
+/* Ed25519 seeds are test fixtures, not identities. */
+static const uint8_t ACCESSORY_SEED[KEY_BYTES] = {
+    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+    0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+};
+static const uint8_t CONTROLLER_SEED[KEY_BYTES] = {
+    0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+    0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
+    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
+    0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
+};
+
+typedef struct {
+    uint8_t counter;
+} rng_t;
+
+typedef struct {
+    airplay_ed25519_keypair_t accessory;
+    airplay_ed25519_keypair_t controller;
+    uint8_t paired_identifier[AIRPLAY_PAIR_SETUP_MAX_IDENTIFIER_BYTES];
+    size_t paired_identifier_len;
+    uint8_t paired_public_key[KEY_BYTES];
+    bool has_pairing;
+    rng_t rng;
+} fixture_t;
+
+static bool event_connected;
+static unsigned event_transitions;
+static unsigned video_context, audio_context, volume_context, event_context;
+
+static void capture_event_state(bool connected, void *context)
+{
+    assert(context == &event_context);
+    event_connected = connected;
+    ++event_transitions;
+}
+
+static unsigned screen_messages;
+static unsigned screen_frames;
+static uint8_t screen_frame[256];
+static size_t screen_frame_len;
+static uint64_t screen_sender_time_ns;
+
+static int capture_screen(airplay_screen_message_type_t type, uint8_t *annex_b,
+                          size_t annex_b_len, size_t prefix_capacity,
+                          uint64_t sender_time_ns, uint64_t arrival_time_us,
+                          void *context)
+{
+    (void)prefix_capacity;
+    (void)arrival_time_us;
+    assert(context == &video_context);
+    ++screen_messages;
+    if (type == AIRPLAY_SCREEN_MESSAGE_FRAME_H264) {
+        assert(annex_b_len <= sizeof(screen_frame));
+        memcpy(screen_frame, annex_b, annex_b_len);
+        screen_frame_len = annex_b_len;
+        screen_sender_time_ns = sender_time_ns;
+        ++screen_frames;
+    }
+    return RTCP_OK;
+}
+
+static unsigned audio_packets;
+static uint8_t audio_pcm[256];
+static size_t audio_pcm_len;
+static uint16_t audio_packets_stream_type;
+static airplay_audio_format_t audio_packet_format;
+static uint32_t audio_packet_timestamp;
+
+static int capture_audio(uint16_t stream_type, const uint8_t *data, size_t len,
+                         const airplay_audio_format_t *format,
+                         uint32_t rtp_timestamp, uint64_t arrival_us,
+                         void *context)
+{
+    (void)arrival_us;
+    assert(context == &audio_context);
+    ++audio_packets;
+    assert(len <= sizeof(audio_pcm));
+    memcpy(audio_pcm, data, len);
+    audio_pcm_len = len;
+    audio_packets_stream_type = stream_type;
+    audio_packet_format = *format;
+    audio_packet_timestamp = rtp_timestamp;
+    return RTCP_OK;
+}
+
+static unsigned volume_events;
+static float volume_last_db;
+
+static void capture_volume(float volume_db, void *context)
+{
+    assert(context == &volume_context);
+    volume_last_db = volume_db;
+    ++volume_events;
+}
+
+/* ------------------------------------------------------------------ */
+/* Providers                                                          */
+/* ------------------------------------------------------------------ */
+
+static int mbed_rng(void *context, unsigned char *output, size_t len)
+{
+    rng_t *rng = context;
+    for (size_t i = 0U; i < len; ++i) output[i] = rng->counter++;
+    return 0;
+}
+
+static bool provider_random(uint8_t *output, size_t len, void *context)
+{
+    fixture_t *fixture = context;
+    return mbed_rng(&fixture->rng, output, len) == 0;
+}
+
+static bool provider_sign(const uint8_t *message, size_t message_len,
+                          uint8_t signature[64], void *context)
+{
+    fixture_t *fixture = context;
+    return airplay_ed25519_sign(&fixture->accessory, message, message_len,
+                                signature);
+}
+
+static bool provider_verify(const uint8_t public_key[32],
+                            const uint8_t *message, size_t message_len,
+                            const uint8_t signature[64], void *context)
+{
+    (void)context;
+    return airplay_ed25519_verify(public_key, message, message_len, signature);
+}
+
+static bool provider_save(const uint8_t *identifier, size_t identifier_len,
+                          const uint8_t public_key[32], void *context)
+{
+    fixture_t *fixture = context;
+    if (identifier_len == 0U ||
+        identifier_len > sizeof(fixture->paired_identifier)) {
+        return false;
+    }
+    memcpy(fixture->paired_identifier, identifier, identifier_len);
+    fixture->paired_identifier_len = identifier_len;
+    memcpy(fixture->paired_public_key, public_key, KEY_BYTES);
+    fixture->has_pairing = true;
+    return true;
+}
+
+static bool provider_lookup(const uint8_t *identifier, size_t identifier_len,
+                            uint8_t public_key[32], void *context)
+{
+    fixture_t *fixture = context;
+    if (!fixture->has_pairing ||
+        identifier_len != fixture->paired_identifier_len ||
+        memcmp(identifier, fixture->paired_identifier, identifier_len) != 0) {
+        return false;
+    }
+    memcpy(public_key, fixture->paired_public_key, KEY_BYTES);
+    return true;
+}
+
+static void fill_pairing(fixture_t *fixture,
+                         airplay_rtsp_pairing_config_t *pairing)
+{
+    memset(pairing, 0, sizeof(*pairing));
+    pairing->pair_setup.pairing_code = PAIRING_CODE;
+    pairing->pair_setup.accessory_identifier = (const uint8_t *)ACCESSORY_ID;
+    pairing->pair_setup.accessory_identifier_len = sizeof(ACCESSORY_ID) - 1U;
+    pairing->pair_setup.accessory_public_key = fixture->accessory.public_key;
+    pairing->pair_setup.random = provider_random;
+    pairing->pair_setup.sign_accessory = provider_sign;
+    pairing->pair_setup.verify_controller = provider_verify;
+    pairing->pair_setup.save_pairing = provider_save;
+    pairing->pair_setup.provider_context = fixture;
+
+    pairing->pair_verify.accessory_identifier = (const uint8_t *)ACCESSORY_ID;
+    pairing->pair_verify.accessory_identifier_len = sizeof(ACCESSORY_ID) - 1U;
+    pairing->pair_verify.random = provider_random;
+    pairing->pair_verify.sign_accessory = provider_sign;
+    pairing->pair_verify.verify_controller = provider_verify;
+    pairing->pair_verify.lookup_controller = provider_lookup;
+    pairing->pair_verify.provider_context = fixture;
+}
+
+/* ------------------------------------------------------------------ */
+/* Crypto helpers (controller side)                                   */
+/* ------------------------------------------------------------------ */
+
+static void nonce_for(const char label[8], uint8_t nonce[12])
+{
+    memset(nonce, 0, 12U);
+    memcpy(nonce + 4U, label, 8U);
+}
+
+static void hkdf_key(const uint8_t *input, size_t input_len, const char *salt,
+                     const char *info, uint8_t output[KEY_BYTES])
+{
+    const mbedtls_md_info_t *sha512 =
+        mbedtls_md_info_from_type(MBEDTLS_MD_SHA512);
+    assert(sha512 != NULL);
+    assert(mbedtls_hkdf(sha512, (const uint8_t *)salt, strlen(salt), input,
+                        input_len, (const uint8_t *)info, strlen(info), output,
+                        KEY_BYTES) == 0);
+}
+
+static size_t chacha_encrypt(const uint8_t key[KEY_BYTES], const char label[8],
+                             const uint8_t *plaintext, size_t plaintext_len,
+                             uint8_t *output, size_t capacity)
+{
+    uint8_t nonce[12];
+    nonce_for(label, nonce);
+    assert(plaintext_len + 16U <= capacity);
+    mbedtls_chachapoly_context context;
+    mbedtls_chachapoly_init(&context);
+    assert(mbedtls_chachapoly_setkey(&context, key) == 0);
+    assert(mbedtls_chachapoly_encrypt_and_tag(
+               &context, plaintext_len, nonce, NULL, 0U, plaintext, output,
+               output + plaintext_len) == 0);
+    mbedtls_chachapoly_free(&context);
+    mbedtls_platform_zeroize(nonce, sizeof(nonce));
+    return plaintext_len + 16U;
+}
+
+static size_t chacha_decrypt(const uint8_t key[KEY_BYTES], const char label[8],
+                             const uint8_t *input, size_t input_len,
+                             uint8_t *plaintext, size_t capacity)
+{
+    uint8_t nonce[12];
+    nonce_for(label, nonce);
+    assert(input_len >= 16U && input_len - 16U <= capacity);
+    size_t ciphertext_len = input_len - 16U;
+    mbedtls_chachapoly_context context;
+    mbedtls_chachapoly_init(&context);
+    assert(mbedtls_chachapoly_setkey(&context, key) == 0);
+    assert(mbedtls_chachapoly_auth_decrypt(
+               &context, ciphertext_len, nonce, NULL, 0U,
+               input + ciphertext_len, input, plaintext) == 0);
+    mbedtls_chachapoly_free(&context);
+    mbedtls_platform_zeroize(nonce, sizeof(nonce));
+    return ciphertext_len;
+}
+
+/* ------------------------------------------------------------------ */
+/* TLV helpers                                                        */
+/* ------------------------------------------------------------------ */
+
+static size_t tlv_encode(const airplay_tlv8_item_t *items, size_t count,
+                         uint8_t *output, size_t capacity)
+{
+    size_t written = 0U;
+    assert(airplay_tlv8_encode(items, count, output, capacity, &written) ==
+           AIRPLAY_TLV8_OK);
+    return written;
+}
+
+static size_t tlv_get(const uint8_t *input, size_t input_len, uint8_t type,
+                      uint8_t *output, size_t capacity)
+{
+    size_t written = 0U;
+    assert(airplay_tlv8_get(input, input_len, type, output, capacity,
+                            &written) == AIRPLAY_TLV8_OK);
+    return written;
+}
+
+static uint8_t tlv_state(const uint8_t *body, size_t body_len)
+{
+    uint8_t state = 0U;
+    assert(tlv_get(body, body_len, 0x06U, &state, sizeof(state)) == 1U);
+    return state;
+}
+
+/* ------------------------------------------------------------------ */
+/* RTSP client                                                        */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    int fd;
+    uint8_t raw[4096];
+    uint8_t plain[32768];
+    size_t plain_len;
+    airplay_control_cipher_t *cipher;
+} client_t;
+
+typedef struct {
+    const uint8_t *headers;
+    size_t headers_len;
+    const uint8_t *body;
+    size_t body_len;
+} response_t;
+
+static void client_send(client_t *client, const uint8_t *bytes, size_t len)
+{
+    size_t offset = 0U;
+    while (offset < len) {
+        int sent = rtcp_net_linux.send(client->fd, bytes + offset,
+                                       len - offset);
+        assert(sent > 0);
+        offset += (size_t)sent;
+    }
+}
+
+static bool client_has_data(int fd)
+{
+    struct rtcp_pollfd pfd = {.fd = fd, .events = RTCP_POLLIN};
+    int ready = rtcp_net_linux.poll(&pfd, 1, 0);
+    return ready > 0 && (pfd.revents & RTCP_POLLIN) != 0;
+}
+
+static bool contains(const uint8_t *bytes, size_t len, const char *needle)
+{
+    size_t needle_len = strlen(needle);
+    if (needle_len > len) return false;
+    for (size_t i = 0U; i <= len - needle_len; ++i) {
+        if (memcmp(bytes + i, needle, needle_len) == 0) return true;
+    }
+    return false;
+}
+
+static void client_pump(rtcp_receiver_t *server, client_t *client)
+{
+    (void)receiver_poll(server, 5);
+    while (client_has_data(client->fd)) {
+        int received = rtcp_net_linux.recv(client->fd, client->raw,
+                                           sizeof(client->raw));
+        assert(received > 0);
+        if (client->cipher == NULL) {
+            assert(client->plain_len + (size_t)received <=
+                   sizeof(client->plain));
+            memcpy(client->plain + client->plain_len, client->raw,
+                   (size_t)received);
+            client->plain_len += (size_t)received;
+            continue;
+        }
+        size_t offset = 0U;
+        while (offset < (size_t)received) {
+            size_t consumed = 0U;
+            size_t plaintext_len = 0U;
+            airplay_control_cipher_result_t result =
+                airplay_control_cipher_decrypt(
+                    client->cipher, client->raw + offset,
+                    (size_t)received - offset, &consumed,
+                    client->plain + client->plain_len,
+                    sizeof(client->plain) - client->plain_len,
+                    &plaintext_len);
+            offset += consumed;
+            client->plain_len += plaintext_len;
+            if (result == AIRPLAY_CONTROL_CIPHER_INCOMPLETE) break;
+            if (result != AIRPLAY_CONTROL_CIPHER_OK) {
+                assert(0 && "server response failed to decrypt");
+            }
+            if (consumed == 0U && plaintext_len == 0U) break;
+        }
+    }
+}
+
+static bool parse_response(const client_t *client, response_t *response)
+{
+    static const char separator[] = "\r\n\r\n";
+    size_t separator_at = 0U;
+    bool found = false;
+    for (size_t i = 0U; i + sizeof(separator) - 1U <= client->plain_len; ++i) {
+        if (memcmp(client->plain + i, separator, sizeof(separator) - 1U) == 0) {
+            separator_at = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) return false;
+    size_t headers_len = separator_at + sizeof(separator) - 1U;
+    size_t content_length = 0U;
+    size_t cursor = 0U;
+    while (cursor < separator_at) {
+        size_t line_end = cursor;
+        while (line_end < separator_at &&
+               !(client->plain[line_end] == '\r' &&
+                 client->plain[line_end + 1U] == '\n')) {
+            ++line_end;
+        }
+        static const char length_header[] = "Content-Length:";
+        size_t length_header_len = sizeof(length_header) - 1U;
+        if (line_end - cursor >= length_header_len &&
+            memcmp(client->plain + cursor, length_header,
+                   length_header_len) == 0) {
+            size_t value_at = cursor + length_header_len;
+            while (value_at < line_end && client->plain[value_at] == ' ') {
+                ++value_at;
+            }
+            while (value_at < line_end &&
+                   client->plain[value_at] >= '0' &&
+                   client->plain[value_at] <= '9') {
+                content_length =
+                    content_length * 10U + (size_t)(client->plain[value_at] - '0');
+                ++value_at;
+            }
+        }
+        cursor = line_end + 2U;
+    }
+    if (client->plain_len < headers_len + content_length) return false;
+    response->headers = client->plain;
+    response->headers_len = headers_len;
+    response->body = client->plain + headers_len;
+    response->body_len = content_length;
+    return true;
+}
+
+static size_t build_request(uint8_t *output, size_t capacity,
+                            const char *method, const char *path,
+                            const char *content_type, uint32_t cseq,
+                            const uint8_t *body, size_t body_len)
+{
+    int written = snprintf(
+        (char *)output, capacity,
+        "%s %s RTSP/1.0\r\n"
+        "CSeq: %u\r\n"
+        "Content-Type: %s\r\n"
+        "Content-Length: %u\r\n\r\n",
+        method, path, (unsigned)cseq, content_type, (unsigned)body_len);
+    assert(written > 0 && (size_t)written + body_len <= capacity);
+    if (body_len != 0U) memcpy(output + written, body, body_len);
+    return (size_t)written + body_len;
+}
+
+static void client_exchange(rtcp_receiver_t *server, client_t *client,
+                            const uint8_t *request, size_t request_len,
+                            response_t *response)
+{
+    client->plain_len = 0U;
+    if (client->cipher == NULL) {
+        client_send(client, request, request_len);
+    } else {
+        uint8_t encrypted[8192];
+        size_t encrypted_len = 0U;
+        assert(airplay_control_cipher_encrypt(client->cipher, request,
+                                              request_len, encrypted,
+                                              sizeof(encrypted),
+                                              &encrypted_len) ==
+               AIRPLAY_CONTROL_CIPHER_OK);
+        client_send(client, encrypted, encrypted_len);
+        mbedtls_platform_zeroize(encrypted, sizeof(encrypted));
+    }
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (!parse_response(client, response)) {
+        assert(rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS);
+        client_pump(server, client);
+    }
+    assert(contains(response->headers, response->headers_len, "200 OK"));
+}
+
+static void client_connect(rtcp_receiver_t *server, client_t *client)
+{
+    uint16_t port = rtcp_receiver_port(server);
+    assert(port != 0U);
+    rtcp_addr_t address = {0};
+    address.family = RTCP_AF_INET;
+    address.addr[0] = 127U;
+    address.addr[3] = 1U;
+    address.port = port;
+    memset(client, 0, sizeof(*client));
+    client->fd = rtcp_net_linux.connect(&address);
+    assert(client->fd >= 0);
+
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS &&
+           !receiver_connected(server)) {
+        receiver_poll(server, 10);
+    }
+    assert(receiver_connected(server));
+    assert(!receiver_authenticated(server));
+}
+
+/* ------------------------------------------------------------------ */
+/* Pair-Setup                                                         */
+/* ------------------------------------------------------------------ */
+
+static void run_pair_setup(rtcp_receiver_t *server, client_t *client,
+                           fixture_t *fixture)
+{
+    uint8_t request[4096];
+    uint8_t body[1024];
+    response_t response;
+    uint32_t cseq = 1U;
+
+    /* M1: start SRP. */
+    uint8_t state1 = 1U;
+    const airplay_tlv8_item_t m1_items[] = {
+        {.type = 0x06U, .value = &state1, .value_len = 1U},
+    };
+    size_t body_len = tlv_encode(m1_items, 1U, body, sizeof(body));
+    size_t request_len = build_request(request, sizeof(request), "POST",
+                                       "/pair-setup", PAIRING_TYPE, cseq++, body,
+                                       body_len);
+    client_exchange(server, client, request, request_len, &response);
+    assert(tlv_state(response.body, response.body_len) == 2U);
+
+    uint8_t salt[AIRPLAY_SRP6A_SALT_BYTES];
+    uint8_t public_b[AIRPLAY_SRP6A_PUBLIC_BYTES];
+    assert(tlv_get(response.body, response.body_len, 0x02U, salt,
+                   sizeof(salt)) == sizeof(salt));
+    assert(tlv_get(response.body, response.body_len, 0x03U, public_b,
+                   sizeof(public_b)) == sizeof(public_b));
+
+    /* M3: SRP client proof. */
+    uint8_t public_a[AIRPLAY_SRP6A_PUBLIC_BYTES];
+    uint8_t proof_m1[AIRPLAY_SRP6A_PROOF_BYTES];
+    uint8_t expected_m2[AIRPLAY_SRP6A_PROOF_BYTES];
+    uint8_t session_key[AIRPLAY_SRP6A_SESSION_KEY_BYTES];
+    airplay_srp6a_test_compute_client_proofs(
+        salt, public_b, "Pair-Setup", PAIRING_CODE, public_a, proof_m1,
+        expected_m2, session_key);
+
+    uint8_t state3 = 3U;
+    const airplay_tlv8_item_t m3_items[] = {
+        {.type = 0x06U, .value = &state3, .value_len = 1U},
+        {.type = 0x03U, .value = public_a, .value_len = sizeof(public_a)},
+        {.type = 0x04U, .value = proof_m1, .value_len = sizeof(proof_m1)},
+    };
+    body_len = tlv_encode(m3_items, 3U, body, sizeof(body));
+    request_len = build_request(request, sizeof(request), "POST",
+                                "/pair-setup", PAIRING_TYPE, cseq++, body,
+                                body_len);
+    client_exchange(server, client, request, request_len, &response);
+    assert(tlv_state(response.body, response.body_len) == 4U);
+    uint8_t proof_m2[AIRPLAY_SRP6A_PROOF_BYTES];
+    assert(tlv_get(response.body, response.body_len, 0x04U, proof_m2,
+                   sizeof(proof_m2)) == sizeof(proof_m2));
+    assert(memcmp(proof_m2, expected_m2, sizeof(proof_m2)) == 0);
+    assert(!receiver_authenticated(server));
+
+    /* M5: encrypted controller identity. */
+    uint8_t encryption_key[KEY_BYTES];
+    uint8_t signing_key[KEY_BYTES];
+    hkdf_key(session_key, sizeof(session_key), "Pair-Setup-Encrypt-Salt",
+             "Pair-Setup-Encrypt-Info", encryption_key);
+    hkdf_key(session_key, sizeof(session_key),
+             "Pair-Setup-Controller-Sign-Salt",
+             "Pair-Setup-Controller-Sign-Info", signing_key);
+
+    uint8_t signature_input[KEY_BYTES * 3U];
+    memcpy(signature_input, signing_key, KEY_BYTES);
+    memcpy(signature_input + KEY_BYTES, CONTROLLER_ID,
+           sizeof(CONTROLLER_ID) - 1U);
+    memcpy(signature_input + KEY_BYTES + sizeof(CONTROLLER_ID) - 1U,
+           fixture->controller.public_key, KEY_BYTES);
+    size_t signature_input_len = KEY_BYTES + sizeof(CONTROLLER_ID) - 1U +
+                                 KEY_BYTES;
+    uint8_t controller_signature[64];
+    assert(airplay_ed25519_sign(&fixture->controller, signature_input,
+                                signature_input_len, controller_signature));
+
+    const airplay_tlv8_item_t controller_items[] = {
+        {.type = 0x01U, .value = (const uint8_t *)CONTROLLER_ID,
+         .value_len = sizeof(CONTROLLER_ID) - 1U},
+        {.type = 0x03U, .value = fixture->controller.public_key,
+         .value_len = KEY_BYTES},
+        {.type = 0x0aU, .value = controller_signature,
+         .value_len = sizeof(controller_signature)},
+    };
+    uint8_t submessage[512];
+    size_t submessage_len = tlv_encode(controller_items, 3U, submessage,
+                                       sizeof(submessage));
+    uint8_t encrypted[sizeof(submessage) + 16U];
+    size_t encrypted_len = chacha_encrypt(encryption_key, "PS-Msg05",
+                                          submessage, submessage_len,
+                                          encrypted, sizeof(encrypted));
+
+    uint8_t state5 = 5U;
+    const airplay_tlv8_item_t m5_items[] = {
+        {.type = 0x06U, .value = &state5, .value_len = 1U},
+        {.type = 0x05U, .value = encrypted, .value_len = encrypted_len},
+    };
+    body_len = tlv_encode(m5_items, 2U, body, sizeof(body));
+    request_len = build_request(request, sizeof(request), "POST",
+                                "/pair-setup", PAIRING_TYPE, cseq++, body,
+                                body_len);
+    client_exchange(server, client, request, request_len, &response);
+    assert(tlv_state(response.body, response.body_len) == 6U);
+
+    uint8_t response_encrypted[sizeof(submessage) + 16U];
+    size_t response_encrypted_len =
+        tlv_get(response.body, response.body_len, 0x05U, response_encrypted,
+                sizeof(response_encrypted));
+    assert(response_encrypted_len > 16U);
+    uint8_t response_plaintext[512];
+    size_t response_plaintext_len = chacha_decrypt(
+        encryption_key, "PS-Msg06", response_encrypted,
+        response_encrypted_len, response_plaintext,
+        sizeof(response_plaintext));
+
+    uint8_t accessory_id[AIRPLAY_PAIR_SETUP_MAX_IDENTIFIER_BYTES];
+    uint8_t accessory_key[KEY_BYTES];
+    uint8_t accessory_signature[64];
+    size_t accessory_id_len = tlv_get(response_plaintext,
+                                      response_plaintext_len, 0x01U,
+                                      accessory_id, sizeof(accessory_id));
+    assert(accessory_id_len == sizeof(ACCESSORY_ID) - 1U);
+    assert(memcmp(accessory_id, ACCESSORY_ID, accessory_id_len) == 0);
+    assert(tlv_get(response_plaintext, response_plaintext_len, 0x03U,
+                   accessory_key, sizeof(accessory_key)) == KEY_BYTES);
+    assert(memcmp(accessory_key, fixture->accessory.public_key, KEY_BYTES) ==
+           0);
+    assert(tlv_get(response_plaintext, response_plaintext_len, 0x0aU,
+                   accessory_signature, sizeof(accessory_signature)) ==
+           sizeof(accessory_signature));
+
+    uint8_t accessory_signing_key[KEY_BYTES];
+    hkdf_key(session_key, sizeof(session_key),
+             "Pair-Setup-Accessory-Sign-Salt",
+             "Pair-Setup-Accessory-Sign-Info", accessory_signing_key);
+    uint8_t accessory_signature_input[KEY_BYTES * 3U];
+    memcpy(accessory_signature_input, accessory_signing_key, KEY_BYTES);
+    memcpy(accessory_signature_input + KEY_BYTES, accessory_id,
+           accessory_id_len);
+    memcpy(accessory_signature_input + KEY_BYTES + accessory_id_len,
+           accessory_key, KEY_BYTES);
+    assert(airplay_ed25519_verify(fixture->accessory.public_key,
+                                  accessory_signature_input,
+                                  KEY_BYTES + accessory_id_len + KEY_BYTES,
+                                  accessory_signature));
+
+    assert(fixture->has_pairing);
+    assert(fixture->paired_identifier_len == sizeof(CONTROLLER_ID) - 1U);
+    assert(memcmp(fixture->paired_identifier, CONTROLLER_ID,
+                  fixture->paired_identifier_len) == 0);
+    assert(memcmp(fixture->paired_public_key, fixture->controller.public_key,
+                  KEY_BYTES) == 0);
+
+    mbedtls_platform_zeroize(session_key, sizeof(session_key));
+    mbedtls_platform_zeroize(encryption_key, sizeof(encryption_key));
+    mbedtls_platform_zeroize(signing_key, sizeof(signing_key));
+    mbedtls_platform_zeroize(signature_input, sizeof(signature_input));
+    mbedtls_platform_zeroize(controller_signature,
+                             sizeof(controller_signature));
+    mbedtls_platform_zeroize(submessage, sizeof(submessage));
+    mbedtls_platform_zeroize(encrypted, sizeof(encrypted));
+    mbedtls_platform_zeroize(response_encrypted,
+                             sizeof(response_encrypted));
+    mbedtls_platform_zeroize(response_plaintext,
+                             sizeof(response_plaintext));
+    mbedtls_platform_zeroize(accessory_signing_key,
+                             sizeof(accessory_signing_key));
+    mbedtls_platform_zeroize(accessory_signature_input,
+                             sizeof(accessory_signature_input));
+}
+
+/* ------------------------------------------------------------------ */
+/* Pair-Verify                                                        */
+/* ------------------------------------------------------------------ */
+
+static void run_pair_verify(rtcp_receiver_t *server, client_t *client,
+                            fixture_t *fixture, uint8_t shared_out[KEY_BYTES])
+{
+    uint8_t request[1024];
+    uint8_t body[256];
+    response_t response;
+    uint32_t cseq = 10U;
+
+    mbedtls_ecp_group group;
+    mbedtls_mpi private_key;
+    mbedtls_mpi shared_secret;
+    mbedtls_ecp_point public_key;
+    mbedtls_ecp_group_init(&group);
+    mbedtls_mpi_init(&private_key);
+    mbedtls_mpi_init(&shared_secret);
+    mbedtls_ecp_point_init(&public_key);
+    assert(mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_CURVE25519) == 0);
+
+    uint8_t controller_public[KEY_BYTES];
+    size_t public_len = 0U;
+    rng_t client_rng = {.counter = 0x40};
+    assert(mbedtls_ecp_gen_keypair(&group, &private_key, &public_key,
+                                   mbed_rng, &client_rng) == 0);
+    assert(mbedtls_ecp_point_write_binary(
+               &group, &public_key, MBEDTLS_ECP_PF_UNCOMPRESSED, &public_len,
+               controller_public, sizeof(controller_public)) == 0);
+    assert(public_len == KEY_BYTES);
+
+    /* M1: controller ephemeral key. */
+    uint8_t state1 = 1U;
+    const airplay_tlv8_item_t m1_items[] = {
+        {.type = 0x06U, .value = &state1, .value_len = 1U},
+        {.type = 0x03U, .value = controller_public,
+         .value_len = sizeof(controller_public)},
+    };
+    size_t body_len = tlv_encode(m1_items, 2U, body, sizeof(body));
+    size_t request_len = build_request(request, sizeof(request), "POST",
+                                       "/pair-verify", PAIRING_TYPE, cseq++, body,
+                                       body_len);
+    client_exchange(server, client, request, request_len, &response);
+    assert(tlv_state(response.body, response.body_len) == 2U);
+    uint8_t accessory_public[KEY_BYTES];
+    assert(tlv_get(response.body, response.body_len, 0x03U, accessory_public,
+                   sizeof(accessory_public)) == KEY_BYTES);
+    uint8_t encrypted[512];
+    size_t encrypted_len = tlv_get(response.body, response.body_len, 0x05U,
+                                   encrypted, sizeof(encrypted));
+
+    /* Shared secret + Pair-Verify encryption key. */
+    mbedtls_ecp_point accessory_point;
+    mbedtls_ecp_point_init(&accessory_point);
+    assert(mbedtls_ecp_point_read_binary(&group, &accessory_point,
+                                         accessory_public,
+                                         sizeof(accessory_public)) == 0);
+    assert(mbedtls_ecdh_compute_shared(&group, &shared_secret,
+                                       &accessory_point, &private_key,
+                                       mbed_rng, &client_rng) == 0);
+    uint8_t shared[KEY_BYTES];
+    assert(mbedtls_mpi_write_binary_le(&shared_secret, shared,
+                                       sizeof(shared)) == 0);
+    memcpy(shared_out, shared, KEY_BYTES);
+    uint8_t verify_key[KEY_BYTES];
+    hkdf_key(shared, sizeof(shared), "Pair-Verify-Encrypt-Salt",
+             "Pair-Verify-Encrypt-Info", verify_key);
+
+    uint8_t submessage[256];
+    size_t submessage_len = chacha_decrypt(verify_key, "PV-Msg02", encrypted,
+                                           encrypted_len, submessage,
+                                           sizeof(submessage));
+    uint8_t accessory_id[AIRPLAY_PAIR_SETUP_MAX_IDENTIFIER_BYTES];
+    uint8_t accessory_signature[64];
+    size_t accessory_id_len = tlv_get(submessage, submessage_len, 0x01U,
+                                      accessory_id, sizeof(accessory_id));
+    assert(accessory_id_len == sizeof(ACCESSORY_ID) - 1U);
+    assert(memcmp(accessory_id, ACCESSORY_ID, accessory_id_len) == 0);
+    assert(tlv_get(submessage, submessage_len, 0x0aU, accessory_signature,
+                   sizeof(accessory_signature)) ==
+           sizeof(accessory_signature));
+
+    uint8_t accessory_signature_input[KEY_BYTES * 3U];
+    memcpy(accessory_signature_input, accessory_public, KEY_BYTES);
+    memcpy(accessory_signature_input + KEY_BYTES, accessory_id,
+           accessory_id_len);
+    memcpy(accessory_signature_input + KEY_BYTES + accessory_id_len,
+           controller_public, KEY_BYTES);
+    assert(airplay_ed25519_verify(
+        fixture->accessory.public_key, accessory_signature_input,
+        KEY_BYTES + accessory_id_len + KEY_BYTES, accessory_signature));
+
+    /* M3: controller signature over both ephemeral keys. */
+    uint8_t controller_signature_input[KEY_BYTES * 3U];
+    memcpy(controller_signature_input, controller_public, KEY_BYTES);
+    memcpy(controller_signature_input + KEY_BYTES, CONTROLLER_ID,
+           sizeof(CONTROLLER_ID) - 1U);
+    memcpy(controller_signature_input + KEY_BYTES +
+               sizeof(CONTROLLER_ID) - 1U,
+           accessory_public, KEY_BYTES);
+    uint8_t controller_signature[64];
+    assert(airplay_ed25519_sign(
+        &fixture->controller, controller_signature_input,
+        KEY_BYTES + sizeof(CONTROLLER_ID) - 1U + KEY_BYTES,
+        controller_signature));
+
+    const airplay_tlv8_item_t controller_items[] = {
+        {.type = 0x01U, .value = (const uint8_t *)CONTROLLER_ID,
+         .value_len = sizeof(CONTROLLER_ID) - 1U},
+        {.type = 0x0aU, .value = controller_signature,
+         .value_len = sizeof(controller_signature)},
+    };
+    submessage_len = tlv_encode(controller_items, 2U, submessage,
+                                sizeof(submessage));
+    encrypted_len = chacha_encrypt(verify_key, "PV-Msg03", submessage,
+                                   submessage_len, encrypted,
+                                   sizeof(encrypted));
+
+    uint8_t state3 = 3U;
+    const airplay_tlv8_item_t m3_items[] = {
+        {.type = 0x06U, .value = &state3, .value_len = 1U},
+        {.type = 0x05U, .value = encrypted, .value_len = encrypted_len},
+    };
+    body_len = tlv_encode(m3_items, 2U, body, sizeof(body));
+    request_len = build_request(request, sizeof(request), "POST",
+                                "/pair-verify", PAIRING_TYPE, cseq++, body,
+                                body_len);
+    client_exchange(server, client, request, request_len, &response);
+    assert(tlv_state(response.body, response.body_len) == 4U);
+    assert(receiver_authenticated(server));
+
+    /* The client encrypts with the controller write key and decrypts with
+     * the controller read key; the server's read/write naming is the
+     * mirror image. */
+    uint8_t controller_write_key[KEY_BYTES];
+    uint8_t controller_read_key[KEY_BYTES];
+    hkdf_key(shared, sizeof(shared), "Control-Salt",
+             "Control-Write-Encryption-Key", controller_write_key);
+    hkdf_key(shared, sizeof(shared), "Control-Salt",
+             "Control-Read-Encryption-Key", controller_read_key);
+    assert(airplay_control_cipher_create(controller_read_key,
+                                         controller_write_key,
+                                         &client->cipher) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+
+    mbedtls_ecp_group_free(&group);
+    mbedtls_mpi_free(&private_key);
+    mbedtls_mpi_free(&shared_secret);
+    mbedtls_ecp_point_free(&public_key);
+    mbedtls_ecp_point_free(&accessory_point);
+    mbedtls_platform_zeroize(shared, sizeof(shared));
+    mbedtls_platform_zeroize(verify_key, sizeof(verify_key));
+    mbedtls_platform_zeroize(controller_write_key,
+                             sizeof(controller_write_key));
+    mbedtls_platform_zeroize(controller_read_key,
+                             sizeof(controller_read_key));
+    mbedtls_platform_zeroize(submessage, sizeof(submessage));
+    mbedtls_platform_zeroize(encrypted, sizeof(encrypted));
+    mbedtls_platform_zeroize(accessory_signature_input,
+                             sizeof(accessory_signature_input));
+    mbedtls_platform_zeroize(controller_signature_input,
+                             sizeof(controller_signature_input));
+    mbedtls_platform_zeroize(controller_signature,
+                             sizeof(controller_signature));
+}
+
+/* ------------------------------------------------------------------ */
+/* Encrypted traffic                                                  */
+/* ------------------------------------------------------------------ */
+
+static void run_encrypted_info(rtcp_receiver_t *server, client_t *client,
+                               const uint8_t *info_plist, size_t info_len)
+{
+    uint8_t request[192];
+    response_t response;
+    size_t request_len = build_request(request, sizeof(request), "GET", "/info",
+                                       PAIRING_TYPE, 20U, NULL, 0U);
+    client_exchange(server, client, request, request_len, &response);
+    assert(response.body_len == info_len);
+    assert(memcmp(response.body, info_plist, info_len) == 0);
+}
+
+/* The sender's SET_PARAMETER volume reaches the receiver callback and the
+ * session acknowledges it with 200 OK. */
+static void run_set_parameter_volume(rtcp_receiver_t *server,
+                                     client_t *client, uint32_t *cseq)
+{
+    static const char body[] = "volume: -12.000000\r\n";
+    uint8_t request[256];
+    response_t response;
+    unsigned before = volume_events;
+    size_t request_len = build_request(
+        request, sizeof(request), "SET_PARAMETER", "/stream",
+        "text/parameters", (*cseq)++, (const uint8_t *)body,
+        sizeof(body) - 1U);
+    client_exchange(server, client, request, request_len, &response);
+    assert(contains(response.headers, response.headers_len, "200"));
+    assert(volume_events == before + 1U);
+    assert(volume_last_db > -12.001f && volume_last_db < -11.999f);
+}
+
+static void run_tampered_frame(rtcp_receiver_t *server,
+                               client_t *client)
+{
+    uint8_t request[192];
+    size_t request_len = build_request(request, sizeof(request), "GET", "/info",
+                                       PAIRING_TYPE, 21U, NULL, 0U);
+    uint8_t encrypted[256];
+    size_t encrypted_len = 0U;
+    assert(airplay_control_cipher_encrypt(client->cipher, request, request_len,
+                                          encrypted, sizeof(encrypted),
+                                          &encrypted_len) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+    encrypted[encrypted_len - 1U] ^= 0x01U;
+    client_send(client, encrypted, encrypted_len);
+
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (receiver_connected(server) &&
+           rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        receiver_poll(server, 10);
+    }
+    assert(!receiver_connected(server));
+}
+
+/* ------------------------------------------------------------------ */
+/* Screen DataStream                                                  */
+/* ------------------------------------------------------------------ */
+
+static void write_le32(uint8_t *output, uint32_t value)
+{
+    for (unsigned i = 0U; i < 4U; ++i) {
+        output[i] = (uint8_t)(value >> (8U * i));
+    }
+}
+
+static void write_le64(uint8_t *output, uint64_t value)
+{
+    for (unsigned i = 0U; i < 8U; ++i) {
+        output[i] = (uint8_t)(value >> (8U * i));
+    }
+}
+
+static void write_be64(uint8_t *output, uint64_t value)
+{
+    for (unsigned i = 0U; i < 8U; ++i) {
+        output[7U - i] = (uint8_t)(value >> (8U * i));
+    }
+}
+
+/* Closes a binary plist: offset table followed by the 32-byte trailer. */
+static size_t bplist_finish(uint8_t *output, size_t objects_len,
+                            const size_t *offsets, size_t object_count,
+                            size_t offset_int_size)
+{
+    size_t table_at = objects_len;
+    for (size_t i = 0U; i < object_count; ++i) {
+        for (size_t byte = 0U; byte < offset_int_size; ++byte) {
+            output[table_at + i * offset_int_size + byte] =
+                (uint8_t)(offsets[i] >>
+                          (8U * (offset_int_size - byte - 1U)));
+        }
+    }
+    size_t trailer_at = table_at + object_count * offset_int_size;
+    memset(output + trailer_at, 0, 32U);
+    output[trailer_at + 6U] = (uint8_t)offset_int_size;
+    output[trailer_at + 7U] = 1U; /* one-byte object references */
+    write_be64(output + trailer_at + 8U, object_count);
+    write_be64(output + trailer_at + 16U, 0U); /* top object */
+    write_be64(output + trailer_at + 24U, table_at);
+    return trailer_at + 32U;
+}
+
+static size_t build_bplist_empty_dict(uint8_t *output, size_t capacity)
+{
+    assert(capacity >= 64U);
+    memcpy(output, "bplist00", 8U);
+    size_t offsets[1] = {8U};
+    output[8] = 0xd0U; /* empty dictionary */
+    return bplist_finish(output, 9U, offsets, 1U, 1U);
+}
+
+/* {"streams": [{"type": 110, "streamConnectionID": id}]} */
+static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
+                                        uint64_t connection_id)
+{
+    assert(capacity >= 128U);
+    memcpy(output, "bplist00", 8U);
+    size_t offsets[8];
+    size_t at = 8U;
+
+    offsets[0] = at;
+    output[at++] = 0xd1U; /* dictionary, one entry */
+    output[at++] = 0x01U;
+    output[at++] = 0x02U;
+
+    offsets[1] = at;
+    output[at++] = 0x57U; /* 7-character string */
+    memcpy(output + at, "streams", 7U);
+    at += 7U;
+
+    offsets[2] = at;
+    output[at++] = 0xa1U; /* array, one element */
+    output[at++] = 0x03U;
+
+    offsets[3] = at;
+    output[at++] = 0xd2U; /* dictionary, two entries */
+    output[at++] = 0x04U;
+    output[at++] = 0x05U;
+    output[at++] = 0x06U;
+    output[at++] = 0x07U;
+
+    offsets[4] = at;
+    output[at++] = 0x54U;
+    memcpy(output + at, "type", 4U);
+    at += 4U;
+
+    offsets[5] = at;
+    output[at++] = 0x5fU; /* 18-character string */
+    output[at++] = 0x10U;
+    output[at++] = 18U;
+    memcpy(output + at, "streamConnectionID", 18U);
+    at += 18U;
+
+    offsets[6] = at;
+    output[at++] = 0x10U; /* one-byte integer */
+    output[at++] = 110U;
+
+    offsets[7] = at;
+    output[at++] = 0x13U; /* eight-byte integer */
+    write_be64(output + at, connection_id);
+    at += 8U;
+
+    return bplist_finish(output, at, offsets, 8U, 2U);
+}
+
+/* {"streams": [{"type": 100, "streamConnectionID": id,
+ *               "audioFormat": bits}]} */
+static size_t build_bplist_audio_setup(uint8_t *output, size_t capacity,
+                                       uint64_t connection_id,
+                                       uint64_t format_bits, bool media)
+{
+    assert(capacity >= 192U);
+    memcpy(output, "bplist00", 8U);
+    size_t offsets[12];
+    size_t at = 8U;
+
+    offsets[0] = at;
+    output[at++] = 0xd1U; /* dictionary, one entry */
+    output[at++] = 0x01U;
+    output[at++] = 0x02U;
+
+    offsets[1] = at;
+    output[at++] = 0x57U;
+    memcpy(output + at, "streams", 7U);
+    at += 7U;
+
+    offsets[2] = at;
+    output[at++] = 0xa1U; /* array, one element */
+    output[at++] = 0x03U;
+
+    offsets[3] = at;
+    output[at++] = media ? 0xd4U : 0xd3U; /* optional audioType */
+    output[at++] = 0x04U;
+    output[at++] = 0x05U;
+    output[at++] = 0x06U;
+    if(media) output[at++] = 10U;
+    output[at++] = 0x07U;
+    output[at++] = 0x08U;
+    output[at++] = 0x09U;
+    if(media) output[at++] = 11U;
+
+    offsets[4] = at;
+    output[at++] = 0x54U;
+    memcpy(output + at, "type", 4U);
+    at += 4U;
+
+    offsets[5] = at;
+    output[at++] = 0x5fU; /* 18-character string */
+    output[at++] = 0x10U;
+    output[at++] = 18U;
+    memcpy(output + at, "streamConnectionID", 18U);
+    at += 18U;
+
+    offsets[6] = at;
+    output[at++] = 0x5bU;
+    memcpy(output + at, "audioFormat", 11U);
+    at += 11U;
+
+    offsets[7] = at;
+    output[at++] = 0x10U;
+    output[at++] = 100U;
+
+    offsets[8] = at;
+    output[at++] = 0x13U; /* eight-byte integer */
+    write_be64(output + at, connection_id);
+    at += 8U;
+
+    offsets[9] = at;
+    if (format_bits <= 0xffU) {
+        output[at++] = 0x10U;
+        output[at++] = (uint8_t)format_bits;
+    } else if (format_bits <= 0xffffU) {
+        output[at++] = 0x11U;
+        output[at++] = (uint8_t)(format_bits >> 8U);
+        output[at++] = (uint8_t)format_bits;
+    } else {
+        output[at++] = 0x12U;
+        output[at++] = (uint8_t)(format_bits >> 24U);
+        output[at++] = (uint8_t)(format_bits >> 16U);
+        output[at++] = (uint8_t)(format_bits >> 8U);
+        output[at++] = (uint8_t)format_bits;
+    }
+
+    if(media) {
+        offsets[10]=at;output[at++]=0x59;memcpy(output+at,"audioType",9);at+=9;
+        offsets[11]=at;output[at++]=0x55;memcpy(output+at,"media",5);at+=5;
+    }
+    return bplist_finish(output, at, offsets, media ? 12U : 10U, 2U);
+}
+
+static uint16_t response_port(const response_t *response, const char *key)
+{
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    airplay_bplist_object_t object;
+    uint64_t value = 0U;
+    assert(airplay_bplist_open(response->body, response->body_len, &doc) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, key, &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, object, &value) == AIRPLAY_BPLIST_OK);
+    assert(value != 0U && value <= UINT16_MAX);
+    return (uint16_t)value;
+}
+
+static uint16_t response_data_port(const response_t *response)
+{
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    airplay_bplist_object_t streams;
+    airplay_bplist_object_t entry;
+    airplay_bplist_object_t object;
+    uint64_t port = 0U;
+    assert(airplay_bplist_open(response->body, response->body_len, &doc) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "streams", &streams) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, streams, 0U, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, entry, "dataPort", &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, object, &port) == AIRPLAY_BPLIST_OK);
+    assert(port != 0U && port <= UINT16_MAX);
+    return (uint16_t)port;
+}
+
+static uint64_t response_stream_uint(const response_t *response, uint64_t index,
+                                     const char *key)
+{
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root;
+    airplay_bplist_object_t streams;
+    airplay_bplist_object_t entry;
+    airplay_bplist_object_t object;
+    uint64_t value = 0U;
+    assert(airplay_bplist_open(response->body, response->body_len, &doc) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "streams", &streams) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, streams, index, &entry) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, entry, key, &object) ==
+           AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_uint(&doc, object, &value) == AIRPLAY_BPLIST_OK);
+    return value;
+}
+
+static uint16_t run_initial_setup(rtcp_receiver_t *server,
+                                  client_t *client, uint32_t *cseq)
+{
+    uint8_t request[192];
+    uint8_t body[64];
+    response_t response;
+    size_t body_len = build_bplist_empty_dict(body, sizeof(body));
+    size_t request_len = build_request(request, sizeof(request), "SETUP",
+                                       "/stream", PLIST_TYPE, (*cseq)++, body,
+                                       body_len);
+    client_exchange(server, client, request, request_len, &response);
+    return response_port(&response, "eventPort");
+}
+
+static size_t receive_decrypted(rtcp_receiver_t *server, int fd,
+                                airplay_control_cipher_t *cipher,
+                                uint8_t *plain, size_t capacity)
+{
+    size_t plain_len = 0U;
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (plain_len == 0U && rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        receiver_poll(server, 10);
+        if (!client_has_data(fd)) continue;
+        uint8_t raw[4096];
+        int received = rtcp_net_linux.recv(fd, raw, sizeof(raw));
+        assert(received > 0);
+        size_t offset = 0U;
+        while (offset < (size_t)received) {
+            size_t consumed = 0U;
+            size_t produced = 0U;
+            airplay_control_cipher_result_t result =
+                airplay_control_cipher_decrypt(
+                    cipher, raw + offset, (size_t)received - offset, &consumed,
+                    plain + plain_len, capacity - plain_len, &produced);
+            offset += consumed;
+            plain_len += produced;
+            if (result == AIRPLAY_CONTROL_CIPHER_INCOMPLETE) break;
+            assert(result == AIRPLAY_CONTROL_CIPHER_OK);
+            if (consumed == 0U && produced == 0U) break;
+        }
+    }
+    return plain_len;
+}
+
+static void run_event_channel(rtcp_receiver_t *server,
+                              const uint8_t shared_secret[KEY_BYTES],
+                              uint16_t event_port)
+{
+    static const uint8_t hid_report[12] = {
+        0xde, 0xad, 0xbe, 0xef, 0x01, 0x02,
+        0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    };
+    /* Before the controller attaches there is no event channel to write. */
+    assert(!rtcp_receiver_send_hid_report(e2e_receiver, 0x2a2a2a2aU,
+                                                hid_report,
+                                                sizeof(hid_report)));
+    assert(!rtcp_receiver_send_hid_report(NULL, 0x2a2a2a2aU, hid_report,
+                                                sizeof(hid_report)));
+
+    rtcp_addr_t address = {0};
+    address.family = RTCP_AF_INET;
+    address.addr[0] = 127U;
+    address.addr[3] = 1U;
+    address.port = event_port;
+    int event_fd = rtcp_net_linux.connect(&address);
+    assert(event_fd >= 0);
+
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (!event_connected &&
+           rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        receiver_poll(server, 10);
+    }
+    assert(event_connected);
+
+    /* The peer reads what the accessory writes (Events-Write) and writes
+     * with Events-Read. */
+    uint8_t peer_read_key[KEY_BYTES];
+    uint8_t peer_write_key[KEY_BYTES];
+    hkdf_key(shared_secret, KEY_BYTES, "Events-Salt",
+             "Events-Write-Encryption-Key", peer_read_key);
+    hkdf_key(shared_secret, KEY_BYTES, "Events-Salt",
+             "Events-Read-Encryption-Key", peer_write_key);
+    airplay_control_cipher_t *peer = NULL;
+    assert(airplay_control_cipher_create(peer_read_key, peer_write_key,
+                                         &peer) ==
+           AIRPLAY_CONTROL_CIPHER_OK);
+
+    assert(rtcp_receiver_send_hid_report(e2e_receiver, 0x2a2a2a2aU, hid_report,
+                                               sizeof(hid_report)));
+
+    uint8_t plain[2048];
+    size_t plain_len = receive_decrypted(server, event_fd, peer, plain,
+                                         sizeof(plain));
+    assert(plain_len > 0U);
+    assert(contains(plain, plain_len, "POST /command"));
+    assert(contains(plain, plain_len, "hidSendReport"));
+    assert(contains(plain, plain_len, "hidReport"));
+
+    rtcp_net_linux.close(event_fd);
+    start = rtcp_os_linux.now_ms();
+    while (event_connected && rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        receiver_poll(server, 10);
+    }
+    assert(!event_connected);
+
+    airplay_control_cipher_destroy(peer);
+    mbedtls_platform_zeroize(peer_read_key, sizeof(peer_read_key));
+    mbedtls_platform_zeroize(peer_write_key, sizeof(peer_write_key));
+}
+
+static void run_screen_stream(rtcp_receiver_t *server, client_t *client,
+                              const uint8_t shared_secret[KEY_BYTES],
+                              uint32_t *cseq)
+{
+    uint8_t request[512];
+    uint8_t body[256];
+    response_t response;
+    size_t request_len;
+    size_t body_len;
+
+    static const uint64_t connection_id = UINT64_C(0x1122334455667788);
+    body_len = build_bplist_screen_setup(body, sizeof(body), connection_id);
+    request_len = build_request(request, sizeof(request), "SETUP", "/stream",
+                                PLIST_TYPE, (*cseq)++, body, body_len);
+    client_exchange(server, client, request, request_len, &response);
+    uint16_t data_port = response_data_port(&response);
+
+    request_len = build_request(request, sizeof(request), "RECORD", "/stream",
+                                PLIST_TYPE, (*cseq)++, NULL, 0U);
+    client_exchange(server, client, request, request_len, &response);
+
+    expect_receiver_state(true, true, true, true, true);
+    uint8_t output_key[KEY_BYTES];
+    assert(airplay_screen_derive_output_key(shared_secret, KEY_BYTES,
+                                            connection_id, output_key) ==
+           RTCP_OK);
+
+    rtcp_addr_t address = {0};
+    address.family = RTCP_AF_INET;
+    address.addr[0] = 127U;
+    address.addr[3] = 1U;
+    address.port = data_port;
+    int screen_fd = rtcp_net_linux.connect(&address);
+    assert(screen_fd >= 0);
+
+    static const uint8_t nal[] = {0x65U, 0x11U, 0x22U, 0x33U, 0x44U};
+    uint8_t plaintext[4U + sizeof(nal)];
+    plaintext[0] = 0U;
+    plaintext[1] = 0U;
+    plaintext[2] = 0U;
+    plaintext[3] = (uint8_t)sizeof(nal);
+    memcpy(plaintext + 4U, nal, sizeof(nal));
+
+    uint8_t header[AIRPLAY_SCREEN_HEADER_BYTES] = {0};
+    write_le32(header, (uint32_t)(sizeof(plaintext) +
+                                  AIRPLAY_SCREEN_TAG_BYTES));
+    header[4] = 0U; /* video */
+    static const uint64_t ntp = UINT64_C(0x0123456789abcdef);
+    write_le64(header + 8U, ntp);
+
+    mbedtls_chachapoly_context cipher;
+    mbedtls_chachapoly_init(&cipher);
+    assert(mbedtls_chachapoly_setkey(&cipher, output_key) == 0);
+    unsigned frames_before = screen_frames;
+    for (unsigned frame_index = 0U; frame_index < 2U; ++frame_index) {
+        uint8_t nonce[12] = {0};
+        write_le64(nonce + 4U, frame_index);
+        uint8_t frame[sizeof(plaintext) + AIRPLAY_SCREEN_TAG_BYTES];
+        assert(mbedtls_chachapoly_encrypt_and_tag(
+                   &cipher, sizeof(plaintext), nonce, header, sizeof(header),
+                   plaintext, frame, frame + sizeof(plaintext)) == 0);
+        assert(rtcp_net_linux.send(screen_fd, header, sizeof(header)) ==
+               (int)sizeof(header));
+        assert(rtcp_net_linux.send(screen_fd, frame, sizeof(frame)) ==
+               (int)sizeof(frame));
+
+        uint64_t start = rtcp_os_linux.now_ms();
+        while (screen_frames == frames_before + frame_index &&
+               rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+            receiver_poll(server, 10);
+        }
+        assert(screen_frames == frames_before + frame_index + 1U);
+    }
+    mbedtls_chachapoly_free(&cipher);
+
+    static const uint8_t start_code[4] = {0U, 0U, 0U, 1U};
+    assert(screen_frame_len == 4U + sizeof(nal));
+    assert(memcmp(screen_frame, start_code, sizeof(start_code)) == 0);
+    assert(memcmp(screen_frame + 4U, nal, sizeof(nal)) == 0);
+    uint64_t expected_ns =
+        (ntp >> 32U) * UINT64_C(1000000000) +
+        (((ntp & UINT64_C(0xffffffff)) * UINT64_C(1000000000)) >> 32U);
+    assert(screen_sender_time_ns == expected_ns);
+
+    rtcp_net_linux.close(screen_fd);
+    mbedtls_platform_zeroize(output_key, sizeof(output_key));
+}
+
+
+static void write_be32(uint8_t *output, uint32_t value)
+{
+    output[0] = (uint8_t)(value >> 24U);
+    output[1] = (uint8_t)(value >> 16U);
+    output[2] = (uint8_t)(value >> 8U);
+    output[3] = (uint8_t)value;
+}
+
+/* One SETUP plus one encrypted RTP datagram through the real server poll
+ * loop, proving the audio endpoint is bound, keyed and wired to the sink. */
+static void run_audio_stream(rtcp_receiver_t *server, client_t *client,
+                             const uint8_t shared_secret[KEY_BYTES],
+                             uint32_t *cseq, bool media)
+{
+    uint64_t connection_id = UINT64_C(0x0102030405060708) + (media ? 1U : 0U);
+    static const uint64_t format_bits = 0x800U; /* 44.1 kHz stereo LPCM */
+    uint8_t request[512];
+    uint8_t body[256];
+    response_t response;
+    size_t body_len = build_bplist_audio_setup(body, sizeof(body), connection_id,
+                                               format_bits, media);
+    size_t request_len = build_request(request, sizeof(request), "SETUP",
+                                       "/stream", PLIST_TYPE, (*cseq)++, body,
+                                       body_len);
+    client_exchange(server, client, request, request_len, &response);
+    uint16_t data_port = (uint16_t)response_stream_uint(&response, 0U, "dataPort");
+    uint16_t control_port =
+        (uint16_t)response_stream_uint(&response, 0U, "controlPort");
+    assert(data_port != 0U && control_port != 0U);
+    assert(response_stream_uint(&response, 0U, "streamConnectionID") ==
+           connection_id);
+
+    expect_receiver_state(true, true, false, false, true);
+    uint8_t output_key[KEY_BYTES];
+    assert(airplay_screen_derive_output_key(shared_secret, KEY_BYTES,
+                                            connection_id, output_key) ==
+           RTCP_OK);
+
+    int fd = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
+    assert(fd >= 0);
+    rtcp_addr_t address = {0};
+    address.family = RTCP_AF_INET;
+    address.addr[0] = 127U;
+    address.addr[3] = 1U;
+    address.port = data_port;
+
+    static const uint8_t pcm[] = {
+        0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
+    };
+    uint8_t header[AIRPLAY_AUDIO_RTP_HEADER_BYTES] = {0x80U, 0x60U, 0x00U, 0x01U};
+    write_be32(header + 4U, 4800U);
+    write_be32(header + 8U, 0x11223344U);
+    uint8_t nonce[12] = {0};
+    nonce[4] = (uint8_t)(audio_packets+1U); /* fresh nonce on duplicate SETUP */
+
+    mbedtls_chachapoly_context cipher;
+    mbedtls_chachapoly_init(&cipher);
+    assert(mbedtls_chachapoly_setkey(&cipher, output_key) == 0);
+    uint8_t wire[AIRPLAY_AUDIO_OVERHEAD_BYTES + sizeof(pcm)];
+    memcpy(wire, header, sizeof(header));
+    assert(mbedtls_chachapoly_encrypt_and_tag(
+               &cipher, sizeof(pcm), nonce, header + 4U, 8U, pcm,
+               wire + AIRPLAY_AUDIO_RTP_HEADER_BYTES,
+               wire + AIRPLAY_AUDIO_RTP_HEADER_BYTES + sizeof(pcm)) == 0);
+    mbedtls_chachapoly_free(&cipher);
+    const size_t nonce_at = sizeof(wire) - AIRPLAY_AUDIO_NONCE_BYTES;
+    memcpy(wire + nonce_at, nonce + 4U, AIRPLAY_AUDIO_NONCE_BYTES);
+
+    assert(rtcp_net_linux.udp_sendto(fd, &address, wire, sizeof(wire)) ==
+           (int)sizeof(wire));
+    unsigned packets_before = audio_packets;
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (audio_packets == packets_before &&
+           rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+        receiver_poll(server, 10);
+    }
+    assert(audio_packets == packets_before + 1U);
+    assert(audio_packets_stream_type == 100U);
+    assert(audio_pcm_len == sizeof(pcm));
+    for (size_t i = 0; i < sizeof(pcm); i += 2) {
+        assert(audio_pcm[i] == pcm[i + 1]);
+        assert(audio_pcm[i + 1] == pcm[i]);
+    }
+    assert(audio_packet_format.sample_rate == 44100U);
+    assert(audio_packet_format.channels == 2U);
+    assert(audio_packet_format.stream_slot_valid && audio_packet_format.stream_slot==(media ? 7U : 0U));
+    assert(audio_packet_timestamp == 4800U);
+    rtcp_receiver_diagnostics_t diagnostics;
+    assert(rtcp_receiver_get_diagnostics(server, &diagnostics) == RTCP_OK);
+    assert(diagnostics.audio.active_streams >= 1 && diagnostics.audio.datagrams >= 1 &&
+           !diagnostics.audio.auth_failures);
+
+    rtcp_net_linux.close(fd);
+    mbedtls_platform_zeroize(output_key, sizeof(output_key));
+}
+
+/* ------------------------------------------------------------------ */
+/* main                                                               */
+/* ------------------------------------------------------------------ */
+
+int main(int argc, char **argv)
+{
+    fixture_t fixture = {0};
+    assert(airplay_ed25519_keypair_from_seed(ACCESSORY_SEED,
+                                             &fixture.accessory));
+    assert(airplay_ed25519_keypair_from_seed(CONTROLLER_SEED,
+                                             &fixture.controller));
+
+    uint8_t info_plist[INFO_PLIST_BYTES];
+    airplay_info_plist_config_t info = {0};
+    info.device_id = ACCESSORY_ID;
+    info.name = "rt-carplay e2e";
+    info.model = "AppleTV6,2";
+    info.width_pixels = 1920U;
+    info.height_pixels = 1080U;
+    info.max_fps = 30U;
+    size_t info_len = 0U;
+    assert(airplay_info_plist_build(&info, info_plist, sizeof(info_plist),
+                                    &info_len));
+
+    rtcp_receiver_config_t receiver_config = {0};
+    receiver_config.platform.os = &rtcp_os_linux;
+    receiver_config.platform.net = &rtcp_net_linux;
+    fill_pairing(&fixture, &receiver_config.platform.pairing);
+    receiver_config.platform.info_plist = info_plist;
+    receiver_config.platform.info_plist_len = info_len;
+    receiver_config.media.on_video = capture_screen;
+    receiver_config.media.video_context = &video_context;
+    receiver_config.media.on_audio = capture_audio;
+    receiver_config.media.audio_context = &audio_context;
+    receiver_config.media.on_volume = capture_volume;
+    receiver_config.media.volume_context = &volume_context;
+    receiver_config.on_event_state = capture_event_state;
+    receiver_config.event_state_context = &event_context;
+
+    if (argc > 1) {
+        assert(argc == 2 && strcmp(argv[1], "--legacy-config") == 0);
+        /* Execute the same encrypted exchanges through the migration API.
+         * Populate the original contract independently of the native one. */
+        airplay_rtsp_server_config_t legacy = {
+            .os = &rtcp_os_linux, .net = &rtcp_net_linux,
+            .info_plist = info_plist, .info_plist_len = info_len,
+            .on_screen_message = capture_screen, .screen_message_context = &video_context,
+            .on_audio_pcm = capture_audio, .audio_pcm_context = &audio_context,
+            .on_volume = capture_volume, .volume_context = &volume_context,
+            .on_event_state = capture_event_state, .event_state_context = &event_context,
+        };
+        fill_pairing(&fixture, &legacy.pairing);
+        assert(rtcp_receiver_config_from_airplay(&legacy, &receiver_config) == RTCP_OK);
+    }
+
+    rtcp_receiver_t *server = NULL;
+    assert(rtcp_receiver_create(&receiver_config, &e2e_receiver) == RTCP_OK);
+    memset(&receiver_config, 0, sizeof(receiver_config)); /* Descriptors are copied. */
+    assert(rtcp_receiver_start(e2e_receiver) == RTCP_OK);
+    server = e2e_receiver;
+    assert(server != NULL);
+
+    client_t client;
+    client_connect(server, &client);
+    expect_receiver_state(true, false, false, false, false);
+    run_pair_setup(server, &client, &fixture);
+    expect_receiver_state(true, false, false, false, false);
+    uint8_t shared_secret[KEY_BYTES];
+    run_pair_verify(server, &client, &fixture, shared_secret);
+    expect_receiver_state(true, true, false, false, false);
+    run_encrypted_info(server, &client, info_plist, info_len);
+    uint32_t cseq = 30U;
+    uint16_t event_port = run_initial_setup(server, &client, &cseq);
+    run_event_channel(server, shared_secret, event_port);
+    /* Audio runs before the screen stream: closing the screen socket ends the
+     * session, so the RTSP connection must still be up for the audio SETUP. */
+    run_audio_stream(server, &client, shared_secret, &cseq, false);
+    expect_receiver_state(true, true, false, false, true);
+    run_audio_stream(server, &client, shared_secret, &cseq, true);
+    /* Reusing the existing default endpoint still works alongside media. */
+    run_audio_stream(server, &client, shared_secret, &cseq, false);
+    run_screen_stream(server, &client, shared_secret, &cseq);
+    mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
+    run_tampered_frame(server, &client);
+    expect_receiver_state(false, false, false, false, false);
+
+    /* The malformed frame dropped only that connection.  A reconnecting
+     * controller must Pair-Verify against the pairing stored by the first
+     * Pair-Setup and run a complete second session on the same server. */
+    client_t client2;
+    client_connect(server, &client2);
+    uint8_t shared_secret2[KEY_BYTES];
+    run_pair_verify(server, &client2, &fixture, shared_secret2);
+    run_encrypted_info(server, &client2, info_plist, info_len);
+    cseq = 60U;
+    uint16_t event_port2 = run_initial_setup(server, &client2, &cseq);
+    run_event_channel(server, shared_secret2, event_port2);
+    run_set_parameter_volume(server, &client2, &cseq);
+    run_audio_stream(server, &client2, shared_secret2, &cseq, false);
+    run_screen_stream(server, &client2, shared_secret2, &cseq);
+    mbedtls_platform_zeroize(shared_secret2, sizeof(shared_secret2));
+
+    if (client2.cipher != NULL) airplay_control_cipher_destroy(client2.cipher);
+    rtcp_net_linux.close(client2.fd);
+    if (client.cipher != NULL) airplay_control_cipher_destroy(client.cipher);
+    rtcp_net_linux.close(client.fd);
+    assert(rtcp_receiver_destroy(e2e_receiver) == RTCP_OK);
+    e2e_receiver = NULL;
+    airplay_ed25519_keypair_clear(&fixture.accessory);
+    airplay_ed25519_keypair_clear(&fixture.controller);
+    mbedtls_platform_zeroize(&fixture, sizeof(fixture));
+
+    assert(screen_messages == 4U);
+    assert(screen_frames == 4U);
+    assert(audio_packets == 4U);
+    assert(volume_events == 1U);
+    assert(event_transitions == 4U);
+    puts("airplay pairing end-to-end host test passed");
+    return 0;
+}

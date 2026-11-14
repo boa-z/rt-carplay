@@ -1,0 +1,19 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#pragma once
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "rtcp/media.h"
+
+typedef struct rtcp_audio_decoder rtcp_audio_decoder_t;
+/* Exactly one negotiated bit. Availability reflects compiled decoders. */
+bool rtcp_audio_format_parse(uint64_t bits, rtcp_audio_format_t *format);
+uint64_t rtcp_audio_output_formats(void);
+int rtcp_audio_decoder_create(const rtcp_audio_format_t *, rtcp_audio_decoder_t **);
+/* Input is an AAC raw access unit, Opus packet, or LITTLE-endian PCM.
+ * Output is host-endian signed 16 bit PCM; capacity/count are total samples.
+ * A decoder belongs to one stream and one audio worker. */
+int rtcp_audio_decoder_decode(rtcp_audio_decoder_t *, const uint8_t *, size_t,
+                              int16_t *, size_t capacity, size_t *samples);
+void rtcp_audio_decoder_destroy(rtcp_audio_decoder_t *);

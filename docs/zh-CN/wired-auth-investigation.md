@@ -137,3 +137,11 @@ make check-lubanlite-touch
 第一轮性能跟进记录于 wired-video-performance.md。V18 移除有线每次 recv 的固定 Sleep，让解码器优先于 Producer 调度，合并已解码输出，并添加阶段统计。这些修改保留 v17 认证／触摸修复，不修改 IPHETH。
 
 随后 V18 实机在第二次配置重置后立即暴露视频参考链故障。V19 缓存／比较配置，并在配置变化、解码失败或输入丢失后从 IDR 重新同步。证据、限制和集中开发板检查见 [wired-video-performance.md](../wired-video-performance.md)。该报告中的失败阶段不是认证或触摸。
+
+## 集成后的有线邀请恢复
+
+有线会话保留 CarPlayAvailability 响应，直到认证及有效端点允许发送。后续每次 availability 都可以请求新的响应，不能被之前成功发送的标志抑制。已经接受 AirPlay TCP 或建立 event 连接后，停止继续发出有线邀请。宿主在 `iap2_session_airplay_t` 中分别提供 `transport_connected` 与 `event_connected`，使启动恢复可以在媒体 SETUP 前停止。
+
+`iap2_session_config_t.wired_reinvite_delay_ms` 可选地启用一次额外启动邀请，条件是尚未观察到连接。SDK 默认为零，即关闭。延迟及是否启用属于宿主兼容策略，不是 Apple 协议要求。端点暂不可用不消耗补发机会；成功补发或观察到连接后停止重试。无线节奏保持原有策略。链路 ACK 只确认 iAP2 链路交付，不等于 AirPlay 接受。
+
+集成应用在 2026-11-14 的用户日志包含首次邀请 ACK、五秒快照仍无 TCP、一次补发及 ACK，随后建立 RTSP、配对/认证、event/screen 连接、视频可见及运行阶段。用户确认该次有线 CarPlay 正常。这支持启动恢复，但不能确定首次邀请未产生连接的原因，也不能证明持续性能或声学验收。同一日志中的互联网共享定时器池断言及音频时间戳缺口仍作为独立未解决问题保留。

@@ -57,6 +57,9 @@ struct iap2_session {
     bool subscriptions_sent;
     bool wired_power_sent;
     bool start_session_sent;
+    bool wired_reinvite_done;
+    bool wired_transport_connected;
+    bool wired_invite_pending;
     bool transport_notification_seen;
     bool mfi_response_pending;
     bool airplay_event_connected;
@@ -105,6 +108,9 @@ static bool send_csm(iap2_session_t *session,
 static void reset_wireless_negotiation(iap2_session_t *session)
 {
     session->start_session_sent = false;
+    session->wired_reinvite_done = false;
+    session->wired_transport_connected = false;
+    session->wired_invite_pending = false;
     session->subscriptions_sent = false;
     session->wired_power_sent = false;
     session->transport_notification_seen = false;
@@ -458,6 +464,13 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
         return false;
     }
 
+    if (wired) session->wired_transport_connected = airplay.transport_connected || airplay.event_connected;
+    if (wired && session->wired_transport_connected) {
+        session->carplay_invite_active = false;
+        session->wired_invite_pending = false;
+        return false;
+    }
+
     iap2_session_wifi_t wifi;
     memset(&wifi, 0, sizeof(wifi));
     if (!wired && !get_wifi(session, &wifi)) return false;
@@ -497,8 +510,20 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
 
 static void maybe_reinvite_carplay(iap2_session_t *session, uint64_t now_ms)
 {
-    /* The wired references send 0x4301 once per CarPlayAvailability. */
-    if (session_is_wired(session)) return;
+    if (session_is_wired(session)) {
+        uint32_t delay = session->config.wired_reinvite_delay_ms;
+        if (!delay || session->wired_reinvite_done ||
+            !session->carplay_invite_active || !session->link_up ||
+            session->airplay_event_connected ||
+            now_ms - session->carplay_invite_at_ms < delay) return;
+        /* One application-enabled compatibility retry, never a periodic
+         * wired invite loop. get_airplay also checks for accepted TCP. */
+        session->start_session_sent = false;
+        if (send_carplay_start_session(session, now_ms, true) ||
+            !session->carplay_invite_active)
+            session->wired_reinvite_done = true;
+        return;
+    }
     if (!session->carplay_invite_active || !session->link_up ||
         session->airplay_event_connected ||
         !iap2_mfi_auth_is_authenticated(&session->auth) ||
@@ -611,6 +636,14 @@ void iap2_session_advance(iap2_session_t *session, uint64_t now_ms)
     if (session == NULL) return;
     session->now_ms = now_ms;
     iap2_core_advance_time(session->core, now_ms);
+    /* An availability message can precede the host's valid IPv6 address or
+     * MFi completion. Retain this one invitation until prerequisites are
+     * ready; never turn it into periodic wired re-invites. */
+    if (session_is_wired(session) && session->link_up &&
+        session->wired_invite_pending && !session->airplay_event_connected &&
+        send_carplay_start_session(session, now_ms, false)) {
+        session->wired_invite_pending = false;
+    }
     maybe_reinvite_carplay(session, now_ms);
 }
 
@@ -694,7 +727,13 @@ void iap2_session_handle_message(iap2_session_t *session,
     case IAP2_MSG_CARPLAY_AVAILABILITY:
         emit_event(session, IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED);
         if (!session->airplay_event_connected) {
-            (void)send_carplay_start_session(session, now_ms, false);
+            /* Each new wired availability deserves a fresh answer. The
+             * sent flag suppresses timer duplicates, not peer requests. */
+            if (session_is_wired(session)) session->start_session_sent = false;
+            bool sent = send_carplay_start_session(session, now_ms, false);
+            if (session_is_wired(session))
+                session->wired_invite_pending = !sent && !session->start_session_sent &&
+                    !session->wired_transport_connected;
         }
         break;
     case 0x4e0dU:

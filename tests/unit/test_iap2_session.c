@@ -253,16 +253,20 @@ static bool fake_airplay(iap2_session_airplay_t *out, void *context)
 
 /* Wired sessions do not require an mDNS state: the phone learns the
  * endpoint from StartSession and connects over the NCM link directly. */
+static bool wired_endpoint_ready = true;
+static bool wired_tcp_connected, wired_event_connected;
 static bool fake_wired_airplay(iap2_session_airplay_t *out, void *context)
 {
     (void)context;
+    if (!wired_endpoint_ready) return false;
     out->airplay_port = 7100U;
     out->ip_address = "fe80::1234";
     out->device_identifier = "11:22:33:44:55:66";
     out->public_key = "fedcba9876543210";
     out->source_version = "rt-carplay/0.1";
     out->mdns_ready = false;
-    out->event_connected = false;
+    out->event_connected = wired_event_connected;
+    out->transport_connected = wired_tcp_connected;
     return true;
 }
 
@@ -419,7 +423,10 @@ int main(void)
     /* ------------------------------------------------------------------ */
     /* Wired USB transport                                                 */
     /* ------------------------------------------------------------------ */
+    for (unsigned wired_case = 0; wired_case < 5; ++wired_case) {
     memset(h, 0, sizeof(*h));
+    wired_endpoint_ready = true;
+    wired_tcp_connected = wired_event_connected = false;
     iap2_session_config_t wired_config = {
         .identity = {
             .name = "rt-carplay wired",
@@ -442,6 +449,7 @@ int main(void)
         .car_play_interface_number = 3U,
         .available_current_ma = 0U,
         .battery_should_charge = false,
+        .wired_reinvite_delay_ms = wired_case ? 10000U : 0U,
     };
     session = iap2_session_create(&wired_config);
     assert(session != NULL);
@@ -524,9 +532,18 @@ int main(void)
     assert(last_message(h, 0x5703) == NULL);
     assert(!event_seen(h, IAP2_SESSION_EVENT_WIFI_CONFIG_SENT));
 
-    /* CarPlayAvailability -> wired StartSession with group 0 addresses. */
+    /* Availability can arrive before IPHETH/DAD is ready. Do not advertise
+     * an invalid endpoint or require the phone to send availability again. */
+    wired_endpoint_ready = false;
     feed_peer_csm(session, 0x4300, NULL, 0, 70);
     drain_tx(session, 71);
+    assert(last_message(h, 0x4301) == NULL);
+    iap2_session_advance(session, 72);
+    assert(last_message(h, 0x4301) == NULL);
+    wired_endpoint_ready = true;
+    iap2_session_advance(session, 73);
+    drain_tx(session, 74);
+    /* The deferred wired StartSession still uses group 0 addresses. */
     const csm_record_t *wired_start = last_message(h, 0x4301);
     assert(wired_start != NULL);
     const uint8_t *wired_attributes = NULL;
@@ -543,19 +560,59 @@ int main(void)
                                &field, &field_len));
     assert(field_len == 4U && field[2] == 0x1bU && field[3] == 0xbcU);
 
-    /* No automatic re-invites on the wired link. */
+    /* Disabled by default; opt-in allows exactly one compatibility retry.
+     * Either TCP or event connection suppresses it before SETUP completes. */
+    wired_tcp_connected = wired_case == 2;
+    wired_event_connected = wired_case == 3;
+    wired_endpoint_ready = wired_case != 4;
     iap2_session_advance(session,
-                         71U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS + 1U);
-    drain_tx(session, 71U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS + 2U);
+                         73U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS);
+    drain_tx(session, 74U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS);
     size_t wired_invites = 0U;
     for (size_t i = 0; i < h->message_count; ++i) {
         if (h->messages[i].id == 0x4301U) ++wired_invites;
     }
-    assert(wired_invites == 1U);
-    assert(!event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
+    assert(wired_invites == (wired_case == 1 ? 2U : 1U));
+    assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT) == (wired_case == 1));
+    if (wired_case == 4) {
+        wired_endpoint_ready = true;
+        iap2_session_advance(session, 10075);
+        drain_tx(session, 10076);
+        ++wired_invites;
+        assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
+    }
+    iap2_session_advance(session, 20080);
+    drain_tx(session, 20081);
+    size_t count = 0;
+    for (size_t i = 0; i < h->message_count; ++i)
+        count += h->messages[i].id == 0x4301U;
+    assert(count == wired_invites); /* Never a periodic retry loop. */
+
+    if (wired_case == 0) {
+        /* A new phone request is answered even after an earlier send.
+         * Temporary endpoint loss must retain this new request as well. */
+        wired_endpoint_ready = false;
+        feed_peer_csm(session, 0x4300, NULL, 0, 20090);
+        drain_tx(session, 20091);
+        wired_endpoint_ready = true;
+        iap2_session_advance(session, 20092);
+        drain_tx(session, 20093);
+        count = 0;
+        for (size_t i = 0; i < h->message_count; ++i)
+            count += h->messages[i].id == 0x4301U;
+        assert(count == 2U);
+        wired_tcp_connected = true;
+        feed_peer_csm(session, 0x4300, NULL, 0, 20100);
+        drain_tx(session, 20101);
+        count = 0;
+        for (size_t i = 0; i < h->message_count; ++i)
+            count += h->messages[i].id == 0x4301U;
+        assert(count == 2U); /* An accepted TCP must not be interrupted. */
+    }
 
     iap2_session_link_down(session);
     iap2_session_destroy(session);
+    }
 
     puts("iap2 session host test passed");
     return 0;

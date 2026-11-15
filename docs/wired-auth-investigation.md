@@ -140,3 +140,11 @@ The first performance follow-up is documented in wired-video-performance.md. V18
 
 
 V18 hardware then exposed a video reference-chain failure immediately after a second configuration reset. V19 caches/compares configuration and resynchronizes on IDR after changes, decode failures or input loss. See [wired-video-performance.md](wired-video-performance.md) for evidence, limitations and the focused board check. Authentication and touch are not the failing stage in that report.
+
+## Wired invitation recovery after integration
+
+The wired session retains a CarPlayAvailability response until authentication and a valid endpoint allow transmission. Each subsequent availability can request another response; an earlier successful send must not suppress it. An accepted AirPlay TCP or event connection suppresses further wired invitations. The host supplies `transport_connected` independently of `event_connected` in `iap2_session_airplay_t`, so startup recovery stops before media SETUP.
+
+`iap2_session_config_t.wired_reinvite_delay_ms` optionally enables one supplementary startup invitation when no connection has been observed. Zero, the SDK default, disables it. The delay and enablement belong to host compatibility policy, not an Apple protocol requirement. A temporarily unavailable endpoint does not consume the supplementary send; a successful send or an observed connection ends the retry. Wireless pacing remains unchanged. Link ACK confirms delivery at the iAP2 link only, not AirPlay acceptance.
+
+The integrating application's 2026-11-14 user log contains initial invitation ACK, no TCP at the five-second snapshot, a supplementary invitation and ACK, followed by RTSP, pairing/authentication, event/screen connection, visible video and the live stage. The user confirms wired CarPlay works in that run. This supports startup recovery but does not identify why the first invitation did not produce a connection, nor establish sustained performance or acoustic acceptance. The same log retains an Internet-sharing timer-pool assertion and audio timestamp gaps as separate open issues.

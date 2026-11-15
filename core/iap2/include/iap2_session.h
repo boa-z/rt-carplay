@@ -39,6 +39,7 @@ typedef struct {
     const char *source_version;
     bool mdns_ready;
     bool event_connected;
+    bool transport_connected; /* TCP accepted; stop wired startup retries before SETUP. */
 } iap2_session_airplay_t;
 
 typedef enum {
@@ -106,6 +107,9 @@ typedef struct {
      * "no charging current claimed", matching the reference bring-up. */
     uint16_t available_current_ma;
     bool battery_should_charge;
+    /* Application compatibility policy, not an iAP2 timing requirement.
+     * Zero disables it. One extra wired invitation is allowed before TCP. */
+    uint32_t wired_reinvite_delay_ms;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES 4U

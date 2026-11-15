@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "vehicle_control_test_model.h"
 #include "airplay_info_plist.h"
+#include "receiver_vehicle.h"
 #include <stdio.h>
 static uint8_t reply[16384];
 static bool dump;
@@ -29,6 +30,41 @@ static void catalogue_validation(void)
     p[1].format=(rtcp_vehicle_format_t)99;assert(rtcp_vehicle_create(&cfg,&v)==RTCP_EINVAL);p[1].format=RTCP_VEHICLE_UINT8;
     cfg.prepare_control=NULL;assert(rtcp_vehicle_create(&cfg,&v)==RTCP_EINVAL);
 }
+static bool hold_delivery;
+static unsigned delivered_controls;
+static int deliver_control(void *ctx, rtcp_data_stream_kind_t kind, const uint8_t *body, size_t bytes)
+{
+    (void)ctx;assert(kind==RTCP_DATA_STREAM_VEHICLE);
+    if(hold_delivery) return RTCP_ENOMEM;
+    vehicle_control_test_reply(body,bytes);++delivered_controls;return RTCP_OK;
+}
+static void retained_control_delivery(void)
+{
+    rtcp_vehicle_t *v=vehicle_control_test_create();
+    receiver_vehicle_t *delivery=receiver_vehicle_create(v,deliver_control,NULL);assert(delivery);
+    unsigned before=control_commits;
+    hold_delivery=true;
+    assert(receiver_vehicle_body(delivery,RTCP_DATA_STREAM_VEHICLE,control_mixed,sizeof(control_mixed)));
+    assert(control_commits==before+2);
+    for(unsigned i=0;i<3;++i) receiver_vehicle_tick(delivery);
+    assert(control_commits==before+2 && !delivered_controls);
+    assert(!receiver_vehicle_body(delivery,RTCP_DATA_STREAM_VEHICLE,control_mixed,sizeof(control_mixed)));
+    assert(control_commits==before+2);
+    rtcp_vehicle_delivery_status_t status;receiver_vehicle_status(delivery,&status);
+    assert(status.pending_reply_bytes[0] && status.queue_retries && status.rejected_requests==1);
+    hold_delivery=false;receiver_vehicle_tick(delivery);
+    assert(delivered_controls==1 && control_commits==before+2);
+    receiver_vehicle_status(delivery,&status);assert(!status.pending_reply_bytes[0]);
+    /* A new valid request can commit again: no inferred exactly-once policy. */
+    hold_delivery=true;
+    assert(receiver_vehicle_body(delivery,RTCP_DATA_STREAM_VEHICLE,control_mixed,sizeof(control_mixed)));
+    assert(control_commits==before+4);
+    receiver_vehicle_closed(delivery,RTCP_DATA_STREAM_VEHICLE,RTCP_EIO);
+    receiver_vehicle_status(delivery,&status);assert(!status.pending_reply_bytes[0] && status.abandoned_replies==1);
+    assert(delivered_controls==1 && control_commits==before+4);
+    receiver_vehicle_destroy(delivery);rtcp_vehicle_destroy(v);
+    control_commits=control_prepares=0;
+}
 int main(int argc,char **argv)
 {
     if(argc==3 && !strcmp(argv[1],"--check-info")) {
@@ -37,7 +73,7 @@ int main(int argc,char **argv)
         rtcp_vehicle_t *v=vehicle_control_test_create();
         printf("%d\n",airplay_info_plist_matches_vehicle(reply,bytes,v));rtcp_vehicle_destroy(v);return 0;
     }
-    dump=argc==2 && !strcmp(argv[1],"--dump");catalogue_validation();
+    dump=argc==2 && !strcmp(argv[1],"--dump");catalogue_validation();retained_control_delivery();
     rtcp_vehicle_t *v=vehicle_control_test_create();size_t length;
     const struct {const uint8_t *bytes;size_t length;} invalid[]={
         {control_wrong_type,sizeof(control_wrong_type)},{control_overflow,sizeof(control_overflow)},

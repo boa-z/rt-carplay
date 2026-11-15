@@ -81,6 +81,11 @@ int main(void)
     config.family = 99;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_EINVAL && receiver == NULL);
     config.family = RTCP_AF_INET;
+    config.data_stream.channel_mask = RTCP_DATA_STREAM_ALL_MASK;
+    assert(rtcp_receiver_create(&config, &receiver) == RTCP_EINVAL && receiver == NULL);
+    config.data_stream.channel_mask = 1U << 12;
+    assert(rtcp_receiver_create(&config, &receiver) == RTCP_EINVAL && receiver == NULL);
+    config.data_stream.channel_mask = 0;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_OK);
     rtcp_receiver_diagnostics_t diagnostics;
     rtcp_addr_t peer;
@@ -91,6 +96,13 @@ int main(void)
     assert(rtcp_receiver_set_single_cipher_frame(NULL, true) == RTCP_EINVAL);
     assert(rtcp_receiver_set_single_cipher_frame(receiver, true) == RTCP_ESTATE);
     expect_empty_diagnostics(receiver);
+    rtcp_data_stream_status_t stream_status;
+    assert(rtcp_receiver_get_data_stream_status(receiver, RTCP_DATA_STREAM_VEHICLE, &stream_status) == RTCP_OK);
+    assert(!stream_status.registered && !stream_status.offered && stream_status.state == RTCP_DATA_STREAM_IDLE);
+    assert(rtcp_receiver_get_data_stream_status(NULL, RTCP_DATA_STREAM_VEHICLE, &stream_status) == RTCP_EINVAL);
+    assert(rtcp_receiver_get_data_stream_status(receiver, RTCP_DATA_STREAM_COUNT, &stream_status) == RTCP_EINVAL);
+    assert(rtcp_receiver_send_data_stream(receiver, RTCP_DATA_STREAM_VEHICLE, NULL, 0) == RTCP_ESTATE);
+    assert(rtcp_receiver_send_data_stream(receiver, RTCP_DATA_STREAM_COUNT, NULL, 0) == RTCP_EINVAL);
     assert(!rtcp_receiver_request_siri(receiver));
     assert(!rtcp_receiver_send_iap(receiver, id, sizeof(id)));
     assert(!rtcp_receiver_send_hid_report(receiver, 1, id, sizeof(id)));

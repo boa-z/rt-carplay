@@ -496,7 +496,7 @@ static size_t build_request(uint8_t *output, size_t capacity,
     return (size_t)written + body_len;
 }
 
-static void client_exchange(rtcp_receiver_t *server, client_t *client,
+static void client_exchange_raw(rtcp_receiver_t *server, client_t *client,
                             const uint8_t *request, size_t request_len,
                             response_t *response)
 {
@@ -519,6 +519,12 @@ static void client_exchange(rtcp_receiver_t *server, client_t *client,
         assert(rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS);
         client_pump(server, client);
     }
+}
+
+static void client_exchange(rtcp_receiver_t *server, client_t *client,
+    const uint8_t *request, size_t request_len, response_t *response)
+{
+    client_exchange_raw(server, client, request, request_len, response);
     assert(contains(response->headers, response->headers_len, "200 OK"));
 }
 
@@ -1000,6 +1006,48 @@ static size_t build_bplist_empty_dict(uint8_t *output, size_t capacity)
     return bplist_finish(output, 9U, offsets, 1U, 1U);
 }
 
+/* Independent test writer: protocol requests are not built by the receiver's
+ * SETUP response serializer. All object references fit in one byte. */
+static size_t plist_string(uint8_t *out, size_t at, const char *text)
+{
+    size_t n = strlen(text);
+    if (n < 15) out[at++] = (uint8_t)(0x50 + n);
+    else { assert(n < 256); out[at++] = 0x5f; out[at++] = 0x10; out[at++] = (uint8_t)n; }
+    memcpy(out + at, text, n); return at + n;
+}
+static void write_be32(uint8_t *output, uint32_t value);
+static size_t build_data_setup(uint8_t out[512], const char *uuid, uint64_t seed, uint64_t connection)
+{
+    size_t offsets[12], at = 8;
+    memcpy(out, "bplist00", 8);
+    offsets[0] = at; out[at++] = 0xd1; out[at++] = 1; out[at++] = 2;
+    offsets[1] = at; at = plist_string(out, at, "streams");
+    offsets[2] = at; out[at++] = 0xa1; out[at++] = 3;
+    offsets[3] = at; out[at++] = 0xd4;
+    for (uint8_t i = 4; i < 12; ++i) out[at++] = i;
+    const char *keys[] = {"type", "clientTypeUUID", "seed", "streamConnectionID"};
+    for (unsigned i = 0; i < 4; ++i) { offsets[4+i] = at; at = plist_string(out, at, keys[i]); }
+    offsets[8] = at; out[at++] = 0x10; out[at++] = 130;
+    offsets[9] = at; at = plist_string(out, at, uuid);
+    offsets[10] = at; out[at++] = 0x13; write_be64(out + at, seed); at += 8;
+    offsets[11] = at; out[at++] = 0x13; write_be64(out + at, connection); at += 8;
+    assert(at + 24 + 32 <= 512);
+    return bplist_finish(out, at, offsets, 12, 2);
+}
+static size_t build_feature_offer(uint8_t out[256], bool invalid)
+{
+    size_t offsets[5], at = 8;
+    memcpy(out, "bplist00", 8);
+    offsets[0] = at; out[at++] = 0xd1; out[at++] = 1; out[at++] = 2;
+    offsets[1] = at; at = plist_string(out, at, "features");
+    offsets[2] = at;
+    if (invalid) out[at++] = 9; /* a bool, not a feature array */
+    else { out[at++] = 0xa2; out[at++] = 3; out[at++] = 4; }
+    offsets[3] = at; at = plist_string(out, at, "vehicleStateProtocol");
+    offsets[4] = at; at = plist_string(out, at, "uiSync");
+    return bplist_finish(out, at, offsets, 5, 2);
+}
+
 /* {"streams": [{"type": 110, "streamConnectionID": id}]} */
 static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
                                         uint64_t connection_id)
@@ -1200,12 +1248,12 @@ static uint64_t response_stream_uint(const response_t *response, uint64_t index,
 }
 
 static uint16_t run_initial_setup(rtcp_receiver_t *server,
-                                  client_t *client, uint32_t *cseq)
+                                  client_t *client, uint32_t *cseq, bool offer)
 {
-    uint8_t request[192];
-    uint8_t body[64];
+    uint8_t request[512];
+    uint8_t body[256];
     response_t response;
-    size_t body_len = build_bplist_empty_dict(body, sizeof(body));
+    size_t body_len = offer ? build_feature_offer(body, false) : build_bplist_empty_dict(body, sizeof(body));
     size_t request_len = build_request(request, sizeof(request), "SETUP",
                                        "/stream", PLIST_TYPE, (*cseq)++, body,
                                        body_len);
@@ -1241,6 +1289,181 @@ static size_t receive_decrypted(rtcp_receiver_t *server, int fd,
         }
     }
     return plain_len;
+}
+
+static unsigned data_messages[RTCP_DATA_STREAM_COUNT], data_closes[RTCP_DATA_STREAM_COUNT];
+static bool fail_next_listener;
+static int data_listen(uint8_t family, uint16_t port)
+{
+    if (fail_next_listener) { fail_next_listener = false; return RTCP_EIO; }
+    return rtcp_net_linux.listen(family, port);
+}
+static bool capture_data(rtcp_data_stream_kind_t kind, const uint8_t *body, size_t length, void *context)
+{
+    assert(context == data_messages && (unsigned)kind < RTCP_DATA_STREAM_COUNT);
+    assert(length == 3 && body[0] == kind && body[1] == 0xab && body[2] == 0xcd);
+    ++data_messages[kind];
+    uint8_t reply[] = {(uint8_t)kind, 0xc7, 0xe1};
+    assert(rtcp_receiver_send_data_stream(e2e_receiver, kind, reply, sizeof(reply)) == RTCP_OK);
+    return true;
+}
+static void capture_data_closed(rtcp_data_stream_kind_t kind, int error, void *context)
+{
+    assert(context == data_messages && (unsigned)kind < RTCP_DATA_STREAM_COUNT);
+    assert(error == 0 || error == RTCP_EIO);
+    ++data_closes[kind];
+    assert(rtcp_receiver_send_data_stream(e2e_receiver, kind, NULL, 0) == RTCP_ESTATE);
+}
+static rtcp_data_stream_status_t data_status(rtcp_data_stream_kind_t kind)
+{
+    rtcp_data_stream_status_t status;
+    assert(rtcp_receiver_get_data_stream_status(e2e_receiver, kind, &status) == RTCP_OK);
+    return status;
+}
+static void response_status_is(const response_t *r, unsigned code)
+{
+    char prefix[32]; int n = snprintf(prefix, sizeof(prefix), "RTSP/1.0 %u ", code);
+    assert(n > 0 && r->headers_len >= (size_t)n && !memcmp(r->headers, prefix, (size_t)n));
+}
+static const char *data_uuids[] = {RTCP_DATA_STREAM_VEHICLE_UUID, RTCP_DATA_STREAM_VEHICLE_HIGH_UUID,
+                                  RTCP_DATA_STREAM_UI_SYNC_UUID};
+static uint16_t request_data(client_t *client, uint32_t *cseq, rtcp_data_stream_kind_t kind,
+    uint64_t seed, unsigned expected_status, uint32_t *id)
+{
+    uint8_t body[512], request[768]; response_t response;
+    size_t length = build_data_setup(body, data_uuids[kind], seed, 9000 + kind);
+    length = build_request(request, sizeof(request), "SETUP", "/stream", PLIST_TYPE,
+        (*cseq)++, body, length);
+    client_exchange_raw(e2e_receiver, client, request, length, &response);
+    response_status_is(&response, expected_status);
+    if (expected_status != 200) return 0;
+    assert(response_stream_uint(&response, 0, "streamConnectionID") == 9000 + (unsigned)kind);
+    assert(response_stream_uint(&response, 0, "type") == 130);
+    *id = (uint32_t)response_stream_uint(&response, 0, "streamID");
+    assert(*id > 1);
+    return response_data_port(&response);
+}
+static void request_data_teardown(client_t *client, uint32_t *cseq, uint32_t id)
+{
+    uint8_t body[256], request[512]; response_t response; size_t length;
+    airplay_bplist_stream_entry_t entry = {.stream_type = 130, .stream_id = id, .data_port = 1};
+    assert(airplay_bplist_build_streams_setup_response(&entry, 1, body, sizeof(body), &length) == AIRPLAY_BPLIST_OK);
+    length = build_request(request, sizeof(request), "TEARDOWN", "/stream", PLIST_TYPE, (*cseq)++, body, length);
+    client_exchange(e2e_receiver, client, request, length, &response);
+    response_status_is(&response, 200);
+}
+static airplay_control_cipher_t *data_phone_cipher(const uint8_t shared[32], uint64_t seed)
+{
+    uint8_t read_key[32], write_key[32]; char salt[64];
+    snprintf(salt, sizeof(salt), "DataStream-Salt%llu", (unsigned long long)seed);
+    hkdf_key(shared, 32, salt, "DataStream-Input-Encryption-Key", read_key);
+    hkdf_key(shared, 32, salt, "DataStream-Output-Encryption-Key", write_key);
+    airplay_control_cipher_t *cipher = NULL;
+    assert(airplay_control_cipher_create(read_key, write_key, &cipher) == AIRPLAY_CONTROL_CIPHER_OK);
+    mbedtls_platform_zeroize(read_key, sizeof(read_key));
+    mbedtls_platform_zeroize(write_key, sizeof(write_key));
+    return cipher;
+}
+static int connect_data(uint16_t port, rtcp_data_stream_kind_t kind)
+{
+    rtcp_addr_t address = {.family = RTCP_AF_INET, .addr = {127,0,0,1}, .port = port};
+    int fd = rtcp_net_linux.connect(&address); assert(fd >= 0);
+    uint64_t start = rtcp_os_linux.now_ms();
+    while (data_status(kind).state != RTCP_DATA_STREAM_CONNECTED &&
+        rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) assert(receiver_poll(e2e_receiver, 10) == RTCP_OK);
+    assert(data_status(kind).state == RTCP_DATA_STREAM_CONNECTED);
+    return fd;
+}
+static void data_roundtrip(int fd, airplay_control_cipher_t *cipher, rtcp_data_stream_kind_t kind, bool bad_tag)
+{
+    uint8_t packet[35] = {0}, sealed[80], plain[128]; size_t length = 0;
+    write_be32(packet, sizeof(packet)); memcpy(packet + 4, "sync", 4);
+    memcpy(packet + 16, "comm", 4); write_be64(packet + 20, UINT64_C(0x8000000000000011) + kind);
+    packet[32] = (uint8_t)kind; packet[33] = 0xab; packet[34] = 0xcd;
+    assert(airplay_control_cipher_encrypt(cipher, packet, sizeof(packet), sealed, sizeof(sealed), &length) == AIRPLAY_CONTROL_CIPHER_OK);
+    if (bad_tag) sealed[length-1] ^= 1;
+    /* Fragment the AEAD header as well as the APTransportPackage. */
+    assert(rtcp_net_linux.send(fd, sealed, 1) == 1);
+    assert(receiver_poll(e2e_receiver, 0) == RTCP_OK);
+    assert(rtcp_net_linux.send(fd, sealed + 1, length - 1) == (int)length - 1);
+    if (bad_tag) {
+        uint64_t start = rtcp_os_linux.now_ms();
+        while (data_status(kind).state != RTCP_DATA_STREAM_FAILED &&
+            rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) receiver_poll(e2e_receiver, 10);
+        assert(data_status(kind).state == RTCP_DATA_STREAM_FAILED);
+        return;
+    }
+    size_t received = 0;
+    while (received < 67) {
+        size_t n = receive_decrypted(e2e_receiver, fd, cipher, plain + received, sizeof(plain) - received);
+        assert(n); received += n;
+    }
+    assert(received == 67 && !memcmp(plain + 4, "rply", 4) && !memcmp(plain + 20, packet + 20, 8));
+    assert(!memcmp(plain + 32 + 4, "asyn", 4) && !memcmp(plain + 32 + 16, "cmnd", 4));
+    assert(plain[64] == kind && plain[65] == 0xc7 && plain[66] == 0xe1);
+}
+static void run_duplex_registry(client_t *client, const uint8_t shared[32], uint32_t *cseq)
+{
+    int fd[3]; uint32_t id[3]; uint16_t port[3]; airplay_control_cipher_t *cipher[3];
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) {
+        rtcp_data_stream_kind_t kind = (rtcp_data_stream_kind_t)k;
+        assert(data_status(kind).registered && data_status(kind).offered);
+        port[k] = request_data(client, cseq, kind, 7000 + k, 200, &id[k]);
+        assert(data_status(kind).state == RTCP_DATA_STREAM_LISTENING);
+        fd[k] = connect_data(port[k], kind); cipher[k] = data_phone_cipher(shared, 7000 + k);
+        data_roundtrip(fd[k], cipher[k], kind, false);
+        assert(data_messages[k] == 1 && data_status(kind).sent == 2);
+        for (unsigned i = 0; i < k; ++i) assert(port[k] != port[i] && id[k] != id[i]);
+    }
+    uint32_t duplicate;
+    assert(request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE, 7000, 200, &duplicate) == port[0] && duplicate == id[0]);
+    request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE, 7010, 503, &duplicate);
+    /* Salt uniqueness spans transport kinds, not just the Type 130 registry. */
+    uint8_t screen_body[256], screen_request[512]; response_t screen_response;
+    size_t screen_length = build_bplist_screen_setup(screen_body, sizeof(screen_body), 7000);
+    screen_length = build_request(screen_request, sizeof(screen_request), "SETUP", "/stream",
+        PLIST_TYPE, (*cseq)++, screen_body, screen_length);
+    client_exchange_raw(e2e_receiver, client, screen_request, screen_length, &screen_response);
+    response_status_is(&screen_response, 503);
+    request_data_teardown(client, cseq, id[1]);
+    assert(data_status(RTCP_DATA_STREAM_VEHICLE_HIGH).state == RTCP_DATA_STREAM_CLOSED);
+    assert(data_status(RTCP_DATA_STREAM_VEHICLE).state == RTCP_DATA_STREAM_CONNECTED);
+    assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state == RTCP_DATA_STREAM_CONNECTED);
+    request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE_HIGH, 7000, 503, &duplicate);
+    /* Even a listener creation failure consumes its salt and stream ID. */
+    fail_next_listener = true;
+    request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE_HIGH, 7100, 503, &duplicate);
+    assert(!fail_next_listener && data_status(RTCP_DATA_STREAM_VEHICLE_HIGH).error == RTCP_EIO);
+    request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE_HIGH, 7100, 503, &duplicate);
+    rtcp_net_linux.close(fd[1]); airplay_control_cipher_destroy(cipher[1]);
+    port[1] = request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE_HIGH, 7101, 200, &duplicate);
+    assert(duplicate > id[2]); id[1] = duplicate;
+    fd[1] = connect_data(port[1], RTCP_DATA_STREAM_VEHICLE_HIGH);
+    cipher[1] = data_phone_cipher(shared, 7101);
+    data_roundtrip(fd[1], cipher[1], RTCP_DATA_STREAM_VEHICLE_HIGH, false);
+    request_data_teardown(client, cseq, 3); /* stale ID cannot retire its replacement */
+    assert(data_status(RTCP_DATA_STREAM_VEHICLE_HIGH).state == RTCP_DATA_STREAM_CONNECTED);
+    data_roundtrip(fd[0], cipher[0], RTCP_DATA_STREAM_VEHICLE, true);
+    assert(data_messages[0] == 1 && data_closes[0] == 1);
+    assert(data_status(RTCP_DATA_STREAM_VEHICLE_HIGH).state == RTCP_DATA_STREAM_CONNECTED);
+    request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE, 7000, 503, &duplicate);
+    rtcp_net_linux.close(fd[0]); airplay_control_cipher_destroy(cipher[0]);
+    port[0] = request_data(client, cseq, RTCP_DATA_STREAM_VEHICLE, 7200, 200, &duplicate);
+    assert(duplicate > id[1]); id[0] = duplicate;
+    fd[0] = connect_data(port[0], RTCP_DATA_STREAM_VEHICLE);
+    cipher[0] = data_phone_cipher(shared, 7200);
+    data_roundtrip(fd[0], cipher[0], RTCP_DATA_STREAM_VEHICLE, false);
+    request_data_teardown(client, cseq, 0); /* all type-130 channels, not video/event */
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) {
+        assert(data_status((rtcp_data_stream_kind_t)k).state == RTCP_DATA_STREAM_CLOSED);
+        rtcp_net_linux.close(fd[k]); airplay_control_cipher_destroy(cipher[k]);
+    }
+    assert(data_closes[0] == 2 && data_closes[1] == 2 && data_closes[2] == 1);
+    assert(receiver_connected(e2e_receiver) && receiver_authenticated(e2e_receiver));
+    /* Leave one never-connected listener owned by this RTSP session. Screen
+     * shutdown below must close it exactly once; the next controller sees idle. */
+    request_data(client, cseq, RTCP_DATA_STREAM_UI_SYNC, 7300, 200, &duplicate);
+    assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state == RTCP_DATA_STREAM_LISTENING);
 }
 
 static void run_event_channel(rtcp_receiver_t *server,
@@ -1519,8 +1742,10 @@ int main(int argc, char **argv)
                                     &info_len));
 
     rtcp_receiver_config_t receiver_config = {0};
+    struct rtcp_net registry_net = rtcp_net_linux;
+    registry_net.listen = data_listen;
     receiver_config.platform.os = &rtcp_os_linux;
-    receiver_config.platform.net = &rtcp_net_linux;
+    receiver_config.platform.net = &registry_net;
     fill_pairing(&fixture, &receiver_config.platform.pairing);
     receiver_config.platform.info_plist = info_plist;
     receiver_config.platform.info_plist_len = info_len;
@@ -1532,18 +1757,23 @@ int main(int argc, char **argv)
     receiver_config.media.volume_context = &volume_context;
     receiver_config.on_event_state = capture_event_state;
     receiver_config.event_state_context = &event_context;
+    receiver_config.data_stream = (rtcp_data_stream_backend_t){
+        .channel_mask = RTCP_DATA_STREAM_ALL_MASK, .on_body = capture_data,
+        .on_closed = capture_data_closed, .context = data_messages};
 
     if (argc > 1) {
         assert(argc == 2 && strcmp(argv[1], "--legacy-config") == 0);
         /* Execute the same encrypted exchanges through the migration API.
          * Populate the original contract independently of the native one. */
         airplay_rtsp_server_config_t legacy = {
-            .os = &rtcp_os_linux, .net = &rtcp_net_linux,
+            .os = &rtcp_os_linux, .net = &registry_net,
             .info_plist = info_plist, .info_plist_len = info_len,
             .on_screen_message = capture_screen, .screen_message_context = &video_context,
             .on_audio_pcm = capture_audio, .audio_pcm_context = &audio_context,
             .on_volume = capture_volume, .volume_context = &volume_context,
             .on_event_state = capture_event_state, .event_state_context = &event_context,
+            .data_stream = {.channel_mask = RTCP_DATA_STREAM_ALL_MASK, .on_body = capture_data,
+                .on_closed = capture_data_closed, .context = data_messages},
         };
         fill_pairing(&fixture, &legacy.pairing);
         assert(rtcp_receiver_config_from_airplay(&legacy, &receiver_config) == RTCP_OK);
@@ -1559,15 +1789,26 @@ int main(int argc, char **argv)
     client_t client;
     client_connect(server, &client);
     expect_receiver_state(true, false, false, false, false);
+    uint32_t guard_cseq = 900, guard_id = 0;
+    request_data(&client, &guard_cseq, RTCP_DATA_STREAM_VEHICLE, 7000, 503, &guard_id);
     run_pair_setup(server, &client, &fixture);
     expect_receiver_state(true, false, false, false, false);
     uint8_t shared_secret[KEY_BYTES];
     run_pair_verify(server, &client, &fixture, shared_secret);
     expect_receiver_state(true, true, false, false, false);
     run_encrypted_info(server, &client, info_plist, info_len);
+    request_data(&client, &guard_cseq, RTCP_DATA_STREAM_VEHICLE, 7000, 503, &guard_id);
+    /* A malformed feature array must not create event/timing/data endpoints. */
+    uint8_t invalid_offer[256], invalid_request[512]; response_t invalid_response;
+    size_t invalid_length = build_feature_offer(invalid_offer, true);
+    invalid_length = build_request(invalid_request, sizeof(invalid_request), "SETUP", "/stream",
+        PLIST_TYPE, guard_cseq++, invalid_offer, invalid_length);
+    client_exchange_raw(server, &client, invalid_request, invalid_length, &invalid_response);
+    response_status_is(&invalid_response, 400);
     uint32_t cseq = 30U;
-    uint16_t event_port = run_initial_setup(server, &client, &cseq);
+    uint16_t event_port = run_initial_setup(server, &client, &cseq, true);
     run_event_channel(server, shared_secret, event_port);
+    run_duplex_registry(&client, shared_secret, &cseq);
     /* Audio runs before the screen stream: closing the screen socket ends the
      * session, so the RTSP connection must still be up for the audio SETUP. */
     run_audio_stream(server, &client, shared_secret, &cseq, false);
@@ -1589,7 +1830,10 @@ int main(int argc, char **argv)
     run_pair_verify(server, &client2, &fixture, shared_secret2);
     run_encrypted_info(server, &client2, info_plist, info_len);
     cseq = 60U;
-    uint16_t event_port2 = run_initial_setup(server, &client2, &cseq);
+    uint16_t event_port2 = run_initial_setup(server, &client2, &cseq, false);
+    request_data(&client2, &guard_cseq, RTCP_DATA_STREAM_UI_SYNC, 8000, 503, &guard_id);
+    assert(data_status(RTCP_DATA_STREAM_UI_SYNC).registered && !data_status(RTCP_DATA_STREAM_UI_SYNC).offered);
+    assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state == RTCP_DATA_STREAM_IDLE);
     run_event_channel(server, shared_secret2, event_port2);
     run_set_parameter_volume(server, &client2, &cseq);
     run_audio_stream(server, &client2, shared_secret2, &cseq, false);
@@ -1611,6 +1855,7 @@ int main(int argc, char **argv)
     assert(audio_packets == 4U);
     assert(volume_events == 1U);
     assert(event_transitions == 4U);
-    puts("airplay pairing end-to-end host test passed");
+    assert(data_closes[0] == 2 && data_closes[1] == 2 && data_closes[2] == 2);
+    puts("airplay pairing end-to-end host test passed (three duplex Type 130 channels, offer/auth gates, salt retirement, independent teardown)");
     return 0;
 }

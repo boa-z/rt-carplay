@@ -8,6 +8,7 @@
  */
 #include "airplay_rtsp_server.h"
 #include "airplay_iap_tunnel.h"
+#include "airplay_data_stream.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -57,6 +58,13 @@ typedef struct {
     unsigned rejected_traces;
 } rtsp_connection_t;
 
+typedef struct {
+    airplay_rtsp_server_t *owner;
+    rtcp_data_stream_kind_t kind;
+    airplay_data_stream_t *stream;
+    rtcp_data_stream_status_t last;
+} server_data_stream_t;
+
 struct airplay_rtsp_server {
     airplay_rtsp_server_config_t config;
     const struct rtcp_os *os;
@@ -89,12 +97,78 @@ struct airplay_rtsp_server {
     bool event_failed;
     bool event_stopping;
     bool screen_failed;
+    server_data_stream_t data_stream[RTCP_DATA_STREAM_COUNT];
 };
 
 static void server_stop_event(void *context);
 static void server_stop_timing(void *context);
 static void server_stop_screen(void *context);
 static void server_stop_audio_slot(airplay_rtsp_server_t *server, unsigned slot);
+
+static void data_stream_snapshot(const server_data_stream_t *slot, rtcp_data_stream_status_t *out)
+{
+    *out = slot->last;
+    if (slot->stream) {
+        airplay_data_stream_status_t status;
+        (void)airplay_data_stream_status(slot->stream, &status);
+        out->state = status.state == AIRPLAY_DATA_STREAM_LISTENING ? RTCP_DATA_STREAM_LISTENING :
+                     status.state == AIRPLAY_DATA_STREAM_CONNECTED ? RTCP_DATA_STREAM_CONNECTED : RTCP_DATA_STREAM_FAILED;
+        out->error = status.error;
+        out->received = status.received; out->delivered = status.delivered;
+        out->ignored = status.ignored; out->sent = status.sent;
+        out->sync_replies = status.sync_replies; out->rejected_peers = status.rejected_peers;
+        out->queued_packages = status.queued_packages; out->queued_bytes = status.queued_bytes;
+    }
+}
+
+static void retire_data_stream(airplay_rtsp_server_t *server, unsigned kind, int error)
+{
+    server_data_stream_t *slot = &server->data_stream[kind];
+    if (!slot->stream) return;
+    data_stream_snapshot(slot, &slot->last);
+    airplay_data_stream_stop(slot->stream); slot->stream = NULL;
+    slot->last.state = error ? RTCP_DATA_STREAM_FAILED : RTCP_DATA_STREAM_CLOSED;
+    slot->last.error = error; slot->last.port = 0;
+    slot->last.queued_packages = slot->last.queued_bytes = 0;
+    airplay_rtsp_session_data_stream_closed(server->session, (rtcp_data_stream_kind_t)kind);
+    if (server->config.data_stream.on_closed)
+        server->config.data_stream.on_closed((rtcp_data_stream_kind_t)kind, error,
+            server->config.data_stream.context);
+}
+
+static void server_stop_data_stream(rtcp_data_stream_kind_t kind, void *context)
+{
+    if ((unsigned)kind < RTCP_DATA_STREAM_COUNT) retire_data_stream(context, (unsigned)kind, 0);
+}
+
+static bool server_data_stream_body(const uint8_t *body, size_t length, void *context)
+{
+    server_data_stream_t *slot = context;
+    return slot->owner->config.data_stream.on_body(slot->kind, body, length,
+        slot->owner->config.data_stream.context);
+}
+
+static bool server_start_data_stream(const airplay_rtsp_pairing_t *pairing,
+    rtcp_data_stream_kind_t kind, uint64_t seed, uint32_t id, uint16_t *port, void *context)
+{
+    airplay_rtsp_server_t *server = context;
+    if ((unsigned)kind >= RTCP_DATA_STREAM_COUNT) return false;
+    server_data_stream_t *slot = &server->data_stream[kind];
+    if (slot->stream || !server->config.data_stream.on_body) return false;
+    uint8_t read_key[32] = {0}, write_key[32] = {0};
+    bool keys = airplay_rtsp_pairing_derive_output_key(pairing, seed, read_key) == AIRPLAY_PAIR_VERIFY_OK &&
+                airplay_rtsp_pairing_derive_input_key(pairing, seed, write_key) == AIRPLAY_PAIR_VERIFY_OK;
+    slot->owner = server; slot->kind = kind;
+    int result = keys ? airplay_data_stream_start(server->net, &server->peer,
+        read_key, write_key, server_data_stream_body, slot, &slot->stream) : RTCP_ESTATE;
+    mbedtls_platform_zeroize(read_key, sizeof(read_key));
+    mbedtls_platform_zeroize(write_key, sizeof(write_key));
+    slot->last = (rtcp_data_stream_status_t){.stream_id = id,
+        .state = result ? RTCP_DATA_STREAM_FAILED : RTCP_DATA_STREAM_LISTENING, .error = result};
+    if (result) return false;
+    *port = slot->last.port = airplay_data_stream_port(slot->stream);
+    return true;
+}
 
 /* ------------------------------------------------------------------ */
 /* Media endpoints                                                     */
@@ -781,6 +855,8 @@ static void server_accept(airplay_rtsp_server_t *server)
     server->connection.tx_bytes = 0U;
     server->connection.tx_frames = 0U;
     server->connection.requests = 0U;
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k)
+        memset(&server->data_stream[k].last, 0, sizeof(server->data_stream[k].last));
 
     if (server->config.get_info_plist != NULL) {
         const uint8_t *bytes = NULL;
@@ -827,6 +903,9 @@ static void server_accept(airplay_rtsp_server_t *server)
         session_config.stop_iap = server_stop_iap;
     }
     session_config.disable_bluetooth = server_disable_bluetooth;
+    session_config.data_stream_mask = server->config.data_stream.channel_mask;
+    session_config.start_data_stream = server_start_data_stream;
+    session_config.stop_data_stream = server_stop_data_stream;
 
     if (airplay_rtsp_session_create_borrowing_info_plist(
             &session_config, &server->session) != AIRPLAY_RTSP_SESSION_OK) {
@@ -877,7 +956,9 @@ int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
         config->net->listen == NULL || config->net->accept == NULL ||
         config->info_plist == NULL || config->info_plist_len == 0U ||
         config->info_plist_len > AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES ||
-        config->on_screen_message == NULL) {
+        config->on_screen_message == NULL ||
+        (config->data_stream.channel_mask & ~RTCP_DATA_STREAM_ALL_MASK) ||
+        (config->data_stream.channel_mask && !config->data_stream.on_body)) {
         return RTCP_EINVAL;
     }
     if (config->info_plist_len > sizeof(((airplay_rtsp_server_t *)0)->info_plist)) {
@@ -1011,13 +1092,19 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
     int rtsp_fd = server->client_fd >= 0 ? server->client_fd
                                          : server->listener_fd;
 
-    struct rtcp_pollfd fds[5 + 2 * AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
+    struct rtcp_pollfd fds[5 + 2 * AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS + RTCP_DATA_STREAM_COUNT];
     int count = 0;
     int rtsp_index = -1;
     int iap_index = -1;
     int event_index = -1;
     int timing_index = -1;
     int screen_index = -1;
+    int data_index[RTCP_DATA_STREAM_COUNT];
+    uint32_t data_id[RTCP_DATA_STREAM_COUNT];
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) {
+        data_index[k] = -1;
+        data_id[k] = server->data_stream[k].last.stream_id;
+    }
     int audio_data_index[AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
     int audio_control_index[AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS];
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
@@ -1078,6 +1165,14 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         }
     }
 
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) {
+        airplay_data_stream_t *stream = server->data_stream[k].stream;
+        int fd = airplay_data_stream_fd(stream);
+        if (fd >= 0) {
+            data_index[k] = count;
+            fds[count++] = (struct rtcp_pollfd){.fd = fd, .events = airplay_data_stream_events(stream)};
+        }
+    }
     int ready = count == 0 ? 0 : server->net->poll(fds, count, timeout_ms);
     if (ready < 0) {
         RTCP_LOGW(TAG, "rtsp_poll=failed rc=%d", ready);
@@ -1128,6 +1223,16 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         !server->config.on_iap_tick(server->config.iap_context)) {
         RTCP_LOGW(TAG, "iap_tunnel=protocol_failed");
         server_stop_iap(server);
+    }
+    /* RTSP may retire/reopen a stream before this dispatch. Never apply stale
+     * readiness to its replacement, even if the allocator/socket reuses it. */
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) {
+        int index = data_index[k];
+        server_data_stream_t *slot = &server->data_stream[k];
+        if (index < 0 || !fds[index].revents || data_id[k] != slot->last.stream_id ||
+            fds[index].fd != airplay_data_stream_fd(slot->stream)) continue;
+        int result = airplay_data_stream_poll(slot->stream, fds[index].revents);
+        if (result) retire_data_stream(server, k, result);
     }
     if (server->screen_failed) {
         server_teardown_connection(server, "screen_stream_lost");
@@ -1199,4 +1304,23 @@ void airplay_rtsp_server_get_receiver_state(const airplay_rtsp_server_t *s,
             if (s->audio[i] != NULL) state->audio_ready = true;
     }
     state->input_ready = s != NULL && s->event_connected;
+}
+
+int airplay_rtsp_server_send_data_stream(airplay_rtsp_server_t *s, rtcp_data_stream_kind_t kind,
+    const uint8_t *body, size_t length)
+{
+    if ((unsigned)kind >= RTCP_DATA_STREAM_COUNT || (!body && length) ||
+        length > AIRPLAY_DATA_STREAM_MAX_BODY) return RTCP_EINVAL;
+    if (!s || s->stopping || !s->data_stream[kind].stream) return RTCP_ESTATE;
+    return airplay_data_stream_send(s->data_stream[kind].stream, body, length);
+}
+
+int airplay_rtsp_server_get_data_stream_status(const airplay_rtsp_server_t *s,
+    rtcp_data_stream_kind_t kind, rtcp_data_stream_status_t *out)
+{
+    if (!s || !out || (unsigned)kind >= RTCP_DATA_STREAM_COUNT) return RTCP_EINVAL;
+    data_stream_snapshot(&s->data_stream[kind], out);
+    out->registered = (s->config.data_stream.channel_mask & RTCP_DATA_STREAM_MASK(kind)) != 0;
+    out->offered = airplay_rtsp_session_data_stream_offered(s->session, kind);
+    return RTCP_OK;
 }

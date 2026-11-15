@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/data_stream.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -13,8 +14,8 @@ extern "C" {
  * All calls belong to one serialized owner; callbacks must not reenter. */
 #define RTCP_VEHICLE_MAX_CHARACTERISTICS 8U
 #define RTCP_VEHICLE_MAX_VALUE_BYTES 256U
-#define RTCP_VEHICLE_DATASTREAM_UUID "3E2F3C61-AAD0-42CB-A8AA-BF22186DA62E"
-#define RTCP_VEHICLE_HIGH_DATASTREAM_UUID "FF4A6720-F2BE-4F56-A3E1-DB3B4E37D634"
+#define RTCP_VEHICLE_DATASTREAM_UUID RTCP_DATA_STREAM_VEHICLE_UUID
+#define RTCP_VEHICLE_HIGH_DATASTREAM_UUID RTCP_DATA_STREAM_VEHICLE_HIGH_UUID
 
 typedef enum {
     RTCP_VEHICLE_BOOL = 0, RTCP_VEHICLE_UINT8 = 1,

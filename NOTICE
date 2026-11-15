@@ -77,6 +77,8 @@ The OPACK codec, Vehicle State envelope/catalogue and display metadata were
 informed by LIVI revision 64a05b68358db52ed887169143afd5944fd6f1f7.
 The bounded duplex DataStream implementation in airplay_data_stream.c also
 adapts APTransportPackage framing and sync replies from LIVI iap_tunnel.rs.
+Receiver Type 130 UUID routing and phone feature gating also reference LIVI
+stack/data_streams.rs and stack/setup.rs at the same revision.
 LIVI is GPL-3.0-or-later with an additional GPL section 7(b) attribution
 requirement, including translations. Retain this attribution in documentation
 and appropriate visible legal/About notices of integrating works.

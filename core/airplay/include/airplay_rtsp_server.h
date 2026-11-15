@@ -91,6 +91,7 @@ typedef struct airplay_rtsp_server_config {
      * Existing sessions keep an immutable snapshot until disconnect. */
     bool (*get_info_plist)(const uint8_t **bytes, size_t *length, void *context);
     void *info_context;
+    rtcp_data_stream_backend_t data_stream;
 } airplay_rtsp_server_config_t;
 
 int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
@@ -137,6 +138,10 @@ bool airplay_rtsp_server_single_cipher_frame(const airplay_rtsp_server_t *server
 void airplay_rtsp_server_stop(airplay_rtsp_server_t *server);
 
 bool airplay_rtsp_server_send_iap(airplay_rtsp_server_t *, const uint8_t *, size_t);
+int airplay_rtsp_server_send_data_stream(airplay_rtsp_server_t *, rtcp_data_stream_kind_t,
+                                         const uint8_t *, size_t);
+int airplay_rtsp_server_get_data_stream_status(const airplay_rtsp_server_t *,
+    rtcp_data_stream_kind_t, rtcp_data_stream_status_t *);
 
 /* RTSP owner only; sends documented requestSiri down/up actions on event. */
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *);

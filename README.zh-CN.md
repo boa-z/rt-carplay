@@ -12,7 +12,7 @@
 
 ## 功能
 
-[Ultra 协议基础](docs/zh-CN/ultra-foundation.md)提供可选 Main Display 元数据、OPACK、有界 Vehicle State 消息处理器和内部认证双向 DataStream 传输。实际 Type 130 和 UI Sync 接入仍待实现，这些 API 不代表完整官方 Ultra 支持。
+[Ultra 协议基础](docs/zh-CN/ultra-foundation.md)提供可选 Main Display 元数据、OPACK、有界 Vehicle State 消息处理器，以及具有显式 Receiver 注册、手机提议/认证门控和独立 Type 130 生命周期的认证双向 DataStream 传输。Vehicle State 和 UI Sync 应用集成仍待实现，这些 API 不代表完整官方 Ultra 支持。
 
 - AirPlay/CarPlay RTSP、Pair-Setup/Pair-Verify、加密控制与事件及媒体、H.264 和 HID 输出。
 - 通过注入的传输服务提供 USBMUX、Lockdown、TLS 协议支持及无线 iAP2、MFi、Wi-Fi Handover。

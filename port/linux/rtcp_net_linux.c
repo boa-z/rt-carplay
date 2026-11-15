@@ -127,8 +127,7 @@ static int recv_bytes(int fd, void *buf, size_t len)
 static int poll_fds(struct rtcp_pollfd *fds, int n, int timeout_ms)
 {
     if (fds == NULL || n < 0) return RTCP_EINVAL;
-    /* RTSP + event + timing + screen + three audio data/control pairs. */
-    struct pollfd local[12];
+    struct pollfd local[RTCP_NET_POLL_MAX];
     if (n > (int)(sizeof(local) / sizeof(local[0]))) return RTCP_EINVAL;
     for (int i = 0; i < n; ++i) {
         local[i].fd = fds[i].fd;

@@ -24,6 +24,12 @@ static void worker(void *arg)
 
 int main(void)
 {
+    /* The complete optional endpoint set must fit one portable poll batch. */
+    struct rtcp_pollfd endpoints[RTCP_NET_POLL_MAX];
+    for (unsigned i = 0; i < RTCP_NET_POLL_MAX; ++i)
+        endpoints[i] = (struct rtcp_pollfd){.fd = -1, .events = RTCP_POLLIN};
+    assert(rtcp_net_linux.poll(endpoints, RTCP_NET_POLL_MAX, 0) == 0);
+    assert(rtcp_net_linux.poll(endpoints, RTCP_NET_POLL_MAX + 1, 0) == RTCP_EINVAL);
     /* Clock and sleep. */
     uint64_t before = rtcp_os_linux.now_ms();
     rtcp_os_linux.sleep_ms(10);

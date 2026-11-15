@@ -10,6 +10,7 @@
 #include "rtcp/events.h"
 #include "rtcp/input.h"
 #include "rtcp/diagnostics.h"
+#include "rtcp/data_stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,6 +34,7 @@ typedef struct {
     void *event_state_context;
     rtcp_receiver_event_cb_t on_state;
     void *context;
+    rtcp_data_stream_backend_t data_stream;
 } rtcp_receiver_config_t;
 
 /* All functions on an instance belong to one ordinary thread. The host
@@ -59,6 +61,15 @@ int rtcp_receiver_set_single_cipher_frame(rtcp_receiver_t *, bool enabled);
 /* Owner-thread tunneled iAP2 output, including iAP2 callbacks during poll.
  * Bytes are consumed synchronously. False when the event channel is absent. */
 bool rtcp_receiver_send_iap(rtcp_receiver_t *, const uint8_t *, size_t);
+
+/* Owner-thread Type 130 transport, including on_body callbacks. send copies
+ * bytes into a bounded queue; success is not phone receipt. EINVAL denotes
+ * invalid kind/body, ESTATE an absent connection, ENOMEM a full queue.
+ * Status works while stopped (zero counters/idle, registration preserved). */
+int rtcp_receiver_send_data_stream(rtcp_receiver_t *, rtcp_data_stream_kind_t,
+                                    const uint8_t *, size_t);
+int rtcp_receiver_get_data_stream_status(const rtcp_receiver_t *,
+    rtcp_data_stream_kind_t, rtcp_data_stream_status_t *);
 
 #ifdef __cplusplus
 }

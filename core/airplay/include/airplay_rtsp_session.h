@@ -7,6 +7,7 @@
 
 #include "airplay_rtsp_pairing.h"
 #include "airplay_audio.h"
+#include "rtcp/data_stream.h"
 
 /* The audio advertisement (audioFormats/audioLatencies) grows /info to about
  * 4.2 KB; keep this in step with AIRPLAY_INFO_PLIST_MAX_BYTES. */
@@ -80,6 +81,10 @@ typedef struct {
     void *command_context;
     void (*on_audio_modes)(const airplay_audio_modes_t *, void *context);
     bool (*on_audio_duck)(bool ducked, float volume_db, uint32_t duration_ms, void *context);
+    uint32_t data_stream_mask;
+    bool (*start_data_stream)(const airplay_rtsp_pairing_t *, rtcp_data_stream_kind_t,
+                              uint64_t seed, uint32_t stream_id, uint16_t *, void *);
+    void (*stop_data_stream)(rtcp_data_stream_kind_t, void *);
 } airplay_rtsp_session_config_t;
 
 typedef enum {
@@ -119,3 +124,5 @@ bool airplay_rtsp_session_is_established(const airplay_rtsp_session_t *session);
 
 /* Owner reports terminal socket loss; consumed seed remains non-reusable. */
 void airplay_rtsp_session_iap_closed(airplay_rtsp_session_t *session);
+void airplay_rtsp_session_data_stream_closed(airplay_rtsp_session_t *, rtcp_data_stream_kind_t);
+bool airplay_rtsp_session_data_stream_offered(const airplay_rtsp_session_t *, rtcp_data_stream_kind_t);

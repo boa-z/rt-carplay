@@ -37,6 +37,13 @@ typedef struct {
     airplay_audio_options_t options;
 } session_audio_stream_t;
 
+typedef struct {
+    bool active, has_connection;
+    uint64_t seed, connection;
+    uint32_t id;
+    uint16_t port;
+} session_data_stream_t;
+
 struct airplay_rtsp_session {
     airplay_rtsp_session_config_t config;
     airplay_rtsp_pairing_t *pairing;
@@ -62,6 +69,8 @@ struct airplay_rtsp_session {
     uint16_t iap_port;
     unsigned modes_changes;
     unsigned unsupported_commands;
+    session_data_stream_t data_stream[RTCP_DATA_STREAM_COUNT];
+    uint32_t data_stream_offered, last_data_stream_id;
 };
 
 static airplay_rtsp_session_t *session_calloc(bool *allocated_in_psram)
@@ -220,6 +229,99 @@ static bool remember_data_stream_connection_id(airplay_rtsp_session_t *session,
     return true;
 }
 
+static void stop_data_stream(airplay_rtsp_session_t *s, unsigned kind)
+{
+    if (!s->data_stream[kind].active) return;
+    s->data_stream[kind].active = false;
+    s->data_stream[kind].port = 0;
+    s->config.stop_data_stream((rtcp_data_stream_kind_t)kind, s->config.media_context);
+}
+
+static bool parse_data_stream_offer(const airplay_bplist_doc_t *doc,
+    airplay_bplist_object_t root, uint32_t *mask)
+{
+    airplay_bplist_object_t array, item;
+    airplay_bplist_type_t type;
+    uint64_t count = 0;
+    *mask = 0;
+    airplay_bplist_result_t rc = airplay_bplist_dict_get(doc, root, "features", &array);
+    if (rc == AIRPLAY_BPLIST_NOT_FOUND) return true;
+    if (rc != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_get_type(doc, array, &type, &count) != AIRPLAY_BPLIST_OK ||
+        type != AIRPLAY_BPLIST_ARRAY || count > 64) return false;
+    for (uint64_t i = 0; i < count; ++i) {
+        char text[128]; size_t length = 0;
+        if (airplay_bplist_array_get(doc, array, i, &item) != AIRPLAY_BPLIST_OK ||
+            airplay_bplist_get_string(doc, item, text, sizeof(text), &length) != AIRPLAY_BPLIST_OK ||
+            strlen(text) != length) return false;
+        if (!strcmp(text, "vehicleStateProtocol"))
+            *mask |= RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE) |
+                     RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE_HIGH);
+        if (!strcmp(text, "uiSync")) *mask |= RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
+    }
+    return true;
+}
+
+/* No capability is advertised here. This is transport registration for host
+ * handlers, additionally gated by the initial phone feature offer and verified
+ * control session. Each new attempt consumes its salt before invoking a sink. */
+static airplay_rtsp_session_result_t setup_data_stream(airplay_rtsp_session_t *s,
+    const airplay_rtsp_request_t *request, const airplay_bplist_doc_t *doc,
+    airplay_bplist_object_t entry, unsigned kind, uint8_t *response,
+    size_t capacity, size_t *length)
+{
+    airplay_bplist_object_t object;
+    uint64_t seed = 0, connection = 0;
+    bool has_connection = false;
+    if (airplay_bplist_dict_get(doc, entry, "seed", &object) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_get_uint(doc, object, &seed) != AIRPLAY_BPLIST_OK)
+        return status_response(request, 400, "Bad Request", response, capacity, length);
+    airplay_bplist_result_t rc = airplay_bplist_dict_get(doc, entry, "streamConnectionID", &object);
+    if (rc == AIRPLAY_BPLIST_OK) {
+        if (airplay_bplist_get_uint(doc, object, &connection) != AIRPLAY_BPLIST_OK)
+            return status_response(request, 400, "Bad Request", response, capacity, length);
+        has_connection = true;
+    } else if (rc != AIRPLAY_BPLIST_NOT_FOUND)
+        return status_response(request, 400, "Bad Request", response, capacity, length);
+    airplay_pair_verify_control_keys_t keys;
+    bool authenticated = s->control_cipher_active &&
+        airplay_rtsp_pairing_get_control_keys(s->pairing, &keys) == AIRPLAY_PAIR_VERIFY_OK;
+    mbedtls_platform_zeroize(&keys, sizeof(keys));
+    uint32_t bit = RTCP_DATA_STREAM_MASK(kind);
+    if (!authenticated || !s->initial_setup_complete ||
+        !(s->config.data_stream_mask & s->data_stream_offered & bit))
+        return status_response(request, 503, "Service Unavailable", response, capacity, length);
+    session_data_stream_t *slot = &s->data_stream[kind];
+    bool started_now = false;
+    if (slot->active) {
+        if (slot->seed != seed || slot->has_connection != has_connection ||
+            (has_connection && slot->connection != connection))
+            return status_response(request, 503, "Service Unavailable", response, capacity, length);
+    } else {
+        if (data_stream_connection_id_was_used(s, seed) ||
+            !remember_data_stream_connection_id(s, seed) || s->last_data_stream_id == UINT32_MAX)
+            return status_response(request, 503, "Service Unavailable", response, capacity, length);
+        uint32_t id = ++s->last_data_stream_id;
+        uint16_t port = 0;
+        bool started = s->config.start_data_stream(s->pairing, (rtcp_data_stream_kind_t)kind,
+            seed, id, &port, s->config.media_context);
+        if (!started || !port) {
+            /* The callback must tolerate cleanup after a partial start. */
+            s->config.stop_data_stream((rtcp_data_stream_kind_t)kind, s->config.media_context);
+            return status_response(request, 503, "Service Unavailable", response, capacity, length);
+        }
+        *slot = (session_data_stream_t){.active = true, .has_connection = has_connection,
+            .seed = seed, .connection = connection, .id = id, .port = port};
+        started_now = true;
+    }
+    airplay_bplist_stream_entry_t accepted = {.stream_type = 130, .data_port = slot->port,
+        .stream_id = slot->id, .has_connection_id = has_connection, .stream_connection_id = connection};
+    airplay_rtsp_session_result_t result = streams_setup_response(request, &accepted, 1,
+        response, capacity, length);
+    if (result != AIRPLAY_RTSP_SESSION_OK && started_now) stop_data_stream(s, kind);
+    return result;
+}
+
 static void stop_audio_endpoint(airplay_rtsp_session_t *s,uint16_t type,const airplay_audio_options_t *options)
 {
     if(s->config.stop_audio_ex)s->config.stop_audio_ex(type,options,s->config.media_context);
@@ -238,13 +340,15 @@ static void session_stop_all_audio(airplay_rtsp_session_t *s)
 static bool teardown_stream_selection(const airplay_rtsp_session_t *session, const airplay_rtsp_request_t *request,
                                       bool *has_stream_selection,
                                       bool *screen_selected,
-                                      uint8_t *audio_type_mask, bool *iap_selected)
+                                      uint8_t *audio_type_mask, bool *iap_selected,
+                                      uint8_t *data_selected)
 {
     if (has_stream_selection == NULL || screen_selected == NULL ||
         audio_type_mask == NULL) {
         return false;
     }
     *iap_selected = false;
+    *data_selected = 0;
     *has_stream_selection = false;
     *screen_selected = false;
     *audio_type_mask = 0U;
@@ -293,7 +397,11 @@ static bool teardown_stream_selection(const airplay_rtsp_session_t *session, con
             if (got == AIRPLAY_BPLIST_OK) {
                 if (airplay_bplist_get_uint(&doc, stream_id, &id) != AIRPLAY_BPLIST_OK) return false;
             } else if (got != AIRPLAY_BPLIST_NOT_FOUND) return false;
-            if (id == 1U) *iap_selected = true;
+            if (id == 1U || got == AIRPLAY_BPLIST_NOT_FOUND) *iap_selected = true;
+            for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k)
+                if (session->data_stream[k].active &&
+                    (got == AIRPLAY_BPLIST_NOT_FOUND || session->data_stream[k].id == id))
+                    *data_selected |= (uint8_t)RTCP_DATA_STREAM_MASK(k);
         }
         if(airplay_audio_stream_type_is_supported(stream_type)) {
             uint64_t connection=0;bool has_connection=false;
@@ -328,14 +436,17 @@ static airplay_rtsp_session_result_t handle_teardown(
     bool has_stream_selection = false;
     bool screen_selected = false;
     uint8_t audio_type_mask = 0U;
+    uint8_t data_selected = 0;
     if (!teardown_stream_selection(session, request, &has_stream_selection,
-                                   &screen_selected, &audio_type_mask, &iap_selected)) {
+                                   &screen_selected, &audio_type_mask, &iap_selected, &data_selected)) {
         return status_response(request, AIRPLAY_RTSP_STATUS_BAD_REQUEST,
                                "Bad Request", response, response_capacity,
                                response_len);
     }
 
     if (has_stream_selection) {
+        for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k)
+            if (data_selected & RTCP_DATA_STREAM_MASK(k)) stop_data_stream(session, k);
         if (iap_selected && session->iap_port && session->config.stop_iap) {
             session->config.stop_iap(session->config.media_context);
             session->iap_port = 0;
@@ -357,6 +468,8 @@ static airplay_rtsp_session_result_t handle_teardown(
                                response, response_capacity, response_len);
     }
 
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) stop_data_stream(session, k);
+    session->data_stream_offered = 0;
     if (session->iap_port && session->config.stop_iap) {
         session->config.stop_iap(session->config.media_context);
         session->iap_port = 0;
@@ -459,6 +572,10 @@ static airplay_rtsp_session_result_t handle_setup(
     airplay_bplist_result_t lookup = airplay_bplist_dict_get(
         &doc, root, "streams", &streams);
     if (lookup == AIRPLAY_BPLIST_NOT_FOUND) {
+        uint32_t offered = session->data_stream_offered;
+        if (!session->initial_setup_complete && session->config.data_stream_mask &&
+            !parse_data_stream_offer(&doc, root, &offered))
+            return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
         if (!session->initial_setup_complete) log_setup_offer(&doc, root);
         uint64_t peer_timing_port = 0U;
         airplay_bplist_result_t timing_lookup = airplay_bplist_dict_get(
@@ -549,6 +666,7 @@ static airplay_rtsp_session_result_t handle_setup(
                                 AIRPLAY_PLIST_CONTENT_TYPE, body, body_len,
                                 response, response_capacity, response_len);
         if (result == AIRPLAY_RTSP_SESSION_OK) {
+            session->data_stream_offered = offered;
             session->initial_setup_complete = true;
             RTCP_LOGI(TAG, "setup=initial timing_port=%u event_port=%u enabled_features=iAPChannel,viewAreas",
                      (unsigned)session->timing_port, (unsigned)session->event_port);
@@ -595,6 +713,21 @@ static airplay_rtsp_session_result_t handle_setup(
             return status_response(request, AIRPLAY_RTSP_STATUS_BAD_REQUEST,
                                    "Bad Request", response, response_capacity,
                                    response_len);
+        }
+        if (candidate_type == 130U && session->config.data_stream_mask) {
+            airplay_bplist_object_t object;
+            char uuid[40]; size_t length = 0;
+            if (stream_count != 1 ||
+                airplay_bplist_dict_get(&doc, entry, "clientTypeUUID", &object) != AIRPLAY_BPLIST_OK ||
+                airplay_bplist_get_string(&doc, object, uuid, sizeof(uuid), &length) != AIRPLAY_BPLIST_OK ||
+                length != 36 || strlen(uuid) != length)
+                return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
+            const char *uuids[] = {RTCP_DATA_STREAM_VEHICLE_UUID, RTCP_DATA_STREAM_VEHICLE_HIGH_UUID,
+                                   RTCP_DATA_STREAM_UI_SYNC_UUID};
+            for (unsigned kind = 0; kind < RTCP_DATA_STREAM_COUNT; ++kind)
+                if (path_has_suffix(uuid, uuids[kind]))
+                    return setup_data_stream(session, request, &doc, entry, kind,
+                        response, response_capacity, response_len);
         }
         if (candidate_type == 130U && session->config.start_iap != NULL) {
             airplay_bplist_object_t o;
@@ -1063,7 +1196,9 @@ static airplay_rtsp_session_result_t session_create(
     *out_session = NULL;
     if (config == NULL || config->info_plist == NULL ||
         config->info_plist_len == 0U ||
-        config->info_plist_len > AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES) {
+        config->info_plist_len > AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES ||
+        (config->data_stream_mask & ~RTCP_DATA_STREAM_ALL_MASK) ||
+        (config->data_stream_mask && (!config->start_data_stream || !config->stop_data_stream))) {
         return AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT;
     }
     airplay_bplist_doc_t info_doc;
@@ -1090,6 +1225,7 @@ static airplay_rtsp_session_result_t session_create(
                    : AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT;
     }
     session->config = *config;
+    session->last_data_stream_id = 1; /* iAP keeps its compatible streamID=1. */
     if (!borrow_info_plist) {
         bool allocated_in_psram = false;
         session->owned_info_plist = copy_info_plist(
@@ -1453,6 +1589,7 @@ void airplay_rtsp_session_mark_control_cipher_active(
 void airplay_rtsp_session_destroy(airplay_rtsp_session_t *session)
 {
     if (session == NULL) return;
+    for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) stop_data_stream(session, k);
     if (session->iap_port && session->config.stop_iap) {
         session->config.stop_iap(session->config.media_context);
         session->iap_port = 0;
@@ -1482,4 +1619,18 @@ void airplay_rtsp_session_iap_closed(airplay_rtsp_session_t *session)
 bool airplay_rtsp_session_is_established(const airplay_rtsp_session_t *session)
 {
     return session != NULL && session->record_active;
+}
+
+void airplay_rtsp_session_data_stream_closed(airplay_rtsp_session_t *s, rtcp_data_stream_kind_t kind)
+{
+    if (s && (unsigned)kind < RTCP_DATA_STREAM_COUNT) {
+        s->data_stream[kind].active = false;
+        s->data_stream[kind].port = 0;
+    }
+}
+
+bool airplay_rtsp_session_data_stream_offered(const airplay_rtsp_session_t *s, rtcp_data_stream_kind_t kind)
+{
+    return s && (unsigned)kind < RTCP_DATA_STREAM_COUNT &&
+        (s->data_stream_offered & RTCP_DATA_STREAM_MASK(kind));
 }

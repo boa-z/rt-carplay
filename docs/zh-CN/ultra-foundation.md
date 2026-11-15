@@ -32,7 +32,7 @@ OPACK 使用调用方提供的前序节点数组，校验 UTF-8、有限数值�
 
 ## 双向 DataStream 传输基础
 
-内部 airplay_data_stream API 新增独立的认证双向 APTransportPackage 传输。所有者提供分别派生的 Pair-Verify DataStream Output/Input 密钥与对端地址，只处理已就绪事件。每个实例只接受一次匹配的连接，包括 IPv6 scope，不会以相同密钥接受替换连接。新流 ID、HKDF 派生、能力协商及注册表仍由 Receiver 所有者负责，本基础尚未接入实际 RTSP SETUP，现有 iAP 隧道保持原样。
+内部 airplay_data_stream API 提供独立的认证双向 APTransportPackage 传输。所有者提供分别派生的 Pair-Verify DataStream Output/Input 密钥与对端地址，只处理已就绪事件。每个实例只接受一次匹配的连接，包括 IPv6 scope，不会以相同密钥接受替换连接。下述 Receiver 集成现已提供新流 ID、密钥派生及 SETUP 路由，现有 iAP 隧道保持原样。
 
 只有完整且通过认证的包体进入回调。Sync 包先以完全相同的八字节 token 排队回复，再交付 comm/cmnd 包体；回复及未知消息类型不交付应用。传输接收与应用执行结果独立，应用输出采用 async/cmnd 包。每个包体最多 65,536 字节，复制保存的 FIFO 最多八包及 131,072 个明文字节。应用发送为传输回复保留一包和 32 字节，应用排队失败不会改变原队列。对端突发消息耗尽回复容量时，明确终止流，避免静默丢弃回复。此处不自行定义协议超时、重传策略或应用序号协议。
 
@@ -40,12 +40,24 @@ OPACK 使用调用方提供的前序节点数组，校验 UTF-8、有限数值�
 
 Host 测试覆盖独立 TCP/加密帧/包分片、65,536 字节包体、短 sync 包每一处截断、方向密钥、精确回复 token、忽略回复/未知类型、短写及临时收发超时、复制 FIFO 顺序及字节/包数限制、回复预留容量与过载失败、回调拒绝、异常长度/种类、错误认证标签、断连、IPv4 对端/IPv6 scope 约束及清理。这些属于模拟测试，不是真实手机证据。
 
+## Receiver 注册及 SETUP 生命周期
+
+公共 rtcp/data_stream.h 接口与 Receiver 配置接收显式通道掩码、完整包体处理器及可选关闭处理器。注册为零时保留 Classic 行为。三类传输对应 Vehicle State 普通/高优先级和 UI Sync UUID。注册不会自动生成应用协议、enabledFeatures 项、vehicleStateProtocolInfo、uiSyncInfo 或 displayPanels 声明。集成宿主只能注册已实现的处理器，D213 开发配置当前仍不注册任何此类处理器。Vehicle State 与 UI Sync 的应用集成尚待完成。
+
+仅在初始手机 SETUP 成功后保存能力提议快照。已注册通道还要求对应的 vehicleStateProtocol 或 uiSync 提议、完成 Pair-Verify、活动的加密控制连接及初始 SETUP，缺失或无效前提会拒绝建立。每次 Type 130 SETUP 当前只包含一条流，与原有 iAP 限制一致；混合/批量 Type 130 请求在启动端点前被拒绝。分别发送请求可以同时建立三条通道，各自拥有独立端口、流 ID、密钥、加密计数器、队列及状态。iAP 保留 streamID 1，注册传输采用递增且大于一的 ID。完全一致的活动 SETUP 返回原有端点，不能通过改变 seed 或连接元数据隐式替换。
+
+Pair-Verify 共享密钥与十进制 seed 通过 DataStream-Salt<seed> 及 Input/Output 标签派生 HKDF-SHA512 方向密钥。共享会话 salt 清单覆盖屏幕、音频、iAP 及注册传输。新的传输尝试在创建监听器之前预留 salt 和 ID，创建失败也会消耗。关闭、选择性 TEARDOWN、输出编码失败及完整 TEARDOWN 均不会释放该配对会话内已消费的 salt。新 seed 可以用新 ID 重开已关闭通道。选择性 TEARDOWN 按 streamID 定位，省略 streamID 时选择全部 Type 130 端点。关闭一条通道保留其他通道及媒体，完整会话销毁也会关闭尚未建立连接的监听器。旧 poll 就绪事件和旧流 ID 不能作用于替换后的通道。
+
+rtcp_receiver_send_data_stream 将包体复制到指定已连接队列，区分非法参数、无连接及队列耗尽，可在完整包体回调中调用。rtcp_receiver_get_data_stream_status 提供注册、手机提议、端点状态/ID/端口、终止错误及传输计数；已关闭计数保留到下一个 RTSP 控制器连接，停止的 Receiver 返回空闲计数并保留注册。关闭回调对每个已拥有端点仅调用一次，不能证明对端接收。Linux/RT-Thread 的 poll 容量现为 24，包含全部可选端点，启用时自定义端口也必须支持该容量。
+
+加密 Host 端到端控制器独立派生流密钥，通过原生和兼容 Receiver 配置驱动真实 TCP socket，检查认证/初始 SETUP/手机提议门控、非法 features、三条并行双向通道、精确同步回复与回调响应、重复 SETUP、跨类型/媒体 salt 冲突、监听失败后 salt 消耗、新 seed 重开、旧 ID 及选择性/全部 Type 130 关闭、错误认证标签隔离，以及控制器重连时清理未连接监听器。交互使用模拟传输包体，不验证真实 Vehicle State/UI Sync 应用交互或真实 iPhone。
+
 ## 测试与验收
 
 Host 测试在 ASan/UBSan 下覆盖 LIVI configRequest 字节样本、负事务编号回传、目录结构与权限、缺失值、订阅、数值界限及步长、宿主拒绝、按 IID 返回部分写入错误、字符串复制、回调时机、输出失败回滚、通知重试/合并/重置、未知控制命令、截断及确定性畸形输入集。显示测试覆盖几何及触摸映射，元数据测试确认默认仍为 Classic 且没有额外可选能力。这些测试不是 iPhone 互操作证据。本里程碑未运行 LIVI 自身测试。
 
-L1 仍为部分完成，需 Type 130 协商集成和 UI Sync 基础分别通过测试。双向传输基础已有 Host 覆盖，尚无实际协商。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
+L1 仍为部分完成，需 Vehicle State 应用集成和 UI Sync 基础分别通过测试。注册 Type 130 传输已有加密 Host SETUP 覆盖，尚未由真实手机验证。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
 
 ## 后续实现
 
-后续协议工作为带新密钥派生的协商流注册表、手机能力提议门控、二进制 plist UI Sync 状态/ACK，以及公共 Receiver 接口接入。现有 iAP 隧道保持原样且仅接收。新增 Vehicle State API 尚未连接到实际 Receiver，也不在其 /info 端点输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。
+后续协议工作为 Vehicle State 应用/通知集成、由完整处理器门控的能力声明，以及二进制 plist UI Sync 状态/ACK。现有 iAP 隧道保持原样且仅接收。Vehicle State 处理器不会自动连接 Receiver，也不在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。

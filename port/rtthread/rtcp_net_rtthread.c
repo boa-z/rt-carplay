@@ -38,13 +38,6 @@ void rtcp_net_rtthread_multicast_interface(const uint8_t ipv4[4])
 #define RTCP_NET_HAVE_IPV6 1
 #endif
 
-/* Upper bound for one poll() batch; stack cost is sizeof(struct pollfd) each.
- * The AirPlay server polls RTSP, event, timing, screen and three audio
- * data/control pairs, so 12 leaves a little headroom. */
-#ifndef RTCP_NET_POLL_MAX
-#define RTCP_NET_POLL_MAX 12
-#endif
-
 static int poll_fds(struct rtcp_pollfd *fds, int n, int timeout_ms);
 static void configure_tcp(int fd);
 

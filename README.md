@@ -12,7 +12,7 @@ Current state: the portable Receiver API and public media registration are imple
 
 ## Features
 
-The [Ultra protocol foundation](docs/ultra-foundation.md) adds optional Main Display metadata, OPACK, a bounded Vehicle State message processor and an internal authenticated duplex DataStream transport. Live Type 130 and UI Sync integration are pending; these APIs do not claim official Ultra support.
+The [Ultra protocol foundation](docs/ultra-foundation.md) adds optional Main Display metadata, OPACK, a bounded Vehicle State message processor and authenticated duplex DataStream transport with explicit Receiver registration, phone-offer/authentication gates and independent Type 130 lifecycles. Vehicle State and UI Sync application integration are pending; these APIs do not claim official Ultra support.
 
 - AirPlay/CarPlay RTSP, Pair-Setup/Pair-Verify, encrypted control/event/media, H.264 and HID output.
 - USBMUX/Lockdown/TLS protocol support and wireless iAP2/MFi/Wi-Fi handover behind injected transport services.

@@ -79,6 +79,7 @@ int rtcp_receiver_config_from_airplay(const struct airplay_rtsp_server_config *a
     config->iap2.on_stop = a->on_iap_stop;
     config->iap2.disable_bluetooth = a->disable_bluetooth;
     config->iap2.context = a->iap_context;
+    config->data_stream = a->data_stream;
     return RTCP_OK;
 }
 
@@ -93,7 +94,9 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         platform->info_plist == NULL || platform->info_plist_len == 0 ||
         platform->info_plist_len > AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES ||
         (config->family != 0 && config->family != RTCP_AF_INET &&
-         config->family != RTCP_AF_INET6))
+         config->family != RTCP_AF_INET6) ||
+        (config->data_stream.channel_mask & ~RTCP_DATA_STREAM_ALL_MASK) ||
+        (config->data_stream.channel_mask && !config->data_stream.on_body))
         return RTCP_EINVAL;
     rtcp_receiver_t *r = calloc(1, sizeof(*r));
     if (r == NULL) return RTCP_ENOMEM;
@@ -128,6 +131,7 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .on_iap_stop = config->iap2.on_stop,
         .disable_bluetooth = config->iap2.disable_bluetooth,
         .iap_context = config->iap2.context,
+        .data_stream = config->data_stream,
     };
     if (r->airplay.on_screen_message == NULL)
         r->airplay.on_screen_message = discard_screen;
@@ -239,5 +243,22 @@ int rtcp_receiver_set_single_cipher_frame(rtcp_receiver_t *r, bool enabled)
     if (r == NULL) return RTCP_EINVAL;
     if (r->server == NULL) return RTCP_ESTATE;
     airplay_rtsp_server_set_single_cipher_frame(r->server, enabled);
+    return RTCP_OK;
+}
+
+int rtcp_receiver_send_data_stream(rtcp_receiver_t *r, rtcp_data_stream_kind_t kind,
+    const uint8_t *body, size_t length)
+{
+    if (!r) return RTCP_EINVAL;
+    return airplay_rtsp_server_send_data_stream(r->server, kind, body, length);
+}
+
+int rtcp_receiver_get_data_stream_status(const rtcp_receiver_t *r,
+    rtcp_data_stream_kind_t kind, rtcp_data_stream_status_t *out)
+{
+    if (!r || !out || (unsigned)kind >= RTCP_DATA_STREAM_COUNT) return RTCP_EINVAL;
+    if (r->server) return airplay_rtsp_server_get_data_stream_status(r->server, kind, out);
+    memset(out, 0, sizeof(*out));
+    out->registered = (r->airplay.data_stream.channel_mask & RTCP_DATA_STREAM_MASK(kind)) != 0;
     return RTCP_OK;
 }

@@ -27,6 +27,20 @@ typedef struct {
     size_t used;
     bool failed;
 } builder_t;
+typedef struct {
+    rtcp_vehicle_control_t spec;
+    rtcp_vehicle_control_parameter_t request[RTCP_VEHICLE_MAX_CONTROL_PARAMETERS];
+    rtcp_vehicle_control_parameter_t response[RTCP_VEHICLE_MAX_CONTROL_PARAMETERS];
+    char names[2][RTCP_VEHICLE_MAX_CONTROL_PARAMETERS][RTCP_VEHICLE_MAX_PARAMETER_NAME+1];
+} control_t;
+typedef struct {
+    size_t count;
+    control_t entries[RTCP_VEHICLE_MAX_CONTROLS];
+    rtcp_vehicle_control_values_t request[RTCP_VEHICLE_MAX_CONTROLS];
+    rtcp_vehicle_control_values_t response[RTCP_VEHICLE_MAX_CONTROLS];
+    bool (*prepare)(void *, int64_t, const rtcp_vehicle_control_values_t *, rtcp_vehicle_control_values_t *);
+    void (*commit)(void *, int64_t, const rtcp_vehicle_control_values_t *);
+} controls_t;
 struct rtcp_vehicle {
     entry_t entries[MAX];
     size_t count;
@@ -40,6 +54,7 @@ struct rtcp_vehicle {
     builder_t builder;
     uint8_t inner[WIRE_BYTES];
     entry_t staged[MAX];
+    controls_t *controls;
 };
 
 static size_t add(builder_t *b, rtcp_opack_type_t type)
@@ -200,6 +215,55 @@ static size_t find(const rtcp_vehicle_t *v, int64_t iid)
     for (size_t i = 0; i < v->count; ++i) if (v->entries[i].spec.iid == iid) return i;
     return SIZE_MAX;
 }
+static rtcp_vehicle_characteristic_t parameter_spec(const rtcp_vehicle_control_parameter_t *p)
+{
+    return (rtcp_vehicle_characteristic_t){.accessory_iid=1,.service_iid=2,.iid=3,
+        .format=p->format,.maximum_length=p->maximum_length,.owner=RTCP_VEHICLE_CAR};
+}
+static bool valid_parameters(const rtcp_vehicle_control_parameter_t *p, size_t count)
+{
+    if (count>RTCP_VEHICLE_MAX_CONTROL_PARAMETERS || (count && !p)) return false;
+    for (size_t i=0;i<count;++i) {
+        if (!p[i].name || !p[i].name[0] || strlen(p[i].name)>RTCP_VEHICLE_MAX_PARAMETER_NAME) return false;
+        for (const unsigned char *c=(const unsigned char *)p[i].name;*c;++c)
+            if (*c<0x20 || *c>0x7e) return false;
+        rtcp_vehicle_characteristic_t spec=parameter_spec(&p[i]);
+        if (!valid_spec(&spec)) return false;
+        for (size_t j=0;j<i;++j) if (!strcmp(p[i].name,p[j].name)) return false;
+    }
+    return true;
+}
+static bool valid_controls(const rtcp_vehicle_config_t *c)
+{
+    if (c->control_count>RTCP_VEHICLE_MAX_CONTROLS ||
+        (c->control_count && (!c->controls || !c->prepare_control))) return false;
+    for (size_t i=0;i<c->control_count;++i) {
+        const rtcp_vehicle_control_t *s=&c->controls[i]; bool service=false;
+        if (s->iid<=0 || s->type<0 || !valid_parameters(s->request,s->request_count) ||
+            !valid_parameters(s->response,s->response_count)) return false;
+        for (size_t j=0;j<c->count;++j) {
+            const rtcp_vehicle_characteristic_t *p=&c->characteristics[j];
+            if (s->iid==p->iid || s->iid==p->service_iid || s->iid==p->accessory_iid) return false;
+            if (s->service_iid==p->service_iid) service=true;
+        }
+        if (!service) return false;
+        for (size_t j=0;j<i;++j) if (s->iid==c->controls[j].iid) return false;
+    }
+    return true;
+}
+static void copy_parameters(rtcp_vehicle_control_parameter_t *out, char names[][RTCP_VEHICLE_MAX_PARAMETER_NAME+1],
+    const rtcp_vehicle_control_parameter_t *in, size_t count)
+{
+    for (size_t i=0;i<count;++i) {
+        strcpy(names[i],in[i].name); out[i]=in[i]; out[i].name=names[i];
+    }
+}
+static size_t find_control(const rtcp_vehicle_t *v, int64_t iid)
+{
+    if (v->controls) for (size_t i=0;i<v->controls->count;++i)
+        if (v->controls->entries[i].spec.iid==iid) return i;
+    return SIZE_MAX;
+}
 int rtcp_vehicle_create(const rtcp_vehicle_config_t *config, rtcp_vehicle_t **out)
 {
     if (!out) return RTCP_EINVAL;
@@ -222,6 +286,7 @@ int rtcp_vehicle_create(const rtcp_vehicle_config_t *config, rtcp_vehicle_t **ou
                 return RTCP_EINVAL;
         }
     }
+    if (!valid_controls(config)) return RTCP_EINVAL;
     rtcp_vehicle_t *v = calloc(1, sizeof(*v));
     if (!v) return RTCP_ENOMEM;
     v->count = config->count; v->plugin_id = config->plugin_id;
@@ -233,10 +298,22 @@ int rtcp_vehicle_create(const rtcp_vehicle_config_t *config, rtcp_vehicle_t **ou
         v->entries[i].has_value = v->entries[i].spec.has_initial;
         if (v->entries[i].has_value) v->entries[i].value = v->entries[i].spec.initial;
     }
+    if (config->control_count) {
+        v->controls=calloc(1,sizeof(*v->controls));
+        if (!v->controls) { free(v); return RTCP_ENOMEM; }
+        v->controls->count=config->control_count;
+        v->controls->prepare=config->prepare_control; v->controls->commit=config->did_control;
+        for (size_t i=0;i<config->control_count;++i) {
+            control_t *c=&v->controls->entries[i]; c->spec=config->controls[i];
+            copy_parameters(c->request,c->names[0],c->spec.request,c->spec.request_count);
+            copy_parameters(c->response,c->names[1],c->spec.response,c->spec.response_count);
+            c->spec.request=c->request; c->spec.response=c->response;
+        }
+    }
     *out = v;
     return RTCP_OK;
 }
-void rtcp_vehicle_destroy(rtcp_vehicle_t *v) { free(v); }
+void rtcp_vehicle_destroy(rtcp_vehicle_t *v) { if (v) free(v->controls); free(v); }
 void rtcp_vehicle_reset_session(rtcp_vehicle_t *v)
 {
     if (v) for (size_t i = 0; i < v->count; ++i)
@@ -246,6 +323,7 @@ int rtcp_vehicle_status(const rtcp_vehicle_t *v, rtcp_vehicle_status_t *out)
 {
     if (!v || !out) return RTCP_EINVAL;
     *out = v->stats; out->characteristics = v->count;
+    out->controls=v->controls ? v->controls->count : 0;
     for (size_t i = 0; i < v->count; ++i) {
         out->subscribed += v->entries[i].subscribed;
         out->pending_notifications += v->entries[i].dirty;
@@ -304,6 +382,32 @@ static void describe(builder_t *b, const entry_t *e)
     if (e->has_value) { text(b, "initialValue"); value_node(b, &e->value); ++pairs; }
     finish(b, at, pairs);
 }
+static void describe_parameters(builder_t *b, const rtcp_vehicle_control_parameter_t *params, size_t count)
+{
+    size_t arr=add(b,RTCP_OPACK_ARRAY);
+    for (size_t i=0;i<count;++i) {
+        size_t dict=add(b,RTCP_OPACK_DICT);
+        text(b,"name"); text(b,params[i].name); text(b,"format"); integer(b,params[i].format);
+        finish(b,dict,2);
+    }
+    finish(b,arr,count);
+}
+static void describe_controls(const rtcp_vehicle_t *v, builder_t *b, int64_t service)
+{
+    size_t arr=add(b,RTCP_OPACK_ARRAY), count=0;
+    if (v->controls) for (size_t i=0;i<v->controls->count;++i) {
+        const rtcp_vehicle_control_t *c=&v->controls->entries[i].spec;
+        if (c->service_iid!=service) continue;
+        ++count; size_t dict=add(b,RTCP_OPACK_DICT), pairs=4;
+        text(b,"iid"); integer(b,c->iid); text(b,"type"); integer(b,c->type);
+        text(b,"sender"); integer(b,0); text(b,"hasResponse"); boolean(b,true);
+        if (c->urgent) { text(b,"priority"); integer(b,1); ++pairs; }
+        if (c->request_count) { text(b,"requestParameters"); describe_parameters(b,c->request,c->request_count); ++pairs; }
+        if (c->response_count) { text(b,"responseParameters"); describe_parameters(b,c->response,c->response_count); ++pairs; }
+        finish(b,dict,pairs);
+    }
+    finish(b,arr,count);
+}
 static void accessories(rtcp_vehicle_t *v, builder_t *b)
 {
     size_t arr = add(b, RTCP_OPACK_ARRAY), count = 0;
@@ -335,7 +439,12 @@ static void accessories(rtcp_vehicle_t *v, builder_t *b)
                 if (v->entries[k].spec.service_iid == t->service_iid) {
                     describe(b, &v->entries[k]); ++nchars;
                 }
-            finish(b, chars, nchars); finish(b, svc, 3);
+            finish(b, chars, nchars);
+            bool controls=false;
+            if (v->controls) for (size_t k=0;k<v->controls->count;++k)
+                if (v->controls->entries[k].spec.service_iid==t->service_iid) controls=true;
+            if (controls) { text(b,"controls"); describe_controls(v,b,t->service_iid); }
+            finish(b, svc, controls ? 4 : 3);
         }
         finish(b, services, nservices); finish(b, acc, 4);
     }
@@ -407,6 +516,38 @@ static bool from_node(const rtcp_vehicle_characteristic_t *s,
     }
     return valid_value(s, out);
 }
+/* Parameters are required named fields. A no-argument control accepts null or
+ * an empty dictionary as in the reference's image/archive and media commands. */
+static bool parse_control(rtcp_vehicle_t *v, size_t slot, const rtcp_opack_node_t *nodes, size_t n, size_t at)
+{
+    const rtcp_vehicle_control_t *c=&v->controls->entries[slot].spec;
+    rtcp_vehicle_control_values_t *args=&v->controls->request[slot];
+    memset(args,0,sizeof(*args)); args->count=c->request_count;
+    if (!c->request_count && nodes[at].type==RTCP_OPACK_NULL) return true;
+    if (nodes[at].type!=RTCP_OPACK_DICT || nodes[at].count!=c->request_count) return false;
+    for (size_t i=0;i<c->request_count;++i) {
+        size_t value=rtcp_opack_dict_get(nodes,n,at,c->request[i].name);
+        rtcp_vehicle_characteristic_t spec=parameter_spec(&c->request[i]);
+        if (value==SIZE_MAX || !from_node(&spec,&nodes[value],&args->values[i])) return false;
+    }
+    return true;
+}
+static bool valid_control_response(const rtcp_vehicle_control_t *c, const rtcp_vehicle_control_values_t *values)
+{
+    if (values->count!=c->response_count) return false;
+    for (size_t i=0;i<values->count;++i) {
+        rtcp_vehicle_characteristic_t spec=parameter_spec(&c->response[i]);
+        if (!valid_value(&spec,&values->values[i])) return false;
+    }
+    return true;
+}
+static void control_response(builder_t *b, const rtcp_vehicle_control_t *c, const rtcp_vehicle_control_values_t *values)
+{
+    if (!values->count) { (void)add(b,RTCP_OPACK_NULL); return; }
+    size_t dict=add(b,RTCP_OPACK_DICT);
+    for (size_t i=0;i<values->count;++i) { text(b,c->response[i].name); value_node(b,&values->values[i]); }
+    finish(b,dict,values->count);
+}
 typedef enum { CONFIG, READ, REGISTER, WRITE, CONTROL } operation_t;
 static int reject(rtcp_vehicle_t *v, int rc) { ++v->stats.rejected_messages; return rc; }
 
@@ -457,10 +598,25 @@ int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
             if (dict) at = r[at].end;
         }
     }
+    /* Validate every registered command before any host preparation. */
+    if (op==CONTROL) for (size_t i=0;i<items;++i) {
+        size_t slot=find_control(v,ids[i]);
+        if (slot!=SIZE_MAX && !parse_control(v,slot,r,n,indices[i])) return reject(v,RTCP_EINVAL);
+    }
     memcpy(v->staged, v->entries, v->count * sizeof(entry_t));
     for (size_t i = 0; i < items; ++i) {
         size_t e = find(v, ids[i]); errors[i] = NO_VALUE;
-        if (op == CONTROL) { errors[i] = NO_COMMAND; continue; }
+        if (op == CONTROL) {
+            errors[i]=NO_COMMAND;
+            size_t slot=find_control(v,ids[i]);
+            if (slot==SIZE_MAX) continue;
+            rtcp_vehicle_control_values_t *result=&v->controls->response[slot];
+            memset(result,0,sizeof(*result));
+            if (!v->controls->prepare(v->context,ids[i],&v->controls->request[slot],result))
+                return reject(v,RTCP_ESTATE);
+            if (!valid_control_response(&v->controls->entries[slot].spec,result)) return reject(v,RTCP_EINVAL);
+            accepted[i]=true; continue;
+        }
         if (e == SIZE_MAX) continue;
         entry_t *entry = &v->staged[e];
         if (op == REGISTER) entry->subscribed = true;
@@ -489,6 +645,18 @@ int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
             }
             finish(b, vals, count); ++pairs;
         }
+        if (op==CONTROL) {
+            size_t count=0;
+            for (size_t i=0;i<items;++i) count+=accepted[i];
+            if (count) {
+                text(b,"values"); size_t vals=add(b,RTCP_OPACK_DICT);
+                for (size_t i=0;i<items;++i) if (accepted[i]) {
+                    size_t slot=find_control(v,ids[i]); integer(b,ids[i]);
+                    control_response(b,&v->controls->entries[slot].spec,&v->controls->response[slot]);
+                }
+                finish(b,vals,count); ++pairs;
+            }
+        }
         text(b, "errors"); size_t errs = add(b, RTCP_OPACK_DICT), count = 0;
         for (size_t i = 0; i < items; ++i) if (op == WRITE || !accepted[i]) {
             integer(b, ids[i]); integer(b, errors[i]); ++count;
@@ -504,6 +672,10 @@ int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
             ++v->stats.committed_writes;
             if (v->did_write) v->did_write(v->context, ids[i], &v->entries[find(v, ids[i])].value);
         } else ++v->stats.refused_writes;
+    }
+    if (op==CONTROL) for (size_t i=0;i<items;++i) if (accepted[i]) {
+        ++v->stats.committed_controls;
+        if (v->controls->commit) v->controls->commit(v->context,ids[i],&v->controls->request[find_control(v,ids[i])]);
     }
     return RTCP_OK;
 }

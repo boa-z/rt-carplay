@@ -24,7 +24,7 @@ OPACK 使用调用方提供的前序节点数组，校验 UTF-8、有限数值�
 
 ## 消息处理与通知
 
-处理器接收完整解密后的 Type 130 comm 消息体，包含 pluginID 和二进制 OPACK pluginData。实现 configRequest/configResponse、readRequest/readResponse、writeRequest/writeResponse、registerRequest/registerResponse 和 updateNotify。要求显式提供有符号整数或 null 的 transactionID，并原样回传。插件编号必须与配置一致。消息结构错误或重复编号会拒绝整个请求，未知值和拒绝写入使用参考实现中的错误值 -6727。不声明任何控制命令，controlRequest 返回参考实现的未知命令状态 -6735。未知命令返回本地不支持错误，不构造猜测的协议响应。
+处理器接收完整解密后的 Type 130 comm 消息体，包含 pluginID 和二进制 OPACK pluginData。实现 configRequest/configResponse、readRequest/readResponse、writeRequest/writeResponse、registerRequest/registerResponse 和 updateNotify。要求显式提供有符号整数或 null 的 transactionID，并原样回传。插件编号必须与配置一致。消息结构错误或重复编号会拒绝整个请求，未知值和拒绝写入使用参考实现中的错误值 -6727。宿主可显式注册[具类型的服务级 Control](vehicle-controls.md)，未注册的 controlRequest IID 仍返回参考实现的未知命令状态 -6735。未知命令返回本地不支持错误，不构造猜测的协议响应。
 
 读取和订阅返回已知当前值及按 IID 区分的不可用错误。已知但尚无值的特征可以订阅，随后有效的手机写入能够产生首次通知。只有已订阅且发生变化的值产生通知，相同值重复写入不会产生通知。变化合并为最新值，通过高优先级通道输出。序列化成功会消费待发送变化，调用方必须保存生成字节，直到发送成功或认证会话结束。编码失败会保留待通知数据。会话重置清除订阅及待通知标记，保留车辆当前值。参考实现没有确认取消订阅的线格式，因此不自行发明。
 
@@ -48,7 +48,7 @@ Host 测试覆盖独立 TCP/加密帧/包分片、65,536 字节包体、短 sync
 
 Pair-Verify 共享密钥与十进制 seed 通过 DataStream-Salt<seed> 及 Input/Output 标签派生 HKDF-SHA512 方向密钥。共享会话 salt 清单覆盖屏幕、音频、iAP 及注册传输。新的传输尝试在创建监听器之前预留 salt 和 ID，创建失败也会消耗。关闭、选择性 TEARDOWN、输出编码失败及完整 TEARDOWN 均不会释放该配对会话内已消费的 salt。新 seed 可以用新 ID 重开已关闭通道。选择性 TEARDOWN 按 streamID 定位，省略 streamID 时选择全部 Type 130 端点。关闭一条通道保留其他通道及媒体，完整会话销毁也会关闭尚未建立连接的监听器。旧 poll 就绪事件和旧流 ID 不能作用于替换后的通道。
 
-rtcp_receiver_send_data_stream 将包体复制到指定已连接队列，区分非法参数、无连接及队列耗尽，可在完整包体回调中调用。rtcp_receiver_get_data_stream_status 提供注册、手机提议、端点状态/ID/端口、终止错误及传输计数；已关闭计数保留到下一个 RTSP 控制器连接，停止的 Receiver 返回空闲计数并保留注册。关闭回调对每个已拥有端点仅调用一次，不能证明对端接收。Linux/RT-Thread 的 poll 容量现为 24，包含全部可选端点，启用时自定义端口也必须支持该容量。
+rtcp_receiver_send_data_stream 将包体复制到指定已连接队列，区分非法参数、无连接及队列耗尽，可在完整包体回调中调用。rtcp_receiver_get_data_stream_status 提供注册、手机提议、端点状态/ID/端口、终止错误及传输计数；已关闭计数保留到下一个 RTSP 控制器连接，停止的 Receiver 返回空闲计数并保留注册。关闭回调对每个已拥有端点仅调用一次，不能证明对端接收。Linux/RT-Thread 的 poll 容量现为 25，包含全部可选端点，启用时自定义端口也必须支持该容量。
 
 加密 Host 端到端控制器独立派生流密钥，通过原生和兼容 Receiver 配置驱动真实 TCP socket，检查认证/初始 SETUP/手机提议门控、非法 features、三条并行双向通道、精确同步回复与回调响应、重复 SETUP、跨类型/媒体 salt 冲突、监听失败后 salt 消耗、新 seed 重开、旧 ID 及选择性/全部 Type 130 关闭、错误认证标签隔离，以及控制器重连时清理未连接监听器。交互使用模拟传输包体，不验证真实 Vehicle State/UI Sync 应用交互或真实 iPhone。
 
@@ -84,6 +84,6 @@ L1 仍为部分完成，Vehicle State 和 UI Sync Receiver 集成均有加密 Ho
 
 ## 后续实现
 
-内部[双视频 RTSP 会话分派](video-stream-session.md)现已分离 Type 110 和实验性 Type 111 生命周期/端口，并共享密钥预留台账，仅显式配对的内部回调会使用该路径；生产 server 和公共 Receiver 仍接入原有 Main 链路。Host 回调/独立 plist 测试不能证明第二个加密监听、独立媒体接收或 L5。公共组合、端点/统计/故障隔离、匹配元数据/altScreen 协商及真实 iPhone 验证仍待实现。
+[双视频会话及实验性公共 Receiver 传输](video-stream-session.md)现已分离 Type 110 和 Type 111 生命周期、监听、密钥/nonce、媒体 Sink 和统计。显式启用后可通过合成加密 Host 接收验证备用失败隔离，默认仍为单 Main。匹配元数据/altScreen 协商、真实 iPhone 接收及 L5 尚未验证。
 
 [UI Sync 实验能力门控](ui-sync-capabilities.md)现已检查接入处理器、已绑定目录和匹配单 Main Display 元数据。后续仍需真实宿主资产/渲染器/呈现集成及手机验证，包括元数据提供时机、显示/plugin/车辆关系。UI Sync 模型现已复制有界宿主目录并拒绝不支持的布局、调色板和区域/组件组合，绑定不会自行声明能力。[UI Sync 状态/ACK 和 Receiver 集成](ui-sync.md)已有独立 plistlib 消息验证与加密应用协议测试，覆盖队列耗尽及通道隔离。现有 iAP 隧道保持原样且仅接收。宿主可显式将 Vehicle State 处理器接入 Receiver，接入不会在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。

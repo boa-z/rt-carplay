@@ -1,0 +1,31 @@
+[English](vehicle-controls.md) | [简体中文](zh-CN/vehicle-controls.md)
+
+# Optional Vehicle State controls
+
+The Vehicle State processor can register service-level controls with typed request and response parameters. The wire shapes follow LIVI vehicle_state.rs, Control::describe/accessory_list/control, at 64a05b68358db52ed887169143afd5944fd6f1f7, by Lasse Heitgres (https://github.com/f-io/LIVI); see NOTICE. Previously every controlRequest was returned as unknown. No command, actuator, production type/IID, image archive or new capability is supplied by default. The D213 simulated engine profile registers no controls. This is portable protocol support, not official Ultra or physical actuation evidence.
+
+## Catalogue and ownership
+
+Append controls/control_count and prepare_control to rtcp_vehicle_config_t before creating the model. Optional did_control handles post-serialization commit. Every control references an existing characteristic-bearing service, has a positive IID distinct from all accessory/service/characteristic/control IDs and a nonnegative host-supplied type. This foundation supports four controls, each with up to four required request parameters and four response parameters. Names are unique within each schema and contain 1..32 printable ASCII bytes. Values support the existing primitive Vehicle formats; STRING/DATA parameters require an explicit 1..256-byte bound. Nested dictionaries/arrays and larger image archives are not implemented by this interface.
+
+Creation validates and copies the descriptors, names and schema arrays. Callback contexts remain borrowed until destroy; all calls and callbacks use the serialized owner and callbacks must not reenter. Controls allocate their bounded workspace only when registered. Existing zero-control models preserve their metadata and unknown-control response behavior.
+
+Both configResponse and vehicleStateProtocolInfo include controls under the matching service. Each description carries iid/type, sender=0 and hasResponse=true; urgent adds priority=1. Nonempty requestParameters/responseParameters arrays contain name/format descriptors, as in the reference. Local maximum_length bounds validate values but are not invented wire fields. Existing /info matching includes the complete control catalogue, so a mismatching refreshed control schema is refused by the Receiver's Vehicle State negotiation gate. Registration does not independently enable vehicleStateProtocol, uiSync, altScreen or a renderer.
+
+## Request, preparation and commit
+
+A controlRequest carries integer IID keys in values and a named parameter dictionary for each registered command. No-argument commands accept null or an empty dictionary. Required parameter counts, names, types and local bounds must match exactly; duplicate command IDs and malformed matching parameters are rejected before any host preparation. Unknown controls retain the reference's -6735 per-IID error. Mixed known/unknown batches return accepted results plus unknown errors. Transaction IDs retain the existing signed-integer/null echo contract.
+
+prepare_control receives copied arguments in descriptor order and fills copied response values in descriptor order. It must be pure: no actuator operation or other side effect, because it can run again after output exhaustion or input retry. A false result returns local ESTATE; an invalid response schema/value returns EINVAL. These paths do not invent a per-command phone error code. If any registered command is refused or invalid, none of the batch's post-commit callbacks run. Pure preparations before a later preparation refusal may already have run.
+
+Only after the entire response fits and serializes successfully does did_control run for each accepted command in request order. A command with no response parameters returns null; otherwise its result is a dictionary of declared response names and typed values. Status reports registered controls and committed_controls, cumulative until model destruction. Commit means serialization and local handoff, not response delivery or vehicle feedback. Read-only controls may omit did_control.
+
+There is no inferred exactly-once execution policy: a repeated valid request can commit again. A host must use its established transaction/actuator contract for non-idempotent operations. This processor does not add guessed replay windows, timeout rules or physical state feedback. Session reset preserves control registration/cumulative statistics while retaining the existing value/subscription reset behavior.
+
+Receiver composition keeps a successfully serialized response when transport queues fill; retrying those retained bytes does not re-run preparation/commit. If another request arrives while the previous retained response cannot be queued, the existing Receiver refuses it before processor entry. A malformed/refused control retires only its request lane under the existing application-refusal policy; a fresh lane must use a fresh transport seed. A response lost after local commit cannot roll back an actual host action.
+
+## Host evidence and remaining acceptance
+
+The dedicated unit test checks copied descriptors/names, duplicate/colliding/unknown-service IDs, missing preparation callback, parameter counts/formats/bounds, malformed batches rejected before preparation, pure refusal, invalid prepared output, every request truncation and insufficient output capacity, mixed known/unknown responses, binary response values, both lanes and reset retention. Independent Python code encodes incoming OPACK fixtures, decodes outgoing OPACK and uses plistlib to verify the actual generated service catalogue plus reordered and mismatching metadata.
+
+The --vehicle-controls public Receiver scenario uses real TCP, Pair-Verify, ControlCipher and both Vehicle lanes. It executes the typed mixed batch on both lanes, refuses a malformed later command without committing the earlier one, verifies a surviving HIGH read, reopens with a fresh seed and accepts another command, then continues existing notification, Classic audio/video and controller-reconnect regression. These synthetic IDs and payloads do not establish real-iPhone Vehicle control interoperability, official catalogue semantics or actual actuation. Full-scope L1 remains PARTIAL and L2-L5/official acceptance remain NOT_RUN.

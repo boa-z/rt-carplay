@@ -122,7 +122,7 @@ if(RTCP_BUILD_TESTS)
         test_lockdown test_plist test_lockdown_pair
         test_lockdown_tls test_lockdown_session
         test_port_linux test_input_bridge
-        test_media_timestamp test_display test_opack test_vehicle test_ui_sync test_airplay_data_stream
+        test_media_timestamp test_display test_opack test_vehicle test_vehicle_controls test_ui_sync test_airplay_data_stream
     )
 
     set(RTCP_PORT_TESTS
@@ -170,11 +170,15 @@ if(RTCP_BUILD_TESTS)
         COMMAND test_airplay_pairing_e2e --alt-video)
     add_test(NAME test_receiver_alt_video_null_e2e
         COMMAND test_airplay_pairing_e2e --alt-video-null)
+    add_test(NAME test_receiver_vehicle_controls_e2e
+        COMMAND test_airplay_pairing_e2e --vehicle-controls)
     add_test(NAME test_receiver_vehicle_e2e
         COMMAND test_airplay_pairing_e2e --vehicle)
     add_test(NAME test_receiver_ultra_applications_e2e
         COMMAND test_airplay_pairing_e2e --ultra-apps)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME test_vehicle_controls_independent_wire
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_vehicle_controls_wire.py $<TARGET_FILE:test_vehicle_controls>)
     add_test(NAME test_vehicle_info_independent_wire
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_vehicle_info_wire.py $<TARGET_FILE:test_airplay_info_plist>)
     add_test(NAME test_ui_info_independent_wire

@@ -1346,6 +1346,7 @@ static int data_listen(uint8_t family, uint16_t port)
     return rtcp_net_linux.listen(family, port);
 }
 #include "vehicle_test_wire.h"
+#include "vehicle_control_test_model.h"
 #include "ui_sync_test_fixtures.h"
 static bool block_server_send;
 static int data_send(int fd, const void *bytes, size_t length)
@@ -1523,7 +1524,10 @@ static void vehicle_exchange(int fd, airplay_control_cipher_t *cipher,
     int64_t expected_value)
 {
     uint8_t packet[1024] = {0}, sealed[1200], plain[4096]; size_t length;
-    size_t body = vehicle_test_request(request_command, write, value, packet+32, sizeof(packet)-32);
+    bool control=!strcmp(request_command,"controlRequest");
+    size_t body;
+    if (control) { body=sizeof(control_mixed); memcpy(packet+32,control_mixed,body); }
+    else body = vehicle_test_request(request_command, write, value, packet+32, sizeof(packet)-32);
     write_be32(packet, (uint32_t)(body+32)); memcpy(packet+4, "sync", 4);
     memcpy(packet+16, "comm", 4); write_be64(packet+20, 0x9988776655443322ULL);
     assert(airplay_control_cipher_encrypt(cipher, packet, body+32, sealed, sizeof(sealed), &length) == AIRPLAY_CONTROL_CIPHER_OK);
@@ -1541,6 +1545,7 @@ static void vehicle_exchange(int fd, airplay_control_cipher_t *cipher,
     assert(received == needed && !memcmp(plain+4, "rply", 4) && !memcmp(plain+20, packet+20, 8));
     assert(!memcmp(plain+36, "asyn", 4) && !memcmp(plain+48, "cmnd", 4));
     vehicle_test_reply(plain+64, received-64, response_command, true, expected_value);
+    if (control) vehicle_control_test_reply(plain+64,received-64);
 }
 static void run_vehicle_processor(client_t *client, const uint8_t shared[32], uint32_t *cseq,
     rtcp_vehicle_t *vehicle, bool raw_ui)
@@ -1551,6 +1556,13 @@ static void run_vehicle_processor(client_t *client, const uint8_t shared[32], ui
         fd[k] = connect_data(port, (rtcp_data_stream_kind_t)k); cipher[k] = data_phone_cipher(shared, 7400+k);
     }
     vehicle_exchange(fd[0], cipher[0], "configRequest", false, 0, "configResponse", -1);
+    rtcp_vehicle_status_t model_status; assert(rtcp_vehicle_status(vehicle,&model_status)==RTCP_OK);
+    if (model_status.controls) {
+        unsigned before=control_commits;
+        vehicle_exchange(fd[0],cipher[0],"controlRequest",false,0,"controlResponse",-1);
+        vehicle_exchange(fd[1],cipher[1],"controlRequest",false,0,"controlResponse",-1);
+        assert(control_commits==before+4);
+    }
     vehicle_exchange(fd[0], cipher[0], "readRequest", false, 0, "readResponse", 7);
     vehicle_exchange(fd[1], cipher[1], "writeRequest", true, 41, "writeResponse", -1);
     vehicle_exchange(fd[0], cipher[0], "registerRequest", false, 0, "registerResponse", 41);
@@ -1585,6 +1597,25 @@ static void run_vehicle_processor(client_t *client, const uint8_t shared[32], ui
         request_data_teardown(client, cseq, ui_id);
         rtcp_net_linux.close(ui_fd); airplay_control_cipher_destroy(ui_cipher);
         assert(data_messages[2] == 1 && data_closes[2] == 1);
+    }
+    if (model_status.controls) {
+        uint8_t packet[512]={0},sealed[600];size_t bytes;
+        write_be32(packet,sizeof(control_late_invalid)+32); memcpy(packet+4,"asyn",4); memcpy(packet+16,"comm",4);
+        memcpy(packet+32,control_late_invalid,sizeof(control_late_invalid));
+        unsigned before=control_commits;
+        assert(airplay_control_cipher_encrypt(cipher[0],packet,sizeof(control_late_invalid)+32,sealed,sizeof(sealed),&bytes)==AIRPLAY_CONTROL_CIPHER_OK);
+        assert(rtcp_net_linux.send(fd[0],sealed,bytes)==(int)bytes);
+        uint64_t start=rtcp_os_linux.now_ms();
+        while (data_status(RTCP_DATA_STREAM_VEHICLE).state!=RTCP_DATA_STREAM_FAILED && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS)
+            receiver_poll(e2e_receiver,10);
+        assert(data_status(RTCP_DATA_STREAM_VEHICLE).state==RTCP_DATA_STREAM_FAILED && control_commits==before);
+        vehicle_exchange(fd[1],cipher[1],"readRequest",false,0,"readResponse",42);
+        assert(receiver_connected(e2e_receiver) && receiver_authenticated(e2e_receiver));
+        rtcp_net_linux.close(fd[0]);airplay_control_cipher_destroy(cipher[0]);
+        uint16_t reopened=request_data(client,cseq,RTCP_DATA_STREAM_VEHICLE,7450,200,&id[0]);
+        fd[0]=connect_data(reopened,RTCP_DATA_STREAM_VEHICLE);cipher[0]=data_phone_cipher(shared,7450);
+        vehicle_exchange(fd[0],cipher[0],"controlRequest",false,0,"controlResponse",-1);
+        assert(control_commits==before+2);
     }
     request_data_teardown(client, cseq, 0);
     for (unsigned k = 0; k < 2; ++k) { rtcp_net_linux.close(fd[k]); airplay_control_cipher_destroy(cipher[k]); }
@@ -2161,9 +2192,10 @@ int main(int argc, char **argv)
 {
     bool null_alt = argc == 2 && !strcmp(argv[1], "--alt-video-null");
     bool alt_mode = null_alt || (argc == 2 && !strcmp(argv[1], "--alt-video"));
+    bool controls_mode=argc==2 && !strcmp(argv[1],"--vehicle-controls");
     bool ui_mode = argc == 2 && !strcmp(argv[1], "--ultra-apps");
-    bool vehicle_mode = ui_mode || (argc == 2 && !strcmp(argv[1], "--vehicle"));
-    rtcp_vehicle_t *vehicle = vehicle_mode ? vehicle_test_create() : NULL;
+    bool vehicle_mode = controls_mode || ui_mode || (argc == 2 && !strcmp(argv[1], "--vehicle"));
+    rtcp_vehicle_t *vehicle = controls_mode ? vehicle_control_test_create() : vehicle_mode ? vehicle_test_create() : NULL;
     rtcp_ui_sync_t *ui=NULL;
     if (ui_mode) {
         rtcp_ui_sync_config_t config={.struct_size=sizeof(config),.display_uuid="b7e6c5a0-1111-4000-8000-000000000001",
@@ -2393,6 +2425,7 @@ int main(int argc, char **argv)
     assert(volume_events == 1U);
     assert(event_transitions == 4U);
     if (!vehicle_mode) assert(data_closes[0] == 2 && data_closes[1] == 2 && data_closes[2] == 2);
+    if (controls_mode) puts("Vehicle controls: authenticated normal/HIGH commands, response values, invalid-batch isolation, fresh-lane recovery and Classic media PASS");
     if (alt_mode) puts("alternate video: authenticated concurrent independent H.264 TCP, teardown/reuse, listener failure, wrong key, bad tag, EOF, Main-loss and stop/start passed");
     puts(ui_mode ? "airplay Ultra applications: authenticated Vehicle State and UI Sync, four-message negotiation, queue exhaustion/reopen, channel isolation and Classic media passed" :
         vehicle_mode ? "airplay vehicle end-to-end: authenticated config/read/write/register, HIGH notification/reopen, session reset and Classic media passed" :

@@ -53,6 +53,28 @@ typedef struct {
     rtcp_vehicle_value_t initial;
 } rtcp_vehicle_characteristic_t;
 
+/* Optional service-level controls, described using LIVI's sender/hasResponse
+ * and named parameter arrays. IDs/types belong to the actual host, not SDK.
+ * Parameters are required, ordered by the descriptor and copied on delivery. */
+#define RTCP_VEHICLE_MAX_CONTROLS 4U
+#define RTCP_VEHICLE_MAX_CONTROL_PARAMETERS 4U
+#define RTCP_VEHICLE_MAX_PARAMETER_NAME 32U
+typedef struct {
+    const char *name;
+    rtcp_vehicle_format_t format;
+    size_t maximum_length; /* STRING/DATA only, 1..MAX_VALUE_BYTES. */
+} rtcp_vehicle_control_parameter_t;
+typedef struct {
+    int64_t service_iid, iid, type;
+    bool urgent;
+    const rtcp_vehicle_control_parameter_t *request, *response;
+    size_t request_count, response_count;
+} rtcp_vehicle_control_t;
+typedef struct {
+    size_t count;
+    rtcp_vehicle_value_t values[RTCP_VEHICLE_MAX_CONTROL_PARAMETERS];
+} rtcp_vehicle_control_values_t;
+
 /* validate_write is a pure policy check; return false to refuse a phone write.
  * did_write runs only after the response fits and the new value is committed.
  * Neither callback implies actual vehicle actuation or feedback. */
@@ -65,6 +87,18 @@ typedef struct {
     bool (*validate_write)(void *, int64_t, const rtcp_vehicle_value_t *);
     void (*did_write)(void *, int64_t, const rtcp_vehicle_value_t *);
     void *context;
+    const rtcp_vehicle_control_t *controls;
+    size_t control_count;
+    /* Required with controls: pure preparation, no actuation/reentry. Receives
+     * copied typed arguments and fills response values in descriptor order.
+     * false refuses locally (ESTATE), without inventing a wire error code.
+     * May run again after output exhaustion; must not produce side effects. */
+    bool (*prepare_control)(void *, int64_t, const rtcp_vehicle_control_values_t *,
+                            rtcp_vehicle_control_values_t *);
+    /* Optional post-serialization commit; parameters borrowed until return.
+     * No callback on malformed input, refusal or encoding failure. A response
+     * proves no actuation, phone receipt or duplicate suppression. */
+    void (*did_control)(void *, int64_t, const rtcp_vehicle_control_values_t *);
 } rtcp_vehicle_config_t;
 
 typedef struct rtcp_vehicle rtcp_vehicle_t;
@@ -72,6 +106,8 @@ typedef struct {
     size_t characteristics, subscribed, pending_notifications;
     uint32_t requests, rejected_messages, committed_writes, refused_writes;
     uint32_t notifications;
+    size_t controls;
+    uint32_t committed_controls;
 } rtcp_vehicle_status_t;
 
 /* Receiver-owned delivery workspace; counters are cumulative until destroy.

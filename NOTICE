@@ -79,6 +79,8 @@ The bounded duplex DataStream implementation in airplay_data_stream.c also
 adapts APTransportPackage framing and sync replies from LIVI iap_tunnel.rs.
 Receiver Type 130 UUID routing and phone feature gating also reference LIVI
 stack/data_streams.rs and stack/setup.rs at the same revision.
+The internal two-video session dispatch references the independent Main/cluster
+receiver routing in LIVI stack/setup.rs; it does not include a second renderer.
 The bounded UI Sync state machine and nested plist messages reference LIVI
 ui_sync.rs, including its public synthetic reset/layout test scenario.
 LIVI is GPL-3.0-or-later with an additional GPL section 7(b) attribution

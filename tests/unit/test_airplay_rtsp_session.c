@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "../fixtures/audio/session-fixtures.h"
+#include "video_session_fixtures.h"
+
+static bool dump_video;
 
 static const uint8_t k_setup_plist[] = {
     0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
@@ -123,6 +126,10 @@ typedef struct {
     unsigned event_stops;
     unsigned timing_stops;
     unsigned screen_starts;
+    unsigned video_starts[2], video_stops[2];
+    uint64_t video_key[2];
+    uint16_t fail_video, zero_video;
+    bool fail_audio;
     unsigned screen_stops;
     unsigned audio_starts;
     unsigned audio_stops;
@@ -250,7 +257,7 @@ static bool test_start_audio(const airplay_rtsp_pairing_t *pairing,
     ports->last_audio_format_bits = audio_format_bits;
     *data_port = (uint16_t)(41000U + stream_type * 2U);
     *control_port = (uint16_t)(41001U + stream_type * 2U);
-    return true;
+    return !ports->fail_audio;
 }
 
 static void test_stop_audio(uint16_t stream_type, void *context)
@@ -1231,8 +1238,178 @@ static void test_iap_runtime_and_commands(void)
     airplay_rtsp_session_destroy(session);
     assert(iap_stops==1);
 }
-int main(void)
+static bool test_start_video(const airplay_rtsp_pairing_t *pairing, uint16_t type,
+    uint64_t connection, uint16_t requested, uint16_t *port, void *context)
 {
+    (void)pairing;
+    assert(type==110 || type==111);
+    unsigned slot=type-110U;
+    test_ports_t *p=context;
+    assert(requested==(slot ? 43111 : 43110));
+    ++p->video_starts[slot]; p->video_key[slot]=connection;
+    *port=p->zero_video==type ? 0 : (uint16_t)(42000+type);
+    return p->fail_video!=type;
+}
+static void test_stop_video(uint16_t type, void *context)
+{
+    assert(type==110 || type==111);
+    ++((test_ports_t *)context)->video_stops[type-110U];
+}
+static airplay_rtsp_session_t *new_video_session(test_ports_t *ports, bool extended)
+{
+    static const uint8_t identifier[]="test-video-accessory", public_key[32]={0};
+    airplay_rtsp_session_config_t config={0};
+    config.pairing.pair_setup.pairing_code="external-test-code";
+    config.pairing.pair_setup.accessory_identifier=identifier;
+    config.pairing.pair_setup.accessory_identifier_len=sizeof(identifier)-1;
+    config.pairing.pair_setup.accessory_public_key=public_key;
+    config.pairing.pair_setup.random=test_random;
+    config.pairing.pair_setup.sign_accessory=test_sign;
+    config.pairing.pair_setup.verify_controller=test_verify;
+    config.pairing.pair_setup.save_pairing=test_save;
+    config.pairing.pair_verify.accessory_identifier=identifier;
+    config.pairing.pair_verify.accessory_identifier_len=sizeof(identifier)-1;
+    config.pairing.pair_verify.random=test_random;
+    config.pairing.pair_verify.sign_accessory=test_sign;
+    config.pairing.pair_verify.verify_controller=test_verify;
+    config.pairing.pair_verify.lookup_controller=test_lookup;
+    config.info_plist=k_setup_plist; config.info_plist_len=sizeof(k_setup_plist);
+    config.start_event=test_start_event; config.start_timing=test_start_timing;
+    config.stop_event=test_stop_event; config.stop_timing=test_stop_timing;
+    config.start_screen=test_start_screen; config.stop_screen=test_stop_screen;
+    config.start_audio=test_start_audio; config.stop_audio=test_stop_audio;
+    config.screen_requested_port=43110; config.alt_screen_requested_port=43111;
+    config.media_context=ports;
+    airplay_rtsp_session_t *session=NULL;
+    if (extended) {
+        config.start_video=test_start_video;
+        assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT && !session);
+        config.start_video=NULL; config.stop_video=test_stop_video;
+        assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT && !session);
+        config.start_video=test_start_video;
+    }
+    assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_OK);
+    return session;
+}
+static void video_request(airplay_rtsp_session_t *session, const char *method,
+    const uint8_t *body, size_t length, const char *status, const char *tag)
+{
+    uint8_t response[AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES]; size_t bytes; bool cipher=false;
+    airplay_rtsp_request_t request=parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+    snprintf(request.method,sizeof(request.method),"%s",method);
+    request.body=body; request.body_len=length;
+    assert(airplay_rtsp_session_handle(session,&request,response,sizeof(response),&bytes,&cipher)==AIRPLAY_RTSP_SESSION_OK);
+    if (!contains_bytes(response,bytes,status))
+        fprintf(stderr,"two-video %s: expected %s, response %.36s\n",method,status,(char *)response);
+    assert(contains_bytes(response,bytes,status));
+    if (dump_video && tag) {
+        const uint8_t *plist=find_bytes(response,bytes,"bplist00"); assert(plist);
+        printf("VIDEOSETUP %s ",tag);
+        for (size_t i=(size_t)(plist-response);i<bytes;++i) printf("%02x",response[i]);
+        puts("");
+    }
+}
+#define VIDEO_REQUEST(s,method,fixture,status,tag) \
+    video_request(s,method,k_video_##fixture,sizeof(k_video_##fixture),status,tag)
+static void test_two_video_sessions(void)
+{
+    test_ports_t ports={0};
+    airplay_rtsp_session_t *session=new_video_session(&ports,true);
+    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
+    assert(!ports.video_starts[0] && !ports.video_starts[1]);
+    VIDEO_REQUEST(session,"SETUP",initial,"200 OK","initial");
+    VIDEO_REQUEST(session,"SETUP",duplicate,"400 Bad Request",NULL);
+    VIDEO_REQUEST(session,"SETUP",collision,"400 Bad Request",NULL);
+    VIDEO_REQUEST(session,"SETUP",video_audio_collision,"400 Bad Request",NULL);
+    assert(!ports.video_starts[0] && !ports.video_starts[1]);
+    VIDEO_REQUEST(session,"SETUP",pair,"200 OK","pair");
+    assert(ports.video_starts[0]==1 && ports.video_starts[1]==1);
+    assert(ports.video_key[0]==200 && ports.video_key[1]==201);
+    VIDEO_REQUEST(session,"SETUP",pair,"200 OK",NULL);
+    assert(ports.video_starts[0]==1 && ports.video_starts[1]==1);
+    VIDEO_REQUEST(session,"SETUP",live_collision,"503 Service Unavailable",NULL);
+    VIDEO_REQUEST(session,"TEARDOWN",stale_alt_teardown,"200 OK",NULL);
+    assert(!ports.video_stops[0] && !ports.video_stops[1]);
+    VIDEO_REQUEST(session,"SETUP",replaced_alt,"200 OK",NULL);
+    assert(ports.video_stops[1]==1 && ports.video_starts[1]==2 && !ports.video_stops[0]);
+    VIDEO_REQUEST(session,"TEARDOWN",alt,"200 OK",NULL); /* Old ID cannot retire replacement. */
+    assert(ports.video_stops[1]==1);
+    VIDEO_REQUEST(session,"TEARDOWN",alt_type_teardown,"200 OK",NULL);
+    assert(ports.video_stops[1]==2 && !ports.video_stops[0]);
+    VIDEO_REQUEST(session,"SETUP",alt,"503 Service Unavailable",NULL);
+    VIDEO_REQUEST(session,"SETUP",replaced_alt,"503 Service Unavailable",NULL);
+    VIDEO_REQUEST(session,"SETUP",fresh_pair,"200 OK",NULL);
+    assert(ports.video_starts[0]==2 && ports.video_starts[1]==3);
+    assert(ports.video_stops[0]==1 && ports.video_stops[1]==2);
+    uint8_t tiny[32]; size_t bytes; bool cipher=false;
+    airplay_rtsp_request_t request=parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 2\r\n\r\n");
+    request.body=k_video_other_pair; request.body_len=sizeof(k_video_other_pair);
+    assert(airplay_rtsp_session_handle(session,&request,tiny,sizeof(tiny),&bytes,&cipher)!=AIRPLAY_RTSP_SESSION_OK);
+    assert(ports.video_starts[0]==3 && ports.video_starts[1]==4);
+    assert(ports.video_stops[0]==3 && ports.video_stops[1]==4);
+    VIDEO_REQUEST(session,"SETUP",other_pair,"503 Service Unavailable",NULL);
+    video_request(session,"TEARDOWN",NULL,0,"200 OK",NULL);
+    airplay_rtsp_session_destroy(session);
+    assert(ports.video_stops[0]==3 && ports.video_stops[1]==4);
+    assert(!ports.screen_starts && !ports.screen_stops); /* No legacy alias. */
+
+    ports=(test_ports_t){.fail_video=111}; session=new_video_session(&ports,true);
+    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
+    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
+    assert(ports.video_starts[0]==1 && ports.video_stops[0]==1 && ports.video_starts[1]==1 && !ports.video_stops[1]);
+    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
+    assert(ports.video_starts[0]==1 && ports.video_starts[1]==1);
+    ports.fail_video=0;
+    VIDEO_REQUEST(session,"SETUP",fresh_pair,"200 OK",NULL);
+    airplay_rtsp_session_destroy(session);
+    assert(ports.video_stops[0]==2 && ports.video_stops[1]==1);
+
+    ports=(test_ports_t){.zero_video=111}; session=new_video_session(&ports,true);
+    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
+    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
+    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+    airplay_rtsp_session_destroy(session);
+    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+
+    ports=(test_ports_t){.fail_video=111}; session=new_video_session(&ports,true);
+    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
+    VIDEO_REQUEST(session,"SETUP",main,"200 OK",NULL);
+    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
+    assert(ports.video_starts[0]==1 && !ports.video_stops[0]); /* Idempotent Main survives. */
+    airplay_rtsp_session_destroy(session);
+    assert(ports.video_stops[0]==1 && !ports.video_stops[1]);
+
+    ports=(test_ports_t){.fail_video=110}; session=new_video_session(&ports,true);
+    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
+    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
+    assert(ports.video_starts[0]==1 && !ports.video_starts[1]);
+    ports.fail_video=0;
+    VIDEO_REQUEST(session,"SETUP",alt,"503 Service Unavailable",NULL); /* Reserved unused sibling key stays retired. */
+    VIDEO_REQUEST(session,"SETUP",fresh_pair,"200 OK",NULL);
+    airplay_rtsp_session_destroy(session);
+    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+
+    ports=(test_ports_t){.fail_audio=true}; session=new_video_session(&ports,true);
+    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
+    VIDEO_REQUEST(session,"SETUP",pair_audio,"503 Service Unavailable",NULL);
+    assert(ports.audio_starts==1 && ports.video_stops[0]==1 && ports.video_stops[1]==1);
+    VIDEO_REQUEST(session,"SETUP",pair_audio,"503 Service Unavailable",NULL);
+    assert(ports.audio_starts==1 && ports.video_starts[0]==1 && ports.video_starts[1]==1);
+    airplay_rtsp_session_destroy(session);
+    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+
+    ports=(test_ports_t){0}; session=new_video_session(&ports,false);
+    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
+    VIDEO_REQUEST(session,"SETUP",alt,"200 OK","legacy");
+    airplay_rtsp_session_destroy(session);
+    assert(!ports.screen_starts && !ports.screen_stops && !ports.video_starts[1]);
+}
+#undef VIDEO_REQUEST
+
+int main(int argc, char **argv)
+{
+    dump_video=argc==2 && !strcmp(argv[1],"--dump");
+    test_two_video_sessions();
     test_iap_runtime_and_commands();
     test_info_and_setup_gates();
     test_initial_setup_timing_and_event_ports();

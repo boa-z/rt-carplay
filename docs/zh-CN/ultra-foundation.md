@@ -42,7 +42,7 @@ Host 测试覆盖独立 TCP/加密帧/包分片、65,536 字节包体、短 sync
 
 ## Receiver 注册及 SETUP 生命周期
 
-公共 rtcp/data_stream.h 接口与 Receiver 配置接收显式通道掩码、完整包体处理器及可选关闭处理器。注册为零时保留 Classic 行为。三类传输对应 Vehicle State 普通/高优先级和 UI Sync UUID。注册不会自动生成应用协议、enabledFeatures 项、vehicleStateProtocolInfo、uiSyncInfo 或 displayPanels 声明。集成宿主只能注册已实现的处理器，D213 开发配置当前仍不注册任何此类处理器。可选 Vehicle State 和 UI Sync 应用处理器接入均已实现，两者都不自动生成能力声明。
+公共 rtcp/data_stream.h 接口与 Receiver 配置接收显式通道掩码、完整包体处理器及可选关闭处理器。注册为零时保留 Classic 行为。三类传输对应 Vehicle State 普通/高优先级和 UI Sync UUID。注册不会自动生成应用协议、enabledFeatures 项、vehicleStateProtocolInfo、uiSyncInfo 或 displayPanels 声明。集成宿主只能注册已实现的处理器。D213 专用 Ultra 开发配置现单独选择接入明确标注 SIMULATED 的发动机 Vehicle State 处理器，普通 Classic 配置保持不接入。可选 Vehicle State 和 UI Sync 应用处理器接入均已实现，两者都不自动生成能力声明。
 
 仅在初始手机 SETUP 成功后保存能力提议快照。已注册通道还要求对应的 vehicleStateProtocol 或 uiSync 提议、完成 Pair-Verify、活动的加密控制连接及初始 SETUP，缺失或无效前提会拒绝建立。每次 Type 130 SETUP 当前只包含一条流，与原有 iAP 限制一致；混合/批量 Type 130 请求在启动端点前被拒绝。分别发送请求可以同时建立三条通道，各自拥有独立端口、流 ID、密钥、加密计数器、队列及状态。iAP 保留 streamID 1，注册传输采用递增且大于一的 ID。完全一致的活动 SETUP 返回原有端点，不能通过改变 seed 或连接元数据隐式替换。
 
@@ -54,7 +54,7 @@ rtcp_receiver_send_data_stream 将包体复制到指定已连接队列，区分�
 
 ## Vehicle State Receiver 集成
 
-将借用的处理器赋给 rtcp_receiver_config_t.vehicle，可同时安装两条 Vehicle State 通道的应用处理器。处理器仅接入一个 Receiver，保留到 Receiver 销毁，并由 Receiver 所有者串行访问。与任一车辆通道重叠的原始注册会被拒绝；独立原始 UI Sync 后端仍可使用。不提供处理器时保持 Classic 路由和回调，不分配车辆发送缓冲区。显式接入在堆上分配约 48 KiB 的有界发送缓冲区，不会声明 /info 能力。D213 配置尚未接入处理器。
+将借用的处理器赋给 rtcp_receiver_config_t.vehicle，可同时安装两条 Vehicle State 通道的应用处理器。处理器仅接入一个 Receiver，保留到 Receiver 销毁，并由 Receiver 所有者串行访问。与任一车辆通道重叠的原始注册会被拒绝；独立原始 UI Sync 后端仍可使用。不提供处理器时保持 Classic 路由和回调，不分配车辆发送缓冲区。显式接入在堆上分配约 48 KiB 的有界发送缓冲区，不会声明 /info 能力。处理器接入是宿主显式策略，与原始传输注册独立。
 
 认证后的 Type 130 请求进入 config/read/write/register 处理器，响应沿请求通道返回。每条通道可在传输队列之外保留一个编码响应。队列耗尽时保留原始响应字节，在 Receiver poll 中重试。如果该通道已有响应仍无法排队又收到新请求，则在处理新请求前明确拒绝并关闭通道。已提交的写入不会因随后断连而回滚；传输 ACK、应用响应和实际执行始终不同。畸形或不支持的应用消息会明确关闭该通道。
 
@@ -83,5 +83,7 @@ SDK Host 测试在 ASan/UBSan 下覆盖 LIVI configRequest 字节样本、负事
 L1 仍为部分完成，Vehicle State 和 UI Sync Receiver 集成均有加密 Host 覆盖，Vehicle State 能力生成和协商现已显式门控，单 Main Display UI Sync 实验门控现已检查已绑定目录和匹配元数据，实际宿主资产/渲染/呈现仍未完成。注册 Type 130 传输已有加密 Host SETUP 覆盖，尚未由真实手机验证。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
 
 ## 后续实现
+
+内部[双视频 RTSP 会话分派](video-stream-session.md)现已分离 Type 110 和实验性 Type 111 生命周期/端口，并共享密钥预留台账，仅显式配对的内部回调会使用该路径；生产 server 和公共 Receiver 仍接入原有 Main 链路。Host 回调/独立 plist 测试不能证明第二个加密监听、独立媒体接收或 L5。公共组合、端点/统计/故障隔离、匹配元数据/altScreen 协商及真实 iPhone 验证仍待实现。
 
 [UI Sync 实验能力门控](ui-sync-capabilities.md)现已检查接入处理器、已绑定目录和匹配单 Main Display 元数据。后续仍需真实宿主资产/渲染器/呈现集成及手机验证，包括元数据提供时机、显示/plugin/车辆关系。UI Sync 模型现已复制有界宿主目录并拒绝不支持的布局、调色板和区域/组件组合，绑定不会自行声明能力。[UI Sync 状态/ACK 和 Receiver 集成](ui-sync.md)已有独立 plistlib 消息验证与加密应用协议测试，覆盖队列耗尽及通道隔离。现有 iAP 隧道保持原样且仅接收。宿主可显式将 Vehicle State 处理器接入 Receiver，接入不会在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。

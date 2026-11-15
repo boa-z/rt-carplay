@@ -87,6 +87,18 @@ typedef struct {
     bool (*start_data_stream)(const airplay_rtsp_pairing_t *, rtcp_data_stream_kind_t,
                               uint64_t seed, uint32_t stream_id, uint16_t *, void *);
     void (*stop_data_stream)(rtcp_data_stream_kind_t, void *);
+    /* Internal experimental multi-video backend. Both callbacks are required.
+     * When supplied they own Type 110 and Type 111 independently; the legacy
+     * start_screen/stop_screen remain unchanged when absent. This hook alone
+     * neither declares a second display nor negotiates altScreen. No public
+     * Receiver opt-in, second listener, HEVC or official Ultra is implied.
+     * Start must clean its partial resources before returning false. A true
+     * result with port zero is refused and followed by stop for that type. */
+    bool (*start_video)(const airplay_rtsp_pairing_t *, uint16_t stream_type,
+                        uint64_t connection_id, uint16_t requested_port,
+                        uint16_t *bound_port, void *);
+    void (*stop_video)(uint16_t stream_type, void *);
+    uint16_t alt_screen_requested_port;
 } airplay_rtsp_session_config_t;
 
 typedef enum {

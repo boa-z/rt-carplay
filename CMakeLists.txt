@@ -177,6 +177,8 @@ if(RTCP_BUILD_TESTS)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_ui_info_wire.py $<TARGET_FILE:test_airplay_info_plist>)
     add_test(NAME test_ui_sync_independent_wire
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_ui_sync_wire.py $<TARGET_FILE:test_ui_sync>)
+    add_test(NAME test_video_session_independent_wire
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_video_session_wire.py $<TARGET_FILE:test_airplay_rtsp_session>)
 endif()
 
 if(RTCP_BUILD_TESTS)

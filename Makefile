@@ -144,6 +144,7 @@ check: all check-public-api check-docs
 	./$(BUILD)/test_airplay_pairing_e2e --vehicle || status=1; \
 	./$(BUILD)/test_airplay_pairing_e2e --ultra-apps || status=1; \
 	python3 tests/check_ui_sync_wire.py $(BUILD)/test_ui_sync || status=1; \
+	python3 tests/check_video_session_wire.py $(BUILD)/test_airplay_rtsp_session || status=1; \
 	python3 tests/check_vehicle_info_wire.py $(BUILD)/test_airplay_info_plist || status=1; \
 	python3 tests/check_ui_info_wire.py $(BUILD)/test_airplay_info_plist || status=1; \
 	./check-boundary.sh || status=1; \

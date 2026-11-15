@@ -1672,7 +1672,12 @@ static void run_ui_processor(client_t *client, const uint8_t shared[32], uint32_
     fd=connect_data(port,RTCP_DATA_STREAM_UI_SYNC); cipher=data_phone_cipher(shared,7510);
     ui_handshake(fd,cipher,ui);
     ui_exchange(fd,cipher,UI_FIXTURE_no_ack,NULL,0);
-    assert(ui_status(ui).phone_appearance==RTCP_UI_SYNC_DARK);
+    assert(ui_status(ui).phone_appearance==RTCP_UI_SYNC_DARK && ui_status(ui).pending_choices==1);
+    rtcp_ui_sync_choice_t choice;
+    assert(rtcp_ui_sync_peek_choice(ui,&choice)==RTCP_OK && choice.kind==RTCP_UI_SYNC_CHOICE_APPEARANCE);
+    assert(choice.appearance==RTCP_UI_SYNC_DARK && choice.sequence==7 && choice.session==1);
+    assert(choice.generation==ui_status(ui).choice_generation && rtcp_ui_sync_consume_choice(ui)==RTCP_OK);
+    uint64_t consumed_generation=choice.generation;
     send_ui_fixture(fd,cipher,UI_FIXTURE_basic,true,true);
     start=rtcp_os_linux.now_ms();
     while (data_status(RTCP_DATA_STREAM_UI_SYNC).state!=RTCP_DATA_STREAM_FAILED && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS)
@@ -1704,7 +1709,42 @@ static void run_ui_processor(client_t *client, const uint8_t shared[32], uint32_
     ui_exchange(fd,cipher,UI_FIXTURE_layout,ack,1);
     ui_exchange(fd,cipher,UI_FIXTURE_palette,ack,1);
     assert(!strcmp(ui_status(ui).phone_layout,"DB7C6944") && !strcmp(ui_status(ui).phone_palette,"red"));
+    assert(ui_status(ui).choice_generation>consumed_generation && ui_status(ui).pending_choices==3);
+    for (unsigned i=0;i<3;++i) {
+        assert(rtcp_ui_sync_peek_choice(ui,&choice)==RTCP_OK && !strcmp(choice.layout_id,"DB7C6944"));
+        assert(choice.kind==(i ? RTCP_UI_SYNC_CHOICE_PALETTE : RTCP_UI_SYNC_CHOICE_LAYOUT));
+        assert(choice.sequence==(i==2 ? 4U : 3U) && choice.session==1);
+        assert(choice.generation==ui_status(ui).choice_generation);
+        if (i) assert(!strcmp(choice.palette_id,i==2 ? "red" : "dark"));
+        assert(rtcp_ui_sync_consume_choice(ui)==RTCP_OK);
+    }
+    consumed_generation=choice.generation;
     request_data_teardown(client,cseq,id); rtcp_net_linux.close(fd); airplay_control_cipher_destroy(cipher);
+
+    /* A slow host renderer can fill its copied-choice FIFO even while the
+     * transport drains normally. Refuse the next command before application
+     * state/ACK commit, retire only UI, and count the undelivered choices. */
+    port=request_data(client,cseq,RTCP_DATA_STREAM_UI_SYNC,7532,200,&id);
+    fd=connect_data(port,RTCP_DATA_STREAM_UI_SYNC); cipher=data_phone_cipher(shared,7532);
+    ui_handshake(fd,cipher,ui);
+    assert(ui_status(ui).choice_generation>consumed_generation);
+    for (unsigned i=0;i<RTCP_UI_SYNC_MAX_CHOICES;++i)
+        ui_exchange(fd,cipher,UI_FIXTURE_choice_burst_00+i,ack,i%2 ? 0 : 1);
+    rtcp_ui_sync_status_t queued=ui_status(ui);
+    assert(queued.pending_choices==RTCP_UI_SYNC_MAX_CHOICES && !queued.pending_outputs);
+    send_ui_fixture(fd,cipher,UI_FIXTURE_choice_burst_16,false,false);
+    start=rtcp_os_linux.now_ms();
+    while (data_status(RTCP_DATA_STREAM_UI_SYNC).state!=RTCP_DATA_STREAM_FAILED && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS)
+        assert(receiver_poll(e2e_receiver,10)==RTCP_OK);
+    assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state==RTCP_DATA_STREAM_FAILED);
+    assert(rtcp_receiver_get_ui_sync_delivery_status(e2e_receiver,&delivery)==RTCP_OK);
+    assert(delivery.last_rejection==RTCP_ENOMEM && delivery.rejected_requests==3);
+    assert(!ui_status(ui).pending_choices && ui_status(ui).abandoned_choices==queued.abandoned_choices+RTCP_UI_SYNC_MAX_CHOICES);
+    assert(ui_status(ui).phone_choices==queued.phone_choices && ui_status(ui).choice_generation>queued.choice_generation);
+    assert(rtcp_ui_sync_peek_choice(ui,&choice)==RTCP_ENOENT);
+    assert(data_status(RTCP_DATA_STREAM_VEHICLE).state==RTCP_DATA_STREAM_CONNECTED);
+    vehicle_exchange(vehicle_fd,vehicle_cipher,"readRequest",false,0,"readResponse",42);
+    rtcp_net_linux.close(fd); airplay_control_cipher_destroy(cipher);
     request_data_teardown(client,cseq,vehicle_id); rtcp_net_linux.close(vehicle_fd); airplay_control_cipher_destroy(vehicle_cipher);
     /* Session destruction must also reset an unconnected fresh UI listener. */
     request_data(client,cseq,RTCP_DATA_STREAM_UI_SYNC,7520,200,&id);
@@ -1991,7 +2031,7 @@ int main(int argc, char **argv)
     rtcp_ui_sync_t *ui=NULL;
     if (ui_mode) {
         rtcp_ui_sync_config_t config={.struct_size=sizeof(config),.display_uuid="b7e6c5a0-1111-4000-8000-000000000001",
-            .allow_layout_change=true,.give_focus=true,.focus_token=12345};
+            .allow_layout_change=true,.give_focus=true,.focus_token=12345,.queue_phone_choices=true};
         assert(rtcp_ui_sync_create(&config,&ui) == RTCP_OK);
         const char *palettes[]={"blue"}, *remote_palettes[]={"dark","red"};
         rtcp_ui_sync_inventory_layout_t installed[]={

@@ -29,3 +29,5 @@ SDK 使用现有不可变会话 /info 快照，因此显式提供的 UI 元数�
 独立 LVGL 融合演示尚不满足此宿主渲染契约，因此仍不注册、不声明。完整协议范围的 L1 仍为 PARTIAL，L2 物理融合/输入和 L3-L5 真实 iPhone/Type 111 验收仍为 NOT_RUN。官方资产/运行时、完整显示/plugin/车辆组合、呈现时钟、编解码/图形可行性及官方集成/认证仍需完成。参见[整体基础](ultra-foundation.md)、[UI 状态机](ui-sync.md)和[参考渲染研究](livi-theme-review.md)。
 
 2026-11-15，完整 SDK Make 检查通过，启用 RTCP_SANITIZE 的 CMake 通过 66/66 项。Python 除 65 项元数据用例外，还独立解码了四种初始 SETUP 能力组合。以上仅为 Host 证据。
+
+需要按顺序将手机选择交给渲染器的宿主，可在 UI 模型启用 queue_phone_choices，并在 Receiver 所有者线程消费复制 FIFO。每项本地 generation 应与最新模型状态比较，重置后作废旧宿主工作。取走记录不能证明渲染或呈现，可选队列本身不满足资产/渲染器/时序契约。

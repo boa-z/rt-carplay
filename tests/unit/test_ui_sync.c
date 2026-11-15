@@ -351,10 +351,134 @@ static void inventory_validation(void)
     rtcp_ui_sync_destroy(s);
     puts("UI Sync inventory: copied ownership, identifier/geometry/duplicate bounds, alternatives, transactional local/phone rejection and reset retention passed");
 }
+static unsigned drain_outputs(rtcp_ui_sync_t *s)
+{
+    const uint8_t *bytes; size_t length; unsigned count=0;
+    while (rtcp_ui_sync_peek(s,&bytes,&length)==RTCP_OK) {
+        assert(bytes && length && rtcp_ui_sync_consume(s)==RTCP_OK); ++count;
+    }
+    return count;
+}
+static void choice_handshake(rtcp_ui_sync_t *s)
+{
+    assert(HANDLE(s,reset)==RTCP_OK && drain_outputs(s)==1);
+    assert(HANDLE(s,complete)==RTCP_OK && drain_outputs(s)==2);
+    assert(status(s).state==RTCP_UI_SYNC_READY);
+}
+static void choice_burst(rtcp_ui_sync_t *s, unsigned index)
+{
+    assert(index<18);
+    unsigned fixture=UI_FIXTURE_choice_burst_00+index;
+    assert(rtcp_ui_sync_handle(s,ui_fixtures[fixture].bytes,ui_fixtures[fixture].length)==RTCP_OK);
+    assert(drain_outputs(s)==(index%2 ? 0U : 1U));
+}
+static rtcp_ui_sync_choice_t peek_choice(rtcp_ui_sync_t *s, rtcp_ui_sync_choice_kind_t kind, uint64_t sequence)
+{
+    rtcp_ui_sync_choice_t c;
+    assert(rtcp_ui_sync_peek_choice(s,&c)==RTCP_OK);
+    assert(c.kind==kind && c.sequence==sequence && c.session==status(s).session);
+    assert(c.generation==status(s).choice_generation);
+    return c;
+}
+static void phone_choice_delivery(void)
+{
+    rtcp_ui_sync_choice_t c;
+    memset(&c,0xa5,sizeof(c));
+    assert(rtcp_ui_sync_peek_choice(NULL,&c)==RTCP_EINVAL);
+    const uint8_t *zero=(const uint8_t *)&c;
+    for (size_t i=0;i<sizeof(c);++i) assert(!zero[i]);
+    assert(rtcp_ui_sync_consume_choice(NULL)==RTCP_EINVAL);
+    rtcp_ui_sync_t *disabled=create(false);
+    assert(!status(disabled).choice_queue_enabled && !status(disabled).pending_choices);
+    assert(rtcp_ui_sync_peek_choice(disabled,&c)==RTCP_ENOTSUP);
+    assert(rtcp_ui_sync_consume_choice(disabled)==RTCP_ENOTSUP);
+    rtcp_ui_sync_destroy(disabled);
+    rtcp_ui_sync_config_t cfg={.struct_size=sizeof(cfg),.display_uuid="Cluster_Display",.queue_phone_choices=true};
+    rtcp_ui_sync_t *s; assert(rtcp_ui_sync_create(&cfg,&s)==RTCP_OK);
+    assert(status(s).choice_queue_enabled && !status(s).pending_choices && !status(s).choice_generation);
+    assert(rtcp_ui_sync_peek_choice(s,NULL)==RTCP_EINVAL);
+    assert(rtcp_ui_sync_peek_choice(s,&c)==RTCP_ENOENT && rtcp_ui_sync_consume_choice(s)==RTCP_ENOENT);
+    choice_handshake(s);
+    uint64_t generation=status(s).choice_generation; assert(generation);
+    uint8_t mutable_input[sizeof(ui_fixture_layout)]; memcpy(mutable_input,ui_fixture_layout,sizeof(mutable_input));
+    assert(rtcp_ui_sync_handle(s,mutable_input,sizeof(mutable_input))==RTCP_OK);
+    memset(mutable_input,0,sizeof(mutable_input)); /* No queued identifier may borrow this input. */
+    assert(status(s).pending_choices==2 && status(s).pending_outputs==1);
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_LAYOUT,3);
+    assert(!strcmp(c.layout_id,"DB7C6944") && !c.palette_id[0]);
+    memset(c.layout_id,'x',sizeof(c.layout_id));
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_LAYOUT,3); assert(!strcmp(c.layout_id,"DB7C6944"));
+    assert(drain_outputs(s)==1); /* Wire consumption does not consume the host FIFO. */
+    rtcp_ui_sync_status_t before=status(s);
+    assert(HANDLE(s,nul_layout_palette)==RTCP_EINVAL); /* Failure after a staged layout. */
+    assert(status(s).pending_choices==before.pending_choices && status(s).last_rx==before.last_rx);
+    assert(status(s).phone_choices==before.phone_choices && !status(s).pending_outputs);
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK);
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_PALETTE,3);
+    assert(!strcmp(c.layout_id,"DB7C6944") && !strcmp(c.palette_id,"dark"));
+    assert(HANDLE(s,palette)==RTCP_OK && drain_outputs(s)==1);
+    assert(HANDLE(s,appearance)==RTCP_OK && drain_outputs(s)==1);
+    assert(HANDLE(s,no_ack)==RTCP_OK && !drain_outputs(s));
+    assert(status(s).pending_choices==4);
+    before=status(s);
+    assert(HANDLE(s,appearance)==RTCP_OK && drain_outputs(s)==1); /* Duplicate, no new choice. */
+    assert(HANDLE(s,stale)==RTCP_OK && !drain_outputs(s));
+    assert(status(s).pending_choices==before.pending_choices && status(s).phone_choices==before.phone_choices);
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK);
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_PALETTE,4); assert(!strcmp(c.palette_id,"red"));
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK);
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_APPEARANCE,5); assert(c.appearance==RTCP_UI_SYNC_LIGHT);
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK);
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_APPEARANCE,7); assert(c.appearance==RTCP_UI_SYNC_DARK);
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK && !status(s).pending_choices);
+    assert(status(s).consumed_choices==5 && rtcp_ui_sync_consume_choice(s)==RTCP_ENOENT);
+
+    for (unsigned i=0;i<RTCP_UI_SYNC_MAX_CHOICES-1;++i) choice_burst(s,i);
+    assert(status(s).pending_choices==RTCP_UI_SYNC_MAX_CHOICES-1);
+    before=status(s);
+    assert(HANDLE(s,choice_capacity_pair)==RTCP_ENOMEM); /* One slot cannot take a two-choice command. */
+    rtcp_ui_sync_status_t after=status(s);
+    assert(after.pending_choices==before.pending_choices && !after.pending_outputs);
+    assert(after.last_rx==before.last_rx && after.next_tx==before.next_tx && after.peer_ack==before.peer_ack);
+    assert(after.phone_choices==before.phone_choices && !strcmp(after.phone_palette,before.phone_palette));
+    assert(HANDLE(s,choice_capacity_layout_only)==RTCP_OK && drain_outputs(s)==1);
+    before=status(s); assert(before.pending_choices==RTCP_UI_SYNC_MAX_CHOICES);
+    unsigned fixture=UI_FIXTURE_choice_burst_16;
+    assert(rtcp_ui_sync_handle(s,ui_fixtures[fixture].bytes,ui_fixtures[fixture].length)==RTCP_ENOMEM);
+    assert(status(s).last_rx==before.last_rx && status(s).next_tx==before.next_tx && !status(s).pending_outputs);
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_APPEARANCE,20); assert(c.appearance==RTCP_UI_SYNC_AUTOMATIC);
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK);
+    choice_burst(s,16); /* Same sequence retries successfully once a slot is free; ring wraps. */
+    for (unsigned i=1;i<15;++i) {
+        c=peek_choice(s,RTCP_UI_SYNC_CHOICE_APPEARANCE,20+i);
+        assert(c.appearance==(rtcp_ui_sync_appearance_t)(i%3));
+        assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK);
+    }
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_LAYOUT,35); assert(!strcmp(c.layout_id,"DB7C6944"));
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK);
+    c=peek_choice(s,RTCP_UI_SYNC_CHOICE_APPEARANCE,36); assert(c.appearance==RTCP_UI_SYNC_LIGHT);
+    assert(rtcp_ui_sync_consume_choice(s)==RTCP_OK && !status(s).pending_choices);
+    choice_burst(s,17); before=status(s);
+    assert(HANDLE(s,id_array)==RTCP_ENOTSUP); /* Failed RESET cannot discard a committed choice or advance generation. */
+    assert(status(s).choice_generation==generation && status(s).pending_choices==1);
+    assert(HANDLE(s,reset)==RTCP_OK && drain_outputs(s)==1);
+    assert(!status(s).pending_choices && status(s).abandoned_choices==before.abandoned_choices+1);
+    assert(status(s).choice_generation>generation && status(s).session==2);
+    generation=status(s).choice_generation;
+    rtcp_ui_sync_reset_session(s); assert(status(s).choice_generation>generation);
+    choice_handshake(s); choice_burst(s,0); choice_burst(s,1); before=status(s);
+    rtcp_ui_sync_reset_session(s);
+    assert(!status(s).pending_choices && status(s).abandoned_choices==before.abandoned_choices+2);
+    assert(status(s).choice_generation>before.choice_generation && status(s).consumed_choices==before.consumed_choices);
+    assert(rtcp_ui_sync_peek_choice(s,&c)==RTCP_ENOENT);
+    rtcp_ui_sync_destroy(s);
+    puts("UI host choices: optional copied FIFO, source generations/order, noAck/duplicates, two-choice atomic refusal, wrap/retry and reset abandonment passed");
+}
+
 int main(int argc, char **argv)
 {
     dump=argc==2 && !strcmp(argv[1],"--dump"); assert(argc==1 || dump);
-    main_scenario(); identifiers_and_errors(); codec_limits(); inventory_validation();
+    main_scenario(); identifiers_and_errors(); codec_limits(); inventory_validation(); phone_choice_delivery();
     puts("UI Sync: independent input, reset/version/layout/palette/appearance/focus/ACK, duplicates, retained output, reset and malformed bounds passed");
     return 0;
 }

@@ -17,6 +17,7 @@ extern "C" {
 #define RTCP_UI_SYNC_MAX_LAYOUTS 8U
 #define RTCP_UI_SYNC_MAX_PALETTES 8U
 #define RTCP_UI_SYNC_MAX_COMPONENTS 16U
+#define RTCP_UI_SYNC_MAX_CHOICES 16U
 #define RTCP_UI_SYNC_DATASTREAM_UUID RTCP_DATA_STREAM_UI_SYNC_UUID
 typedef struct { const char *zone, *component; } rtcp_ui_sync_component_t;
 typedef struct {
@@ -49,9 +50,23 @@ typedef struct {
      * focus token; values must fit INT64_MAX. No renderer is provided here. */
     bool give_focus;
     uint64_t focus_token;
+    /* Optional copied FIFO for host renderer handoff. False preserves the
+     * snapshot-only behavior and allocates no choice-queue workspace. */
+    bool queue_phone_choices;
 } rtcp_ui_sync_config_t;
 typedef enum { RTCP_UI_SYNC_IDLE, RTCP_UI_SYNC_RESETTING, RTCP_UI_SYNC_READY } rtcp_ui_sync_state_t;
 typedef enum { RTCP_UI_SYNC_AUTOMATIC, RTCP_UI_SYNC_LIGHT, RTCP_UI_SYNC_DARK } rtcp_ui_sync_appearance_t;
+typedef enum {
+    RTCP_UI_SYNC_CHOICE_LAYOUT, RTCP_UI_SYNC_CHOICE_PALETTE, RTCP_UI_SYNC_CHOICE_APPEARANCE
+} rtcp_ui_sync_choice_kind_t;
+typedef struct {
+    rtcp_ui_sync_choice_kind_t kind;
+    /* Local generation distinguishes reset/reopened channels that reuse the
+     * same wire session/psn. It is not a timestamp or presentation clock. */
+    uint64_t generation, session, sequence;
+    char layout_id[RTCP_UI_SYNC_MAX_ID+1], palette_id[RTCP_UI_SYNC_MAX_ID+1];
+    rtcp_ui_sync_appearance_t appearance; /* Valid only for APPEARANCE. */
+} rtcp_ui_sync_choice_t;
 typedef struct {
     rtcp_ui_sync_state_t state;
     unsigned version;
@@ -65,6 +80,9 @@ typedef struct {
     uint64_t received, rejected, stale, duplicates, ignored, phone_choices;
     uint64_t generated_messages, consumed_messages, abandoned_messages;
     int last_error;
+    bool choice_queue_enabled;
+    size_t pending_choices;
+    uint64_t choice_generation, consumed_choices, abandoned_choices;
 } rtcp_ui_sync_status_t;
 typedef struct rtcp_ui_sync rtcp_ui_sync_t;
 typedef struct {
@@ -102,6 +120,20 @@ void rtcp_ui_sync_reset_session(rtcp_ui_sync_t *);
 int rtcp_ui_sync_status(const rtcp_ui_sync_t *, rtcp_ui_sync_status_t *);
 int rtcp_ui_sync_select(rtcp_ui_sync_t *, const rtcp_ui_sync_layout_t *);
 int rtcp_ui_sync_set_dark(rtcp_ui_sync_t *, bool);
+/* Optional host handoff FIFO: peek copies the oldest accepted choice without
+ * removing it. Consume only after the host has copied/accepted that choice.
+ * Neither operation means a frame was rendered/presented. Both are owner-only;
+ * do not interleave handle/reset between a peek and its corresponding consume.
+ * ENOTSUP when disabled, ENOENT when empty. Peek clears output on failure.
+ * One layout command with a palette stages two records atomically. A full
+ * queue returns ENOMEM before choice/state/ACK commit, never drops an oldest
+ * record. Protocol RESET and reset_session abandon pending choices visibly;
+ * stale/duplicate commands do not enqueue them again. No renderer, callback,
+ * presentation timestamp or wire timing policy is supplied by this API.
+ * Host queues must invalidate older generations when reset/reopen is observed.
+ * Generation exhaustion stops new queued choices with ESTATE until recreate. */
+int rtcp_ui_sync_peek_choice(const rtcp_ui_sync_t *, rtcp_ui_sync_choice_t *);
+int rtcp_ui_sync_consume_choice(rtcp_ui_sync_t *);
 /* Complete authenticated Type 130 comm body: OPACK panel + binary plist header
  * + optional nested binary plist command. Caller retains input until return.
  * Malformed input/output exhaustion do not commit protocol state or outputs.

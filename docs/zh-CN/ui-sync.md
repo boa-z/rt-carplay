@@ -42,6 +42,18 @@ Receiver 发送状态增加 `last_rejection`，与拒绝计数一起保留准确
 
 目录是宿主实现契约，不是主题解析器、真实性校验器、渲染器或呈现回调。绑定不会生成 displayPanels/uiSyncInfo 或启用 uiSync。测试中的模拟标识不能当作已经实现的车辆主题向手机声明；独立的[实验能力门控](ui-sync-capabilities.md)要求已绑定目录及匹配 Main Display 元数据，宿主仍负责实际渲染/资产/呈现。D213 配置尚未绑定或声明此协议。[LIVI 主题补充研究](livi-theme-review.md)说明了参考元数据测试为何不能证明完整官方 Local UI 渲染。
 
+## 复制手机选择以交给宿主
+
+设置 rtcp_ui_sync_config_t.queue_phone_choices，可启用最多十六项手机选择的可选复制 FIFO。false 保留原有最终状态行为，不分配选择队列工作区，选择 API 返回 ENOTSUP。启用后，rtcp_ui_sync_peek_choice 复制最早的 rtcp_ui_sync_choice_t，宿主复制/接受后才调用 rtcp_ui_sync_consume_choice 释放。peek 失败清空输出，空队列返回 ENOENT。全部调用仍在串行所有者线程；一次 peek 与对应 consume 之间不能调用 handle/reset。不新增渲染器回调或线程。
+
+布局、调色板、外观按接收顺序保存。带可选调色板的布局命令会原子产生两项，与 LIVI follow_phone/take_choices 中分开的选择一致。布局项携带 layout_id，调色板项携带 layout_id/palette_id，外观项携带 appearance，均有源消息 session/sequence 和本地 generation。handle 返回后可释放输入缓冲。两项暂存及有界 FIFO 使用可选固定大小堆工作区，不逐消息分配或加入资产数据。
+
+FIFO 满时返回 ENOMEM，不提交手机状态、接收/ACK 序号、暂存项或输出，不覆盖旧项腾出空间；两项消息必须有两个空槽。解析/输出失败只丢弃本次暂存。旧会话/重复命令不再次入队，noAck 仍保存有效选择。宿主消费与协议输出消费独立。Receiver 将选择队列拒绝按既有可观察策略处理：仅关闭 UI，保留具体 last_rejection、Vehicle/媒体，并要求重新握手；不能将其当作已确认的官方重传/超时规则。
+
+成功的协议 RESET 和 reset_session 丢弃待交付选择，累加 abandoned_choices 并递增 choice_generation。通道关闭、认证失效和 Receiver start/stop 已调用 reset_session。失败 RESET 保持事务性，不能丢弃先前选择或推进generation。本地 generation 区分 wire session/sequence 重复的重开通道。宿主应在generation改变时作废已复制的旧工作，包括同一次 Receiver poll 内发生的改变。generation 不是时间戳、手机时钟或帧标识；耗尽后以 ESTATE 停止新增队列交付，直到重建模型。consumed_choices 仅表示宿主取走记录，与线上的 ACK 均不能证明渲染器接受、绘制、扫描输出或呈现时刻。
+
+单元测试覆盖关闭/空队列/空参数、输入及输出复制归属、布局/调色板顺序、noAck、重复/旧消息过滤、暂存布局后的失败、双项容量原子拒绝、满队列保留、环形回绕/重试、失败/成功协议 RESET 及通道重置的放弃计数/generation。加密 Receiver 场景显式启用队列，消费实际 noAck/布局/调色板记录，区分重开generation，在传输继续发送时填满十六项，仅拒绝 UI 的下一项、统计放弃记录并继续 Vehicle 读取。D213 LVGL 演示仍未接入 UI 模型，本接口没有实现官方资产、渲染或时序。
+
 ## 验证与剩余验收
 
 tests/check_ui_sync_wire.py 使用 Python plistlib 生成已保存的模拟输入字节，并独立解析输出 OPACK/plist。初始场景参考 LIVI 公开模拟 reset/layout 测试，使用不同的可配置焦点 token。测试覆盖版本 1/2、布局/组件/深色请求、手机布局/调色板/外观选择、焦点策略、应用 ACK/noAck、旧会话/重复消息、超前 ACK 拒绝、保留输出、重置保留、标量 id、重复路由字段、非 ASCII/复杂 id 拒绝、超大面板元数据、截断及确定性畸形输入集。plist 写入器测试覆盖 null/bool/signed/data/扩展数组、每一处输出容量截断、非法树及深度限制，Python 独立于 SDK 解析器核对输出消息。
@@ -53,3 +65,5 @@ tests/check_ui_sync_wire.py 使用 Python plistlib 生成已保存的模拟输�
 目录单元测试覆盖嵌套数据复制、标识/尺寸/数量/重复边界、显示匹配、原子替换、准确的区域/组件候选、按布局限定调色板、宿主选择拒绝、独立编码的非法手机选择、拒绝时不提交状态/ACK 及重置保留。加密 Receiver 场景绑定模拟目录，仅拒绝并关闭收到未知布局的 UI 通道，保留准确 last_rejection，车辆读取继续，随后在新 UI 通道接受支持的布局/调色板。Python 独立解析 35 条输出。2026-11-15 该里程碑通过 SDK Make、CMake 65/65 及完整集成 Host 测试，均不是真实手机或渲染器证据。
 
 独立 plistlib 消息还覆盖手机布局/调色板四个标识字段中的内嵌 NUL 字节。现有二进制 plist 字符串读取器会以 EINVAL 拒绝完整字符串，不能通过截断前缀匹配已安装标识。测试逐项确认拒绝后选择状态、收发/ACK 序号不变且无输出。本次补充回归证据，没有改变协议行为。
+
+复制选择里程碑于 2026-11-15 通过完整 SDK Make、启用 RTCP_SANITIZE 的 CMake 66/66 项及完整集成 Host 套件。独立线协议解码器仍验证原有场景的 35 条输出；新增突发消息及加密 FIFO 压力场景补充宿主交接覆盖。这些结果不证明真实 iPhone 行为、渲染器执行或呈现时序。

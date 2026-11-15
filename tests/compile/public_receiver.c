@@ -48,3 +48,10 @@ int public_receiver_ui_sync(rtcp_receiver_t *receiver, rtcp_ui_sync_delivery_sta
 {
     return rtcp_receiver_get_ui_sync_delivery_status(receiver, status);
 }
+
+int public_ui_choice_handoff(rtcp_ui_sync_t *ui, rtcp_ui_sync_choice_t *choice)
+{
+    int result=rtcp_ui_sync_peek_choice(ui,choice);
+    if (result) return result;
+    return rtcp_ui_sync_consume_choice(ui);
+}

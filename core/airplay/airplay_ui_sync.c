@@ -34,9 +34,15 @@ typedef struct {
     component_t component_ids[RTCP_UI_SYNC_MAX_LAYOUTS][RTCP_UI_SYNC_MAX_COMPONENTS];
     rtcp_ui_sync_component_t components[RTCP_UI_SYNC_MAX_LAYOUTS][RTCP_UI_SYNC_MAX_COMPONENTS];
 } inventory_t;
+typedef struct {
+    rtcp_ui_sync_choice_t records[RTCP_UI_SYNC_MAX_CHOICES], staged[2];
+    size_t head, count, staged_count;
+    bool discard;
+} choices_t;
 struct rtcp_ui_sync {
     char display[ID]; bool allow_layout_change, give_focus; int64_t focus_token;
     inventory_t *inventory;
+    choices_t *choices;
     state_t current, work;
     output_t outputs[RTCP_UI_SYNC_MAX_OUTPUTS]; size_t head, pending;
     rtcp_opack_node_t nodes[NODES], frame[RTCP_OPACK_MAX_NODES]; size_t used;
@@ -236,9 +242,26 @@ static int command(rtcp_ui_sync_t *s, unsigned kind)
     return rc ? rc : emit(s,2,s->command,length,false,false);
 }
 static int fail(rtcp_ui_sync_t *s, int rc)
-{ s->pending=0; ++s->current.status.rejected; s->current.status.last_error=rc; return rc; }
+{
+    s->pending=0;
+    if (s->choices) { s->choices->staged_count=0; s->choices->discard=false; }
+    ++s->current.status.rejected; s->current.status.last_error=rc; return rc;
+}
 static int commit(rtcp_ui_sync_t *s)
-{ s->work.status.last_error=0; s->current=s->work; s->head=0; return RTCP_OK; }
+{
+    choices_t *q=s->choices;
+    if (q) {
+        if (q->discard) {
+            s->work.status.abandoned_choices+=q->count;
+            memset(q->records,0,sizeof(q->records)); q->head=q->count=0;
+        }
+        for (size_t i=0;i<q->staged_count;++i) {
+            q->records[(q->head+q->count)%RTCP_UI_SYNC_MAX_CHOICES]=q->staged[i]; ++q->count;
+        }
+        q->staged_count=0; q->discard=false;
+    }
+    s->work.status.last_error=0; s->current=s->work; s->head=0; return RTCP_OK;
+}
 int rtcp_ui_sync_create(const rtcp_ui_sync_config_t *config, rtcp_ui_sync_t **out)
 {
     if (!out) return RTCP_EINVAL;
@@ -246,17 +269,26 @@ int rtcp_ui_sync_create(const rtcp_ui_sync_config_t *config, rtcp_ui_sync_t **ou
     if (!config || config->struct_size != sizeof(*config) || !identifier(config->display_uuid) ||
         (config->give_focus && config->focus_token > INT64_MAX)) return RTCP_EINVAL;
     rtcp_ui_sync_t *s=calloc(1,sizeof(*s)); if (!s) return RTCP_ENOMEM;
+    if (config->queue_phone_choices) {
+        s->choices=calloc(1,sizeof(*s->choices));
+        if (!s->choices) { free(s); return RTCP_ENOMEM; }
+    }
     strcpy(s->display,config->display_uuid); s->allow_layout_change=config->allow_layout_change;
     s->give_focus=config->give_focus; s->focus_token=config->give_focus ? (int64_t)config->focus_token : 0;
     s->current.status.requested_dark=config->initial_dark; *out=s; return RTCP_OK;
 }
 void rtcp_ui_sync_destroy(rtcp_ui_sync_t *s)
-{ if (s) { free(s->inventory); memset(s,0,sizeof(*s)); free(s); } }
+{ if (s) { free(s->inventory); free(s->choices); memset(s,0,sizeof(*s)); free(s); } }
 void rtcp_ui_sync_reset_session(rtcp_ui_sync_t *s)
 {
     if (!s) return;
     rtcp_ui_sync_status_t old=s->current.status;
     old.abandoned_messages+=s->pending;
+    if (s->choices) {
+        old.abandoned_choices+=s->choices->count;
+        if (old.choice_generation<UINT64_MAX) ++old.choice_generation;
+        memset(s->choices,0,sizeof(*s->choices));
+    }
     old.state=RTCP_UI_SYNC_IDLE; old.session=old.next_tx=old.last_rx=old.peer_ack=0; old.version=0;
     old.pending_outputs=0; old.last_error=0;
     old.phone_layout[0]=old.phone_palette[0]=old.phone_palette_layout[0]=0; old.phone_appearance=RTCP_UI_SYNC_AUTOMATIC;
@@ -267,6 +299,7 @@ int rtcp_ui_sync_status(const rtcp_ui_sync_t *s, rtcp_ui_sync_status_t *out)
 {
     if (!s || !out) return RTCP_EINVAL;
     *out=s->current.status; out->pending_outputs=s->pending;
+    out->choice_queue_enabled=s->choices != NULL; out->pending_choices=s->choices ? s->choices->count : 0;
     strcpy(out->requested_layout,s->current.wanted); strcpy(out->requested_palette,s->current.palette);
     return RTCP_OK;
 }
@@ -315,6 +348,38 @@ int rtcp_ui_sync_consume(rtcp_ui_sync_t *s)
     if (!s) return RTCP_EINVAL;
     if (!s->pending) return RTCP_ENOENT;
     s->head=(s->head+1)%RTCP_UI_SYNC_MAX_OUTPUTS; --s->pending; ++s->current.status.consumed_messages;
+    return RTCP_OK;
+}
+int rtcp_ui_sync_peek_choice(const rtcp_ui_sync_t *s, rtcp_ui_sync_choice_t *out)
+{
+    if (out) memset(out,0,sizeof(*out));
+    if (!s || !out) return RTCP_EINVAL;
+    if (!s->choices) return RTCP_ENOTSUP;
+    if (!s->choices->count) return RTCP_ENOENT;
+    *out=s->choices->records[s->choices->head]; return RTCP_OK;
+}
+int rtcp_ui_sync_consume_choice(rtcp_ui_sync_t *s)
+{
+    if (!s) return RTCP_EINVAL;
+    choices_t *q=s->choices;
+    if (!q) return RTCP_ENOTSUP;
+    if (!q->count) return RTCP_ENOENT;
+    memset(&q->records[q->head],0,sizeof(q->records[q->head]));
+    q->head=(q->head+1)%RTCP_UI_SYNC_MAX_CHOICES; --q->count;
+    ++s->current.status.consumed_choices; return RTCP_OK;
+}
+static int stage_choice(rtcp_ui_sync_t *s, rtcp_ui_sync_choice_kind_t kind, uint64_t sequence)
+{
+    choices_t *q=s->choices;
+    if (!q) return RTCP_OK;
+    if (s->work.status.choice_generation==UINT64_MAX) return RTCP_ESTATE;
+    if (q->staged_count==2 || q->count+q->staged_count>=RTCP_UI_SYNC_MAX_CHOICES) return RTCP_ENOMEM;
+    rtcp_ui_sync_choice_t *c=&q->staged[q->staged_count++];
+    *c=(rtcp_ui_sync_choice_t){.kind=kind,.generation=s->work.status.choice_generation,.session=s->work.status.session,.sequence=sequence};
+    if (kind==RTCP_UI_SYNC_CHOICE_LAYOUT) strcpy(c->layout_id,s->work.status.phone_layout);
+    else if (kind==RTCP_UI_SYNC_CHOICE_PALETTE) {
+        strcpy(c->layout_id,s->work.status.phone_palette_layout); strcpy(c->palette_id,s->work.status.phone_palette);
+    } else c->appearance=s->work.status.phone_appearance;
     return RTCP_OK;
 }
 static int get(const airplay_bplist_doc_t *d, airplay_bplist_object_t root, const char *key,
@@ -388,7 +453,7 @@ static int capture_panel(rtcp_ui_sync_t *s, const uint8_t *input, size_t length,
     if (rtcp_opack_encode(s->nodes,s->used,s->work.panel,sizeof(s->work.panel),&s->work.panel_length) != RTCP_OPACK_OK) return RTCP_ENOMEM;
     return RTCP_OK;
 }
-static int follow(rtcp_ui_sync_t *s, const airplay_bplist_doc_t *d, airplay_bplist_object_t root, bool *focus)
+static int follow(rtcp_ui_sync_t *s, const airplay_bplist_doc_t *d, airplay_bplist_object_t root, uint64_t sequence, bool *focus)
 {
     airplay_bplist_object_t body; int rc=get(d,root,"data",&body);
     if (rc == RTCP_ENOENT) return RTCP_OK;
@@ -407,6 +472,7 @@ static int follow(rtcp_ui_sync_t *s, const airplay_bplist_doc_t *d, airplay_bpli
         const rtcp_ui_sync_inventory_layout_t *layout=s->inventory ? find_layout(s->inventory,w->status.phone_layout) : NULL;
         if (s->inventory && !layout) return RTCP_ENOTSUP;
         ++w->status.phone_choices;
+        rc=stage_choice(s,RTCP_UI_SYNC_CHOICE_LAYOUT,sequence); if (rc) return rc;
         char palette[ID]; rc=get_text(&command_doc,args,"paletteID",palette);
         if (rc == RTCP_ENOENT) return RTCP_OK;
         if (rc) return rc;
@@ -424,7 +490,8 @@ static int follow(rtcp_ui_sync_t *s, const airplay_bplist_doc_t *d, airplay_bpli
         if (rc || preference>2) return RTCP_EINVAL;
         w->status.phone_appearance=(rtcp_ui_sync_appearance_t)preference;
     }
-    ++w->status.phone_choices; return RTCP_OK;
+    ++w->status.phone_choices;
+    return stage_choice(s,type==0x13 ? RTCP_UI_SYNC_CHOICE_APPEARANCE : RTCP_UI_SYNC_CHOICE_PALETTE,sequence);
 }
 int rtcp_ui_sync_handle(rtcp_ui_sync_t *s, const uint8_t *input, size_t length)
 {
@@ -444,6 +511,10 @@ int rtcp_ui_sync_handle(rtcp_ui_sync_t *s, const uint8_t *input, size_t length)
     if (type == 0) {
         if (st->state == RTCP_UI_SYNC_RESETTING && st->next_tx == 2) { ++st->duplicates; return commit(s); }
         if (st->session >= INT64_MAX) return fail(s,RTCP_ESTATE);
+        if (s->choices) {
+            if (st->choice_generation==UINT64_MAX) return fail(s,RTCP_ESTATE);
+            ++st->choice_generation; s->choices->discard=true;
+        }
         ++st->session; st->next_tx=1; st->last_rx=st->peer_ack=0; st->version=2; st->state=RTCP_UI_SYNC_RESETTING;
         rc=capture_id(s,&d,root); if (!rc) rc=emit(s,0,NULL,0,true,true);
     } else if (ssn != st->session || st->state == RTCP_UI_SYNC_IDLE) { ++st->stale; return commit(s); }
@@ -465,7 +536,7 @@ int rtcp_ui_sync_handle(rtcp_ui_sync_t *s, const uint8_t *input, size_t length)
             if (rc != RTCP_OK && rc != RTCP_ENOENT) return fail(s,rc);
             rc=RTCP_OK;
             if (psn <= st->last_rx) ++st->duplicates;
-            else { rc=follow(s,&d,root,&focus); st->last_rx=psn; }
+            else { rc=follow(s,&d,root,psn,&focus); st->last_rx=psn; }
             if (!rc && !no_ack) rc=emit(s,3,NULL,0,false,false);
             if (!rc && focus) rc=command(s,7);
         } else if (type == 3) { if (psn>st->last_rx) st->last_rx=psn; }

@@ -89,6 +89,13 @@ def fixtures():
         'nul_palette_layout': command(0x10, {'layoutIdentifier': 'DB7C6944\x00suffix', 'paletteIdentifier': 'red'}, psn=5),
         'nul_palette_id': command(0x10, {'layoutIdentifier': 'DB7C6944', 'paletteIdentifier': 'red\x00suffix'}, psn=5),
     }
+    # Synthetic burst with fresh command sequence numbers; odd entries use
+    # noAck to test host delivery independently of wire ACK production.
+    for i in range(18):
+        result['choice_burst_{:02d}'.format(i)] = command(0x13, {'preference': i % 3},
+                                                        psn=20+i, noAck=bool(i % 2))
+    result['choice_capacity_pair'] = command(3, {'layoutID': 'DB7C6944', 'paletteID': 'dark'}, psn=35)
+    result['choice_capacity_layout_only'] = command(3, {'layoutID': 'DB7C6944'}, psn=35)
     # Introduce a duplicate type key in a real plistlib object table, independent
     # of the SDK writer. Root has fewer than 15 fields and one-byte references.
     duplicate = bytearray(plistlib.dumps(dict(reset, shadow=0), fmt=plistlib.FMT_BINARY, sort_keys=False))

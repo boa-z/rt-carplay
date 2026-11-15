@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include "rtcp/rtcp.h"
 
 #include "airplay_bplist.h"
 #include "airplay_hid_descriptor.h"
@@ -50,8 +51,83 @@ static void expect_uint(const airplay_bplist_doc_t *doc,
     assert(number == expected);
 }
 
-int main(void)
+static const char *match_file;
+static bool match_expected;
+static void test_vehicle_info(bool dump)
 {
+    /* These synthetic types have no production vehicle meaning. */
+    rtcp_vehicle_characteristic_t spec[4]={0};
+    for (unsigned i=0;i<4;++i) {
+        spec[i]=(rtcp_vehicle_characteristic_t){.accessory_iid=1,.accessory_type=100,
+            .service_iid=2,.service_type=200,.iid=3+i,.type=1003+i,
+            .owner=RTCP_VEHICLE_CAR,.mutable_value=true,.has_initial=true};
+    }
+    spec[0].format=RTCP_VEHICLE_FLOAT; spec[0].has_range=true;
+    spec[0].minimum=-2; spec[0].maximum=10; spec[0].step=0.25;
+    spec[0].initial=(rtcp_vehicle_value_t){.format=RTCP_VEHICLE_FLOAT,.as.real=-1.25};
+    spec[1].format=RTCP_VEHICLE_UINT64;
+    spec[1].initial=(rtcp_vehicle_value_t){.format=RTCP_VEHICLE_UINT64,.as.integer=INT64_C(9007199254740993)};
+    spec[2].format=RTCP_VEHICLE_STRING; spec[2].maximum_length=256;
+    spec[2].initial=(rtcp_vehicle_value_t){.format=RTCP_VEHICLE_STRING};
+    const uint8_t unicode[]={0x41,0,0xe8,0xbd,0xa6,0xf0,0x9f,0x9a,0x97};
+    memcpy(spec[2].initial.as.blob.bytes,unicode,sizeof(unicode)); spec[2].initial.as.blob.length=sizeof(unicode);
+    spec[3].format=RTCP_VEHICLE_DATA; spec[3].maximum_length=256;
+    spec[3].initial=(rtcp_vehicle_value_t){.format=RTCP_VEHICLE_DATA};
+    spec[3].initial.as.blob.bytes[0]=0xff; spec[3].initial.as.blob.length=1;
+    rtcp_vehicle_config_t cfg={.struct_size=sizeof(cfg),.plugin_name="\xe8\xbd\xa6\xf0\x9f\x9a\x97",.plugin_id=9,
+        .characteristics=spec,.count=4};
+    rtcp_vehicle_t *vehicle;
+    assert(rtcp_vehicle_create(&cfg,&vehicle) == RTCP_OK);
+    uint8_t bytes[AIRPLAY_INFO_PLIST_MAX_BYTES]; size_t length=0;
+    airplay_info_plist_config_t info=k_config; info.vehicle=vehicle;
+    assert(airplay_info_plist_build(&info,bytes,sizeof(bytes),&length));
+    assert(airplay_info_plist_matches_vehicle(bytes,length,vehicle));
+    if (match_file) {
+        FILE *input=fopen(match_file,"rb"); assert(input);
+        uint8_t supplied[AIRPLAY_INFO_PLIST_MAX_BYTES+1];
+        size_t size=fread(supplied,1,sizeof(supplied),input); assert(!ferror(input)); fclose(input);
+        assert(airplay_info_plist_matches_vehicle(supplied,size,vehicle) == match_expected);
+    }
+    if (dump) { printf("VEHICLE_INFO "); for (size_t i=0;i<length;++i) printf("%02x",bytes[i]); puts(""); }
+    rtcp_vehicle_value_t changed={.format=RTCP_VEHICLE_UINT64,.as.integer=INT64_C(9007199254740994)};
+    assert(rtcp_vehicle_set(vehicle,4,&changed) == RTCP_OK);
+    assert(!airplay_info_plist_matches_vehicle(bytes,length,vehicle));
+    assert(airplay_info_plist_build(&info,bytes,sizeof(bytes),&length));
+    assert(airplay_info_plist_matches_vehicle(bytes,length,vehicle));
+    /* Every truncation and output shortage must fail without an apparent document. */
+    for (size_t n=0;n<length;++n) assert(!airplay_info_plist_matches_vehicle(bytes,n,vehicle));
+    assert(!airplay_info_plist_build(&info,bytes,64,&length) && length == 0);
+    info.vehicle=NULL;
+    assert(airplay_info_plist_build(&info,bytes,sizeof(bytes),&length));
+    assert(!airplay_info_plist_matches_vehicle(bytes,length,vehicle));
+    /* Audio plus a small catalogue fits the existing bounded session buffer. */
+    rtcp_vehicle_destroy(vehicle); cfg.count=1;
+    assert(rtcp_vehicle_create(&cfg,&vehicle) == RTCP_OK);
+    info.vehicle=vehicle; info.audio_output=true;
+    assert(airplay_info_plist_build(&info,bytes,sizeof(bytes),&length));
+    assert(airplay_info_plist_matches_vehicle(bytes,length,vehicle));
+    rtcp_vehicle_destroy(vehicle);
+    spec[0].format=RTCP_VEHICLE_INT32; spec[0].has_range=false;
+    spec[0].initial=(rtcp_vehicle_value_t){.format=RTCP_VEHICLE_INT32,.as.integer=-7};
+    assert(rtcp_vehicle_create(&cfg,&vehicle) == RTCP_OK); info.vehicle=vehicle;
+    assert(airplay_info_plist_build(&info,bytes,sizeof(bytes),&length));
+    assert(airplay_info_plist_matches_vehicle(bytes,length,vehicle));
+    rtcp_vehicle_destroy(vehicle);
+    rtcp_vehicle_characteristic_t large[RTCP_VEHICLE_MAX_CHARACTERISTICS];
+    for (unsigned i=0;i<RTCP_VEHICLE_MAX_CHARACTERISTICS;++i) {
+        large[i]=spec[3]; large[i].iid=3+i; large[i].initial.as.blob.length=256;
+        memset(large[i].initial.as.blob.bytes,0xff,256);
+    }
+    cfg.characteristics=large; cfg.count=RTCP_VEHICLE_MAX_CHARACTERISTICS;
+    assert(rtcp_vehicle_create(&cfg,&vehicle) == RTCP_OK); info.vehicle=vehicle;
+    assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length);
+    rtcp_vehicle_destroy(vehicle);
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 4 && !strcmp(argv[1],"--match")) { match_file=argv[2]; match_expected=!strcmp(argv[3],"yes"); }
+    test_vehicle_info(argc == 2 && !strcmp(argv[1],"--wire"));
     uint8_t plist[AIRPLAY_INFO_PLIST_MAX_BYTES];
     size_t plist_len = 0U;
     assert(airplay_info_plist_build(&k_config, plist, sizeof(plist), &plist_len));

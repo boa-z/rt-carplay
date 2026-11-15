@@ -1247,6 +1247,7 @@ static uint64_t response_stream_uint(const response_t *response, uint64_t index,
     return value;
 }
 
+static rtcp_data_stream_status_t data_status(rtcp_data_stream_kind_t kind);
 static uint16_t run_initial_setup(rtcp_receiver_t *server,
                                   client_t *client, uint32_t *cseq, bool offer)
 {
@@ -1258,6 +1259,21 @@ static uint16_t run_initial_setup(rtcp_receiver_t *server,
                                        "/stream", PLIST_TYPE, (*cseq)++, body,
                                        body_len);
     client_exchange(server, client, request, request_len, &response);
+    airplay_bplist_doc_t doc; airplay_bplist_object_t root,features,item;
+    uint64_t count; airplay_bplist_type_t type;
+    assert(airplay_bplist_open(response.body,response.body_len,&doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc,&root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc,root,"enabledFeatures",&features) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_type(&doc,features,&type,&count) == AIRPLAY_BPLIST_OK && type == AIRPLAY_BPLIST_ARRAY);
+    bool enabled=data_status(RTCP_DATA_STREAM_VEHICLE).enabled;
+    assert(count == (enabled ? 3U : 2U));
+    const char *expected[]={"iAPChannel","viewAreas","vehicleStateProtocol"};
+    for (uint64_t i=0;i<count;++i) {
+        char text[64]; size_t n;
+        assert(airplay_bplist_array_get(&doc,features,i,&item) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_string(&doc,item,text,sizeof(text),&n) == AIRPLAY_BPLIST_OK);
+        assert(!strcmp(text,expected[i]));
+    }
     return response_port(&response, "eventPort");
 }
 
@@ -1916,6 +1932,23 @@ static void run_audio_stream(rtcp_receiver_t *server, client_t *client,
 /* main                                                               */
 /* ------------------------------------------------------------------ */
 
+typedef struct {
+    airplay_info_plist_config_t config;
+    uint8_t *bytes;
+    size_t *length;
+    bool omit;
+    unsigned calls;
+} vehicle_info_refresh_t;
+static bool refresh_vehicle_info(const uint8_t **bytes, size_t *length, void *context)
+{
+    vehicle_info_refresh_t *r=context;
+    ++r->calls;
+    airplay_info_plist_config_t config=r->config;
+    if (r->omit) config.vehicle=NULL;
+    if (!airplay_info_plist_build(&config,r->bytes,AIRPLAY_INFO_PLIST_MAX_BYTES,r->length)) return false;
+    *bytes=r->bytes; *length=*r->length; return true;
+}
+
 int main(int argc, char **argv)
 {
     bool ui_mode = argc == 2 && !strcmp(argv[1], "--ultra-apps");
@@ -1943,10 +1976,12 @@ int main(int argc, char **argv)
     info.width_pixels = 1920U;
     info.height_pixels = 1080U;
     info.max_fps = 30U;
+    info.vehicle = vehicle;
     size_t info_len = 0U;
     assert(airplay_info_plist_build(&info, info_plist, sizeof(info_plist),
                                     &info_len));
 
+    vehicle_info_refresh_t info_refresh={.config=info,.bytes=info_plist,.length=&info_len};
     rtcp_receiver_config_t receiver_config = {0};
     struct rtcp_net registry_net = rtcp_net_linux;
     registry_net.listen = data_listen;
@@ -1970,6 +2005,9 @@ int main(int argc, char **argv)
 
     if (vehicle_mode) {
         receiver_config.vehicle = vehicle;
+        receiver_config.negotiate_vehicle = true;
+        receiver_config.platform.get_info_plist=refresh_vehicle_info;
+        receiver_config.platform.info_context=&info_refresh;
         receiver_config.data_stream.channel_mask = RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
         if (ui_mode) { receiver_config.ui_sync=ui; receiver_config.data_stream.channel_mask=0; }
     } else if (argc > 1) {
@@ -2018,6 +2056,10 @@ int main(int argc, char **argv)
     response_status_is(&invalid_response, 400);
     uint32_t cseq = 30U;
     uint16_t event_port = run_initial_setup(server, &client, &cseq, true);
+    assert(data_status(RTCP_DATA_STREAM_VEHICLE).enabled == vehicle_mode);
+    assert(data_status(RTCP_DATA_STREAM_VEHICLE_HIGH).enabled == vehicle_mode);
+    assert(!data_status(RTCP_DATA_STREAM_UI_SYNC).enabled);
+    if (vehicle_mode) assert(run_initial_setup(server,&client,&cseq,false) == event_port);
     run_event_channel(server, shared_secret, event_port);
     if (vehicle_mode) run_vehicle_processor(&client, shared_secret, &cseq, vehicle,!ui_mode);
     else run_duplex_registry(&client, shared_secret, &cseq);
@@ -2043,6 +2085,18 @@ int main(int argc, char **argv)
     /* The malformed frame dropped only that connection.  A reconnecting
      * controller must Pair-Verify against the pairing stored by the first
      * Pair-Setup and run a complete second session on the same server. */
+    if (vehicle_mode) {
+        /* A refreshed Classic-only document must reject the new controller,
+         * rather than silently negotiate with stale Vehicle metadata. */
+        info_refresh.omit=true; unsigned calls=info_refresh.calls;
+        rtcp_addr_t address={.family=RTCP_AF_INET,.port=rtcp_receiver_port(server),.addr={127,0,0,1}};
+        int fd=rtcp_net_linux.connect(&address); assert(fd >= 0);
+        uint64_t start=rtcp_os_linux.now_ms();
+        while (info_refresh.calls == calls && rtcp_os_linux.now_ms()-start < WAIT_LIMIT_MS)
+            receiver_poll(server,10);
+        assert(info_refresh.calls > calls && !receiver_connected(server));
+        rtcp_net_linux.close(fd); info_refresh.omit=false;
+    }
     client_t client2;
     client_connect(server, &client2);
     uint8_t shared_secret2[KEY_BYTES];
@@ -2050,6 +2104,7 @@ int main(int argc, char **argv)
     run_encrypted_info(server, &client2, info_plist, info_len);
     cseq = 60U;
     uint16_t event_port2 = run_initial_setup(server, &client2, &cseq, false);
+    assert(!data_status(RTCP_DATA_STREAM_VEHICLE).enabled);
     request_data(&client2, &guard_cseq, RTCP_DATA_STREAM_UI_SYNC, 8000, 503, &guard_id);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).registered && !data_status(RTCP_DATA_STREAM_UI_SYNC).offered);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state == RTCP_DATA_STREAM_IDLE);

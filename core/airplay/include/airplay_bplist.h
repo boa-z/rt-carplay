@@ -146,3 +146,15 @@ typedef struct { uint16_t type; uint32_t sample_rate; uint64_t connection_id; } 
 airplay_bplist_result_t airplay_bplist_build_audio_feedback(const airplay_audio_feedback_t *, size_t,
                                                             uint8_t *, size_t, size_t *);
 airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action, uint8_t *, size_t, size_t *);
+
+/* Exact UTF-8 comparison with ASCII/UTF-16 plist text, including surrogate
+ * pairs. Explicit length; malformed input never matches. */
+bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *,
+    airplay_bplist_object_t, const uint8_t *, size_t);
+
+airplay_bplist_result_t airplay_bplist_dict_get_utf8_unique(const airplay_bplist_doc_t *,
+    airplay_bplist_object_t, const uint8_t *, size_t, airplay_bplist_object_t *);
+
+/* Internal opt-in extension; false emits the original Classic response bytes. */
+airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
+    uint16_t, uint16_t, bool, uint8_t *, size_t, size_t *);

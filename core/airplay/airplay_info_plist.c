@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Minimal binary property-list writer for the AirPlay /info response.
+ * Optional Vehicle catalogue follows LIVI by Lasse Heitgres; see NOTICE.
  *
  * Objects are emitted depth-first: children first, then their parent container.
  * Object IDs are assigned in emission order and the offset table maps IDs back
@@ -12,6 +13,10 @@
 #include "../audio/include/audio_codec.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include "airplay_bplist.h"
+#include "rtcp/opack.h"
+#include "rtcp/rtcp.h"
 
 #include "airplay_hid_descriptor.h"
 #include "rtcp/log.h"
@@ -47,7 +52,8 @@ typedef struct {
     uint8_t *out;
     size_t capacity;
     size_t used;
-    uint32_t offsets[IP_MAX_OBJECTS];
+    uint32_t *offsets;
+    size_t max_objects;
     uint32_t next_id;
     bool ok;
 } ip_writer_t;
@@ -88,7 +94,7 @@ static void ip_bytes(ip_writer_t *w, const void *data, size_t len)
 
 static uint32_t ip_object_start(ip_writer_t *w)
 {
-    if (!w->ok || w->next_id >= IP_MAX_OBJECTS) {
+    if (!w->ok || w->next_id >= w->max_objects) {
         w->ok = false;
         return 0U;
     }
@@ -569,11 +575,80 @@ static uint32_t emit_hid_device(ip_writer_t *w, const airplay_info_plist_config_
     return ip_emit_literal_dict(w, keys, values, 7U);
 }
 
+/* Only generated catalogue nodes enter here. Large arenas live on the heap,
+ * keeping the Classic RTSP owner's stack and byte-for-byte output unchanged. */
+#define IP_VEHICLE_OPACK_BYTES 16384U
+typedef struct {
+    uint8_t opack[IP_VEHICLE_OPACK_BYTES];
+    rtcp_opack_node_t nodes[RTCP_OPACK_MAX_NODES];
+    uint32_t ids[RTCP_OPACK_MAX_NODES];
+    uint32_t offsets[IP_MAX_OBJECTS + RTCP_OPACK_MAX_NODES + 1U];
+} ip_vehicle_workspace_t;
+
+static bool vehicle_nodes(rtcp_vehicle_t *vehicle, ip_vehicle_workspace_t *v, size_t *count)
+{
+    size_t length = 0;
+    return rtcp_vehicle_info(vehicle,v->opack,sizeof(v->opack),&length) == RTCP_OK &&
+        rtcp_opack_decode(v->opack,length,v->nodes,RTCP_OPACK_MAX_NODES,count) == RTCP_OPACK_OK;
+}
+
+static uint32_t emit_vehicle(ip_writer_t *w, const rtcp_opack_node_t *nodes, size_t count,
+    uint32_t *ids)
+{
+    uint32_t refs[2U * IP_MAX_DICT_ENTRIES];
+    for (size_t i=count; i-- > 0 && w->ok;) {
+        const rtcp_opack_node_t *n=&nodes[i];
+        switch (n->type) {
+        case RTCP_OPACK_BOOL: ids[i]=ip_emit_bool(w,n->value.boolean); break;
+        case RTCP_OPACK_INT: ids[i]=ip_emit_int(w,n->value.integer); break;
+        case RTCP_OPACK_REAL: {
+            uint64_t bits; memcpy(&bits,&n->value.real,sizeof(bits));
+            ids[i]=ip_object_start(w); ip_u8(w,IP_MARKER_REAL); ip_be(w,bits,8); break;
+        }
+        case RTCP_OPACK_STRING: {
+            const uint8_t *begin=n->value.blob.bytes, *end=begin+n->value.blob.length;
+            bool ascii=true; size_t units=0;
+            for (const uint8_t *p=begin;p<end;) {
+                uint32_t cp=ip_utf8_decode(&p,end); if (cp > 127U) ascii=false;
+                units+=cp > 0xffffU ? 2U : 1U;
+            }
+            if (ascii) ids[i]=ip_emit_ascii(w,(const char *)begin,n->value.blob.length);
+            else {
+                ids[i]=ip_object_start(w);
+                if (units < IP_LONG) ip_u8(w,(uint8_t)(IP_MARKER_UTF16|units));
+                else { ip_u8(w,IP_MARKER_UTF16|IP_LONG); ip_int_inline(w,(int64_t)units); }
+                for (const uint8_t *p=begin;p<end;) {
+                    uint32_t cp=ip_utf8_decode(&p,end);
+                    if (cp <= 0xffffU) ip_be(w,cp,2);
+                    else { cp-=0x10000U; ip_be(w,0xd800U|(cp>>10),2); ip_be(w,0xdc00U|(cp&0x3ffU),2); }
+                }
+            }
+            break;
+        }
+        case RTCP_OPACK_DATA: ids[i]=ip_emit_data(w,n->value.blob.bytes,n->value.blob.length); break;
+        case RTCP_OPACK_ARRAY: case RTCP_OPACK_DICT: {
+            bool dict=n->type == RTCP_OPACK_DICT;
+            if (n->count > IP_MAX_DICT_ENTRIES) { w->ok=false; break; }
+            size_t child=i+1;
+            for (unsigned j=0;j<n->count;++j) {
+                refs[j]=ids[child]; child=nodes[child].end;
+                if (dict) { refs[n->count+j]=ids[child]; child=nodes[child].end; }
+            }
+            ids[i]=ip_emit_container(w,dict ? IP_MARKER_DICT : IP_MARKER_ARRAY,
+                n->count,refs,n->count*(dict ? 2U : 1U)); break;
+        }
+        default: w->ok=false; break;
+        }
+    }
+    return w->ok ? ids[0] : 0;
+}
+
 static uint32_t emit_root(ip_writer_t *w,
                           const airplay_info_plist_config_t *config,
                           const char *name,
                           const uint8_t *descriptor,
-                          size_t descriptor_len)
+                          size_t descriptor_len,
+                          uint32_t vehicle_info)
 {
     static const char *const base_keys[] = {
         "sourceVersion", "features", "statusFlags", "model", "manufacturer",
@@ -581,7 +656,7 @@ static uint32_t emit_root(ip_writer_t *w,
         "keepAliveLowPower", "keepAliveSendStatsAsBody", "modes",
         "extendedFeatures", "displays", "hidDevices",
     };
-    const char *keys[17];
+    const char *keys[18];
     memcpy(keys, base_keys, sizeof(base_keys));
 
     uint32_t bluetooth;
@@ -598,7 +673,7 @@ static uint32_t emit_root(ip_writer_t *w,
     uint32_t modes = emit_modes(w);
     uint32_t extended = emit_extended_features(w);
 
-    uint32_t values[17];
+    uint32_t values[18];
     values[0] = ip_emit_string(w, config->source_version != NULL
                                       ? config->source_version
                                       : AIRPLAY_INFO_DEFAULT_SOURCE_VERSION);
@@ -631,6 +706,10 @@ static uint32_t emit_root(ip_writer_t *w,
         entry_count = 17U;
     }
 
+    if (config->vehicle) {
+        keys[entry_count]="vehicleStateProtocolInfo";
+        values[entry_count++]=vehicle_info;
+    }
     return ip_emit_literal_dict(w, keys, values, entry_count);
 }
 
@@ -657,30 +736,41 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
         return false;
     }
 
+    if (output_capacity < 8U) return false;
+    ip_vehicle_workspace_t *vehicle = config->vehicle ? calloc(1,sizeof(*vehicle)) : NULL;
+    if (config->vehicle && !vehicle) return false;
+    uint32_t classic_offsets[IP_MAX_OBJECTS];
     ip_writer_t writer;
     memset(&writer, 0, sizeof(writer));
     writer.out = output;
-    writer.capacity = output_capacity;
+    writer.capacity = config->vehicle && output_capacity > AIRPLAY_INFO_PLIST_MAX_BYTES
+        ? AIRPLAY_INFO_PLIST_MAX_BYTES : output_capacity;
     writer.ok = true;
+    writer.offsets = vehicle ? vehicle->offsets : classic_offsets;
+    writer.max_objects = vehicle ? sizeof(vehicle->offsets)/sizeof(vehicle->offsets[0]) : IP_MAX_OBJECTS;
 
-    if (output_capacity < 8U) return false;
     ip_bytes(&writer, "bplist00", 8U);
 
     const char *name = config->name != NULL && config->name[0] != '\0'
                            ? config->name
                            : IP_DEFAULT_NAME;
-    uint32_t root = emit_root(&writer, config, name, descriptor, descriptor_len);
+    uint32_t vehicle_info=0; size_t node_count=0;
+    if (vehicle) {
+        if (!vehicle_nodes(config->vehicle,vehicle,&node_count)) { free(vehicle); return false; }
+        vehicle_info=emit_vehicle(&writer,vehicle->nodes,node_count,vehicle->ids);
+    }
+    uint32_t root = emit_root(&writer, config, name, descriptor, descriptor_len,vehicle_info);
     if (!writer.ok) {
         RTCP_LOGE(TAG, "encode failed objects=%u used=%u",
                   (unsigned)writer.next_id, (unsigned)writer.used);
-        return false;
+        free(vehicle); return false;
     }
 
     size_t table_offset = writer.used;
     for (uint32_t i = 0U; i < writer.next_id; ++i) {
         ip_be(&writer, writer.offsets[i], 4U);
     }
-    if (!writer.ok) return false;
+    if (!writer.ok) { free(vehicle); return false; }
 
     static const uint8_t zeros[6] = {0};
     ip_bytes(&writer, zeros, sizeof(zeros));
@@ -689,8 +779,9 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
     ip_be(&writer, writer.next_id, 8U);                     /* num objects */
     ip_be(&writer, root, 8U);                               /* top object */
     ip_be(&writer, table_offset, 8U);                       /* offset table */
-    if (!writer.ok) return false;
+    if (!writer.ok) { free(vehicle); return false; }
 
+    free(vehicle);
     *output_len = writer.used;
     RTCP_LOGD(TAG, "built /info plist bytes=%u objects=%u",
               (unsigned)writer.used, (unsigned)writer.next_id);
@@ -705,4 +796,70 @@ uint64_t airplay_info_plist_features(const airplay_info_plist_config_t *config)
     if (config->audio_compressed && (rtcp_audio_output_formats() & UINT64_C(0xc00000)))
         features |= AIRPLAY_INFO_AAC_LC_FEATURE;
     return features;
+}
+
+static bool matches_node(const airplay_bplist_doc_t *doc, airplay_bplist_object_t object,
+    const rtcp_opack_node_t *nodes, size_t at, unsigned depth)
+{
+    if (depth > RTCP_OPACK_MAX_DEPTH) return false;
+    const rtcp_opack_node_t *n=&nodes[at];
+    airplay_bplist_type_t type; uint64_t count;
+    if (airplay_bplist_get_type(doc,object,&type,&count) != AIRPLAY_BPLIST_OK) return false;
+    switch (n->type) {
+    case RTCP_OPACK_BOOL: {
+        bool value;
+        return airplay_bplist_get_bool(doc,object,&value) == AIRPLAY_BPLIST_OK && value == n->value.boolean;
+    }
+    case RTCP_OPACK_INT: {
+        uint64_t value;
+        return airplay_bplist_get_uint(doc,object,&value) == AIRPLAY_BPLIST_OK && value == (uint64_t)n->value.integer;
+    }
+    case RTCP_OPACK_REAL: {
+        double value;
+        return type == AIRPLAY_BPLIST_REAL && airplay_bplist_get_number(doc,object,&value) == AIRPLAY_BPLIST_OK && value == n->value.real;
+    }
+    case RTCP_OPACK_STRING:
+        return airplay_bplist_string_equals_utf8(doc,object,n->value.blob.bytes,n->value.blob.length);
+    case RTCP_OPACK_DATA: {
+        const uint8_t *bytes; size_t length;
+        return airplay_bplist_get_data(doc,object,&bytes,&length) == AIRPLAY_BPLIST_OK &&
+            length == n->value.blob.length && !memcmp(bytes,n->value.blob.bytes,length);
+    }
+    case RTCP_OPACK_ARRAY: case RTCP_OPACK_DICT: {
+        bool dict=n->type == RTCP_OPACK_DICT;
+        if (type != (dict ? AIRPLAY_BPLIST_DICTIONARY : AIRPLAY_BPLIST_ARRAY) || count != n->count) return false;
+        size_t child=at+1;
+        for (uint64_t i=0;i<count;++i) {
+            airplay_bplist_object_t value;
+            if (dict) {
+                /* Generated catalogue keys are short ASCII except the plugin
+                 * mapping name; use the UTF-8-aware lookup below for that. */
+                const rtcp_opack_node_t *key=&nodes[child];
+                if (key->type != RTCP_OPACK_STRING ||
+                    airplay_bplist_dict_get_utf8_unique(doc,object,key->value.blob.bytes,
+                        key->value.blob.length,&value) != AIRPLAY_BPLIST_OK) return false;
+                child=key->end;
+            } else if (airplay_bplist_array_get(doc,object,i,&value) != AIRPLAY_BPLIST_OK) return false;
+            if (!matches_node(doc,value,nodes,child,depth+1)) return false;
+            child=nodes[child].end;
+        }
+        return true;
+    }
+    default: return false;
+    }
+}
+
+bool airplay_info_plist_matches_vehicle(const uint8_t *bytes, size_t length, rtcp_vehicle_t *model)
+{
+    if (!bytes || !model || length > AIRPLAY_INFO_PLIST_MAX_BYTES) return false;
+    airplay_bplist_doc_t doc; airplay_bplist_object_t root,info;
+    if (airplay_bplist_open(bytes,length,&doc) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_root(&doc,&root) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_dict_get_unique(&doc,root,"vehicleStateProtocolInfo",&info) != AIRPLAY_BPLIST_OK) return false;
+    ip_vehicle_workspace_t *workspace=calloc(1,sizeof(*workspace));
+    if (!workspace) return false;
+    size_t count=0;
+    bool matches=vehicle_nodes(model,workspace,&count) && matches_node(&doc,info,workspace->nodes,0,0);
+    free(workspace);
+    return matches;
 }

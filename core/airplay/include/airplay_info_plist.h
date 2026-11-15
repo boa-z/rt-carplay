@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "rtcp/display.h"
+#include "rtcp/vehicle.h"
 
 #define AIRPLAY_INFO_PLIST_MAX_BYTES 6144U
 
@@ -54,6 +55,9 @@ typedef struct {
     /* NULL retains the original Classic document. Optional, validated Main
      * Display geometry/appearance; copied into the output, never retained. */
     const rtcp_display_profile_t *main_display_profile;
+    /* Optional catalogue from the actual processor. Owner-thread only; emits
+     * vehicleStateProtocolInfo, not enabledFeatures or UI/cluster support. */
+    rtcp_vehicle_t *vehicle;
 } airplay_info_plist_config_t;
 
 /*
@@ -69,3 +73,7 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
 
 /* Effective mask shared by /info and service discovery. NULL uses video-only. */
 uint64_t airplay_info_plist_features(const airplay_info_plist_config_t *config);
+
+/* Exact, bounded catalogue check used by the Receiver opt-in and each refreshed
+ * session snapshot. Dictionary ordering is irrelevant; duplicates are refused. */
+bool airplay_info_plist_matches_vehicle(const uint8_t *, size_t, rtcp_vehicle_t *);

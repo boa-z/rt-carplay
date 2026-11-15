@@ -171,6 +171,8 @@ if(RTCP_BUILD_TESTS)
     add_test(NAME test_receiver_ultra_applications_e2e
         COMMAND test_airplay_pairing_e2e --ultra-apps)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME test_vehicle_info_independent_wire
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_vehicle_info_wire.py $<TARGET_FILE:test_airplay_info_plist>)
     add_test(NAME test_ui_sync_independent_wire
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_ui_sync_wire.py $<TARGET_FILE:test_ui_sync>)
 endif()

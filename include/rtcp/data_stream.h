@@ -28,6 +28,7 @@ typedef enum {
 } rtcp_data_stream_state_t;
 typedef struct {
     bool registered, offered;
+    bool enabled; /* Accepted initial SETUP enabledFeatures, not phone execution. */
     rtcp_data_stream_state_t state;
     int error;
     uint32_t stream_id;

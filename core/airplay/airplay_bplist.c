@@ -323,6 +323,32 @@ airplay_bplist_result_t airplay_bplist_dict_get_unique(
     return found ? AIRPLAY_BPLIST_OK : AIRPLAY_BPLIST_NOT_FOUND;
 }
 
+airplay_bplist_result_t airplay_bplist_dict_get_utf8_unique(const airplay_bplist_doc_t *doc,
+    airplay_bplist_object_t dictionary, const uint8_t *key, size_t key_length,
+    airplay_bplist_object_t *value)
+{
+    if ((!key && key_length) || !value) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_object_info_t info;
+    airplay_bplist_result_t rc=resolve_object(doc,dictionary,&info);
+    if (rc != AIRPLAY_BPLIST_OK) return rc;
+    if (info.type != 0x0dU) return AIRPLAY_BPLIST_WRONG_TYPE;
+    bool found=false;
+    for (uint64_t i=0;i<info.count;++i) {
+        airplay_bplist_object_t k; bplist_object_info_t ki;
+        rc=read_reference(doc,info.payload_offset+(size_t)i*doc->reference_size,&k);
+        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        rc=resolve_object(doc,k,&ki);
+        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        if (ki.type != 5U && ki.type != 6U) return AIRPLAY_BPLIST_WRONG_TYPE;
+        if (!airplay_bplist_string_equals_utf8(doc,k,key,key_length)) continue;
+        if (found) return AIRPLAY_BPLIST_INVALID_OBJECT;
+        rc=read_reference(doc,info.payload_offset+((size_t)info.count+(size_t)i)*doc->reference_size,value);
+        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        found=true;
+    }
+    return found ? AIRPLAY_BPLIST_OK : AIRPLAY_BPLIST_NOT_FOUND;
+}
+
 airplay_bplist_result_t airplay_bplist_get_main_display_size(
     const airplay_bplist_doc_t *doc,
     uint16_t *width_pixels,
@@ -432,6 +458,37 @@ airplay_bplist_result_t airplay_bplist_get_string(
     output[info.count] = '\0';
     *output_len = (size_t)info.count;
     return AIRPLAY_BPLIST_OK;
+}
+
+bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *doc,
+    airplay_bplist_object_t object, const uint8_t *text, size_t length)
+{
+    bplist_object_info_t info;
+    if ((!text && length) || resolve_object(doc,object,&info) != AIRPLAY_BPLIST_OK ||
+        (info.type != 5U && info.type != 6U)) return false;
+    size_t pos=0;
+    for (uint64_t i=0;i<info.count;++i) {
+        uint32_t cp=doc->bytes[info.payload_offset+i];
+        if (info.type == 6U) {
+            cp=((uint32_t)doc->bytes[info.payload_offset+2*i]<<8) |
+                doc->bytes[info.payload_offset+2*i+1];
+            if (cp >= 0xd800U && cp <= 0xdbffU) {
+                if (++i >= info.count) return false;
+                uint32_t low=((uint32_t)doc->bytes[info.payload_offset+2*i]<<8) |
+                    doc->bytes[info.payload_offset+2*i+1];
+                if (low < 0xdc00U || low > 0xdfffU) return false;
+                cp=0x10000U+((cp-0xd800U)<<10)+(low-0xdc00U);
+            } else if (cp >= 0xdc00U && cp <= 0xdfffU) return false;
+        } else if (cp > 0x7fU) return false;
+        uint8_t encoded[4]; size_t n;
+        if (cp < 0x80U) { encoded[0]=(uint8_t)cp; n=1; }
+        else if (cp < 0x800U) { encoded[0]=(uint8_t)(0xc0U|(cp>>6)); encoded[1]=(uint8_t)(0x80U|(cp&63)); n=2; }
+        else if (cp < 0x10000U) { encoded[0]=(uint8_t)(0xe0U|(cp>>12)); encoded[1]=(uint8_t)(0x80U|((cp>>6)&63)); encoded[2]=(uint8_t)(0x80U|(cp&63)); n=3; }
+        else { encoded[0]=(uint8_t)(0xf0U|(cp>>18)); encoded[1]=(uint8_t)(0x80U|((cp>>12)&63)); encoded[2]=(uint8_t)(0x80U|((cp>>6)&63)); encoded[3]=(uint8_t)(0x80U|(cp&63)); n=4; }
+        if (n > length-pos || memcmp(text+pos,encoded,n)) return false;
+        pos+=n;
+    }
+    return pos == length;
 }
 
 airplay_bplist_result_t airplay_bplist_get_data(
@@ -618,9 +675,10 @@ static airplay_bplist_result_t build_setup_response(
     return AIRPLAY_BPLIST_OK;
 }
 
-airplay_bplist_result_t airplay_bplist_build_initial_setup_response(
+airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
     uint16_t timing_port,
     uint16_t event_port,
+    bool vehicle,
     uint8_t *output,
     size_t output_capacity,
     size_t *output_len)
@@ -628,7 +686,7 @@ airplay_bplist_result_t airplay_bplist_build_initial_setup_response(
     if (timing_port == 0U || event_port == 0U) {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
-    bplist_write_object_t objects[9] = {
+    bplist_write_object_t objects[10] = {
         {.kind = BPLIST_WRITE_DICTIONARY,
          /* Binary-plist dictionaries store all key references before values. */
          .references = {1U, 3U, 5U, 2U, 4U, 6U},
@@ -643,7 +701,19 @@ airplay_bplist_result_t airplay_bplist_build_initial_setup_response(
         {.kind = BPLIST_WRITE_STRING, .text = "iAPChannel"},
         {.kind = BPLIST_WRITE_STRING, .text = "viewAreas"},
     };
-    return build_setup_response(objects, 9U, output, output_capacity, output_len);
+    if (vehicle) {
+        objects[6].references[2]=9U; objects[6].reference_count=3U;
+        objects[9]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="vehicleStateProtocol"};
+    }
+    return build_setup_response(objects, vehicle ? 10U : 9U, output, output_capacity, output_len);
+}
+
+airplay_bplist_result_t airplay_bplist_build_initial_setup_response(
+    uint16_t timing_port, uint16_t event_port, uint8_t *output,
+    size_t output_capacity, size_t *output_len)
+{
+    return airplay_bplist_build_initial_setup_response_vehicle(timing_port,event_port,false,
+        output,output_capacity,output_len);
 }
 
 airplay_bplist_result_t airplay_bplist_build_screen_setup_response(

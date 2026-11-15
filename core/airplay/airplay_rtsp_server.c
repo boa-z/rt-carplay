@@ -904,6 +904,7 @@ static void server_accept(airplay_rtsp_server_t *server)
     }
     session_config.disable_bluetooth = server_disable_bluetooth;
     session_config.data_stream_mask = server->config.data_stream.channel_mask;
+    session_config.negotiate_vehicle = server->config.negotiate_vehicle;
     session_config.start_data_stream = server_start_data_stream;
     session_config.stop_data_stream = server_stop_data_stream;
 
@@ -1322,5 +1323,6 @@ int airplay_rtsp_server_get_data_stream_status(const airplay_rtsp_server_t *s,
     data_stream_snapshot(&s->data_stream[kind], out);
     out->registered = (s->config.data_stream.channel_mask & RTCP_DATA_STREAM_MASK(kind)) != 0;
     out->offered = airplay_rtsp_session_data_stream_offered(s->session, kind);
+    out->enabled = airplay_rtsp_session_data_stream_enabled(s->session, kind);
     return RTCP_OK;
 }

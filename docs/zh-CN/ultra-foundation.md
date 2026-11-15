@@ -64,14 +64,24 @@ rtcp_receiver_get_vehicle_delivery_status 提供接入状态、待发响应/通�
 
 专门的加密 Host 场景使用真实 TCP、Pair-Verify/ControlCipher 和独立模拟控制器，目录 ID 为测试数据。覆盖 config/read/write/register、事务回传、选择性关闭/重开后的 HIGH updateNotify、认证边界保留值并清除订阅、原始 UI 回调共存，以及 Classic 音视频交互。故障注入应用测试覆盖保留原始字节及顺序、队列满重试、第二次写入前拒绝、放弃计数和畸形消息失败。这些属于 Host 测试，不代表真实 iPhone Vehicle State 互操作通过。
 
+## 显式 Vehicle State 能力协商
+
+可选 airplay_info_plist_config_t.vehicle 字段从实际处理器目录生成 vehicleStateProtocolInfo，包含协议版本、插件映射与配置、归属、权限、范围和当前初值。字段为空时 Classic 文档不变。额外对象使用临时有界堆工作区，不扩大 Classic RTSP 栈。字符串保留显式长度、内嵌 NUL，并由 UTF-8 转为 UTF-16；有限浮点元数据、二进制值和精确 int64 均保留。目录放不进现有 6,144 字节会话缓冲区时返回失败和零输出长度，不截断或静默省略。不会新增模拟仪表面板、主题目录、HEVC 或备用屏幕声明。
+
+仅在接入 Vehicle State 处理器并提供匹配 /info 目录时，显式设置 rtcp_receiver_config_t.negotiate_vehicle。Receiver 创建时比较完整元数据值，包括当前初值，拒绝缺失、不匹配或重复的元数据。每次接受新控制器前，重新验证刷新的不可变 /info 快照，失败则拒绝该连接。车辆值可能变化的宿主应通过 platform.get_info_plist 在每次会话前重新构建文档；作为 initialValue 输出的值改变后，静态文档会过期。已建立会话的能力快照保持不变。
+
+只有手机在初始 SETUP 提供该协议，并且 Receiver 的显式启用通过验证后，才向 enabledFeatures 加入 vehicleStateProtocol。重复初始 SETUP 保留已接受的 offer，新认证控制器重新协商。默认响应仍为 iAPChannel/viewAreas。仅注册传输、接入 UI Sync 模型或提供原始回调均不启用此声明。rtcp_data_stream_status_t.enabled 独立记录初始 SETUP 协商结果，与 registered/offered、连接状态和手机实际执行分开。两条 Vehicle 通道共享协议启用状态；UI Sync 在实际显示、主题及渲染目录就绪前仍不声明。
+
+Host 测试使用 Python plistlib 独立验证生成文档、重新编码的字典与引用布局、浮点/整数/字符串/二进制一致性、UTF-16 代理对、大于 2^53 的精确整数、重复与不匹配元数据、所有截断及输出耗尽。加密控制器测试检查 enabledFeatures，拒绝无效刷新快照，验证新控制器未提供协议的情况，并保留 Classic 媒体覆盖。这些是模拟 Host 控制器结果，不是真实 iPhone 协商证据。
+
 ## 测试与验收
 
 SDK Host 测试在 ASan/UBSan 下覆盖 LIVI configRequest 字节样本、负事务编号回传、目录结构与权限、缺失值、订阅、数值界限及步长、宿主拒绝、按 IID 返回部分写入错误、字符串复制、回调时机、输出失败回滚、通知重试/合并/重置、未知控制命令、截断及确定性畸形输入集。显示测试覆盖几何及触摸映射，元数据测试确认默认仍为 Classic 且没有额外可选能力。这些测试不是 iPhone 互操作证据。
 
 2026-11-15，上述参考版本的原始 LIVI 源码在 Ubuntu 24.04/WSL、Rust/Cargo 1.100.0 和 OpenSSL 3.0.13 下执行 cargo test --locked -p livi-cp --lib，179 个通过，失败/忽略/过滤均为零，包括 15 个 info、27 个 Vehicle State、一个 UI Sync 综合测试及四个 iAP 隧道测试。[选取的原始输出与环境](../evidence/livi-cp-host-20261115.txt)保留测试身份及范围，源码和 Cargo.lock 未改动，构建输出位于源码目录之外。Windows 尝试无法编译 livi-base 的 Unix 文件权限 API，因此没有在 Windows 执行参考测试。成功命令不包含 livi-core 的 theme_catalog 测试，后者保持 NOT_RUN。参考 Host 通过不能证明 D213、真实手机或完整官方 Ultra 验收。
 
-L1 仍为部分完成，Vehicle State 和 UI Sync Receiver 集成均有加密 Host 覆盖，仍需完成能力声明门控。注册 Type 130 传输已有加密 Host SETUP 覆盖，尚未由真实手机验证。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
+L1 仍为部分完成，Vehicle State 和 UI Sync Receiver 集成均有加密 Host 覆盖，Vehicle State 能力生成和协商现已显式门控，UI Sync 能力生成仍需实际宿主目录。注册 Type 130 传输已有加密 Host SETUP 覆盖，尚未由真实手机验证。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
 
 ## 后续实现
 
-后续协议工作为由完整处理器及实际宿主目录门控的能力声明。[UI Sync 状态/ACK 和 Receiver 集成](ui-sync.md)已有独立 plistlib 消息验证与加密应用协议测试，覆盖队列耗尽及通道隔离。现有 iAP 隧道保持原样且仅接收。宿主可显式将 Vehicle State 处理器接入 Receiver，接入不会在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。
+后续协议工作为由完整处理器及实际宿主目录门控的 UI Sync 能力声明。[UI Sync 状态/ACK 和 Receiver 集成](ui-sync.md)已有独立 plistlib 消息验证与加密应用协议测试，覆盖队列耗尽及通道隔离。现有 iAP 隧道保持原样且仅接收。宿主可显式将 Vehicle State 处理器接入 Receiver，接入不会在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。

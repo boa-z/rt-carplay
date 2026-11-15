@@ -41,14 +41,20 @@ typedef struct {
      * destroy, use only on owner. start/stop and authentication loss reset
      * subscriptions/pending events while preserving current vehicle values.
      * Automatically registers both Vehicle lanes, rejects overlapping raw
-     * registration, and owns replies/notification retry. Does not modify /info
-     * or advertise enabledFeatures. NULL preserves the Classic path. */
+     * registration, and owns replies/notification retry. Attachment alone does not modify
+     * /info or advertise enabledFeatures. NULL preserves the Classic path. */
     rtcp_vehicle_t *vehicle;
     /* Optional borrowed UI Sync processor, exclusive to this Receiver until
      * destroy. Owns UI output/retry; rejects overlapping raw UI registration.
      * Channel close/authentication loss/start/stop resets the handshake and
      * pending output, retaining desired layout/appearance. No /info declaration. */
     rtcp_ui_sync_t *ui_sync;
+    /* Explicit Vehicle State negotiation opt-in. Requires vehicle and exact
+     * vehicleStateProtocolInfo matching that model in initial/refreshed /info.
+     * Invalid initial metadata fails create; invalid refresh rejects the new
+     * controller. SETUP enables only when the phone offers the protocol.
+     * Does not enable UI Sync, HEVC, altScreen or official Ultra. */
+    bool negotiate_vehicle;
 } rtcp_receiver_config_t;
 
 /* All functions on an instance belong to one ordinary thread. The host

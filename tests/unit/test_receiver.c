@@ -95,7 +95,18 @@ int main(void)
         .characteristics = &characteristic, .count = 1};
     rtcp_vehicle_t *vehicle;
     assert(rtcp_vehicle_create(&vehicle_config, &vehicle) == RTCP_OK);
+    config.negotiate_vehicle=true;
+    assert(rtcp_receiver_create(&config,&receiver) == RTCP_EINVAL && !receiver);
     config.vehicle = vehicle;
+    assert(rtcp_receiver_create(&config,&receiver) == RTCP_EINVAL && !receiver);
+    info.vehicle=vehicle;
+    assert(airplay_info_plist_build(&info,plist,sizeof(plist),&length));
+    config.platform.info_plist_len=length;
+    assert(rtcp_receiver_create(&config,&receiver) == RTCP_OK);
+    assert(rtcp_receiver_destroy(receiver) == RTCP_OK); receiver=NULL;
+    config.negotiate_vehicle=false; info.vehicle=NULL;
+    assert(airplay_info_plist_build(&info,plist,sizeof(plist),&length));
+    config.platform.info_plist_len=length;
     config.data_stream.channel_mask = RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE);
     config.data_stream.on_body = raw_body;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_EINVAL && receiver == NULL);

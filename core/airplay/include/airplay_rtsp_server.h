@@ -92,6 +92,7 @@ typedef struct airplay_rtsp_server_config {
     bool (*get_info_plist)(const uint8_t **bytes, size_t *length, void *context);
     void *info_context;
     rtcp_data_stream_backend_t data_stream;
+    bool negotiate_vehicle; /* Internal Receiver opt-in after exact catalogue validation. */
 } airplay_rtsp_server_config_t;
 
 int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,

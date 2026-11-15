@@ -3,6 +3,7 @@
 #include "airplay_rtsp_server.h"
 #include "rtcp/receiver_compat.h"
 #include "receiver_vehicle.h"
+#include "airplay_info_plist.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,7 +19,19 @@ struct rtcp_receiver {
     rtcp_data_stream_backend_t raw_data_stream;
     rtcp_ui_sync_t *ui_sync;
     rtcp_ui_sync_delivery_status_t ui_delivery;
+    rtcp_vehicle_t *vehicle_model;
+    bool (*host_info)(const uint8_t **, size_t *, void *);
+    void *host_info_context;
 };
+
+static bool receiver_info(const uint8_t **bytes, size_t *length, void *context)
+{
+    rtcp_receiver_t *r=context;
+    if (r->host_info) {
+        if (!r->host_info(bytes,length,r->host_info_context)) return false;
+    } else { *bytes=r->info; *length=r->airplay.info_plist_len; }
+    return airplay_info_plist_matches_vehicle(*bytes,*length,r->vehicle_model);
+}
 
 static int ui_flush(rtcp_receiver_t *r)
 {
@@ -160,6 +173,9 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         (config->vehicle && (config->data_stream.channel_mask & RTCP_RECEIVER_VEHICLE_MASK)) ||
         (config->ui_sync && (config->data_stream.channel_mask & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC))))
         return RTCP_EINVAL;
+    if (config->negotiate_vehicle && (!config->vehicle ||
+        !airplay_info_plist_matches_vehicle(platform->info_plist,platform->info_plist_len,config->vehicle)))
+        return RTCP_EINVAL;
     rtcp_receiver_t *r = calloc(1, sizeof(*r));
     if (r == NULL) return RTCP_ENOMEM;
     if (config->vehicle) {
@@ -200,7 +216,13 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .disable_bluetooth = config->iap2.disable_bluetooth,
         .iap_context = config->iap2.context,
         .data_stream = config->data_stream,
+        .negotiate_vehicle = config->negotiate_vehicle,
     };
+    if (config->negotiate_vehicle) {
+        r->vehicle_model=config->vehicle;
+        r->host_info=platform->get_info_plist; r->host_info_context=platform->info_context;
+        r->airplay.get_info_plist=receiver_info; r->airplay.info_context=r;
+    }
     if (r->vehicle || r->ui_sync) {
         if (r->vehicle) r->airplay.data_stream.channel_mask |= RTCP_RECEIVER_VEHICLE_MASK;
         if (r->ui_sync) r->airplay.data_stream.channel_mask |= RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);

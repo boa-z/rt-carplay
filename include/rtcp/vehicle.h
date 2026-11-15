@@ -92,7 +92,7 @@ int rtcp_vehicle_status(const rtcp_vehicle_t *, rtcp_vehicle_status_t *);
 int rtcp_vehicle_get(const rtcp_vehicle_t *, int64_t iid, rtcp_vehicle_value_t *, bool *has_value);
 int rtcp_vehicle_set(rtcp_vehicle_t *, int64_t iid, const rtcp_vehicle_value_t *);
 
-/* OPACK vehicleStateProtocolInfo value, for a future host /info composition.
+/* OPACK vehicleStateProtocolInfo value, usable by host /info composition.
  * This API does not advertise or negotiate any capability by itself. */
 int rtcp_vehicle_info(rtcp_vehicle_t *, uint8_t *, size_t, size_t *);
 /* Complete decrypted Type 130 comm body, not an arbitrary TCP fragment.

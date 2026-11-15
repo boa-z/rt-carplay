@@ -122,7 +122,7 @@ if(RTCP_BUILD_TESTS)
         test_lockdown test_plist test_lockdown_pair
         test_lockdown_tls test_lockdown_session
         test_port_linux test_input_bridge
-        test_media_timestamp test_display test_opack test_vehicle
+        test_media_timestamp test_display test_opack test_vehicle test_airplay_data_stream
     )
 
     set(RTCP_PORT_TESTS

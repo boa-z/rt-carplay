@@ -12,7 +12,7 @@
 
 ## 功能
 
-[Ultra 协议基础](docs/zh-CN/ultra-foundation.md)提供可选 Main Display 元数据、OPACK 和有界 Vehicle State 消息处理器。实际 Type 130 和 UI Sync 接入仍待实现，这些 API 不代表完整官方 Ultra 支持。
+[Ultra 协议基础](docs/zh-CN/ultra-foundation.md)提供可选 Main Display 元数据、OPACK、有界 Vehicle State 消息处理器和内部认证双向 DataStream 传输。实际 Type 130 和 UI Sync 接入仍待实现，这些 API 不代表完整官方 Ultra 支持。
 
 - AirPlay/CarPlay RTSP、Pair-Setup/Pair-Verify、加密控制与事件及媒体、H.264 和 HID 输出。
 - 通过注入的传输服务提供 USBMUX、Lockdown、TLS 协议支持及无线 iAP2、MFi、Wi-Fi Handover。
@@ -68,7 +68,7 @@ cmake --build build-cmake -j8
 ctest --test-dir build-cmake --output-on-failure
 ```
 
-Make 使用 `config/mbedtls_rtcp_host.h` 在 `build/mbedtls` 构建私有 `libmbedcrypto.a`；mbedTLS 通过获取脚本提供，不提交源码。CMake 使用指定二进制目录。Make 默认启用 ASan/UBSan，上述 CMake 命令显式启用。测试集执行 57 个测试程序及旧配置加密端到端变体（58 个 CTest 用例）、边界检查及不使用内部包含目录的公共头文件编译检查。适配器专用回归由对应宿主集成文档说明。
+Make 使用 `config/mbedtls_rtcp_host.h` 在 `build/mbedtls` 构建私有 `libmbedcrypto.a`；mbedTLS 通过获取脚本提供，不提交源码。CMake 使用指定二进制目录。Make 默认启用 ASan/UBSan，上述 CMake 命令显式启用。测试集执行 58 个测试程序及旧配置加密端到端变体（59 个 CTest 用例）、边界检查及不使用内部包含目录的公共头文件编译检查。适配器专用回归由对应宿主集成文档说明。
 
 ## 快速开始
 

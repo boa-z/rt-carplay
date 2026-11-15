@@ -55,7 +55,7 @@ TESTS := test_rtthread_headless test_receiver  test_rtthread_clock   test_audio_
          test_usb_device test_usbmux test_usbmux_host test_lockdown test_plist \
          test_lockdown_pair test_lockdown_tls test_lockdown_session \
          test_port_linux test_input_bridge \
-         test_media_timestamp test_display test_opack test_vehicle
+         test_media_timestamp test_display test_opack test_vehicle test_airplay_data_stream
 
 # These tests drive the poll seams through the POSIX port.
 PORT_TESTS := test_receiver test_airplay_control_port test_airplay_timing_port \

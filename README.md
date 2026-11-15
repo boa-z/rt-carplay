@@ -12,7 +12,7 @@ Current state: the portable Receiver API and public media registration are imple
 
 ## Features
 
-The [Ultra protocol foundation](docs/ultra-foundation.md) adds optional Main Display metadata, OPACK and a bounded Vehicle State message processor. Live Type 130 and UI Sync integration are pending; these APIs do not claim official Ultra support.
+The [Ultra protocol foundation](docs/ultra-foundation.md) adds optional Main Display metadata, OPACK, a bounded Vehicle State message processor and an internal authenticated duplex DataStream transport. Live Type 130 and UI Sync integration are pending; these APIs do not claim official Ultra support.
 
 - AirPlay/CarPlay RTSP, Pair-Setup/Pair-Verify, encrypted control/event/media, H.264 and HID output.
 - USBMUX/Lockdown/TLS protocol support and wireless iAP2/MFi/Wi-Fi handover behind injected transport services.
@@ -68,7 +68,7 @@ cmake --build build-cmake -j8
 ctest --test-dir build-cmake --output-on-failure
 ```
 
-Make builds a private `libmbedcrypto.a` under `build/mbedtls` using `config/mbedtls_rtcp_host.h`; mbedTLS is fetched rather than committed. CMake uses its selected binary directory. Make enables ASan/UBSan by default; the CMake command above enables them explicitly. The suite executes 57 test binaries plus the legacy-configuration encrypted end-to-end variant (58 CTest cases), boundary checks and a public-header compilation without private include paths. Adapter-specific regressions are documented with the corresponding host integration.
+Make builds a private `libmbedcrypto.a` under `build/mbedtls` using `config/mbedtls_rtcp_host.h`; mbedTLS is fetched rather than committed. CMake uses its selected binary directory. Make enables ASan/UBSan by default; the CMake command above enables them explicitly. The suite executes 58 test binaries plus the legacy-configuration encrypted end-to-end variant (59 CTest cases), boundary checks and a public-header compilation without private include paths. Adapter-specific regressions are documented with the corresponding host integration.
 
 ## Quick start
 

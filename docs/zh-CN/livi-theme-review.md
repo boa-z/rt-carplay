@@ -1,6 +1,6 @@
-# LIVI 主题目录与渲染证据
+[English](../livi-theme-review.md) | [简体中文](livi-theme-review.md)
 
-[English](../livi-theme-review.md)
+# LIVI 主题目录与渲染证据
 
 基于 Lasse Heitgres 的 LIVI 原版 `64a05b68358db52ed887169143afd5944fd6f1f7`，遵守 GPL-3.0-or-later 及 NOTICE。本研究补充 [Ultra 基础报告](ultra-foundation.md)，不证明 LIVI 或本 SDK 已实现官方 Ultra。
 
@@ -17,13 +17,13 @@
 
 ## 实际实现与边界
 
-`native/crates/livi-core/src/projection/theme_catalog.rs` 的 `from_package()` 识别 centerConsole/cluster，要求存在 cluster，提取仪表布局 ID/显示名和调色板 ID，只保留包含 DCA_Map 组件的区域；中心屏布局故意置空。调色板提取只保留 accentColor 的明暗字符串。这是元数据目录提取，不能证明所有仪表图形/脚本、组件行为或呈现时钟已实现。
+[theme_catalog.rs](https://github.com/f-io/LIVI/blob/64a05b68358db52ed887169143afd5944fd6f1f7/native/crates/livi-core/src/projection/theme_catalog.rs) 的 `from_package()` 识别 centerConsole/cluster，要求存在 cluster，提取仪表布局 ID/显示名和调色板 ID，只保留包含 DCA_Map 组件的区域；中心屏布局故意置空。调色板提取只保留 accentColor 的明暗字符串。这是元数据目录提取，不能证明所有仪表图形/脚本、组件行为或呈现时钟已实现。
 
 fetch 路径会请求目录、校验下载的公开根证书 SHA256、选择资产/版本，并通过 HTTP Range 读取 ZIP 内两个 JSON。`catalog_assets()` 在该函数内解码 JWT payload，没有应用层 JWT 签名校验；`inflate()` 在该处没有显式解压输出上限，所选 ZIP 辅助代码也不构成完整资产认证/校验流程。不能将 HTTPS 传输检查与元数据解析当作官方签名资产渲染器已经验证。本 SDK 没有复制该下载器或资产。
 
 `ThemeId::parse()` 提取资产和数字版本，缓存文件名以二者命名；`cached()` 还要求已存主题的完整 ID 与配置一致。测试覆盖完整 ID 不匹配，但不能证明同资产/版本的不同 SDK 后缀可同时保存在不同文件。
 
-`native/crates/livi-ui-model/src/dashboard/layout.rs` 的 `spec()` 只特别处理少数内置 livi 布局，未知或厂商 ID 默认落入通用仪表加地图模型；`pages()` 使用目录中的布局/调色板 ID 和强调色。原版测试明确验证了这个回退，因此“选择了某厂商布局 ID”不能独立证明该厂商完整本地图形已经运行。
+[dashboard/layout.rs](https://github.com/f-io/LIVI/blob/64a05b68358db52ed887169143afd5944fd6f1f7/native/crates/livi-ui-model/src/dashboard/layout.rs) 的 `spec()` 只特别处理少数内置 livi 布局，未知或厂商 ID 默认落入通用仪表加地图模型；`pages()` 使用目录中的布局/调色板 ID 和强调色。原版测试明确验证了这个回退，因此“选择了某厂商布局 ID”不能独立证明该厂商完整本地图形已经运行。
 
 `livi-core/src/projection/cluster.rs` 仅在配置主题 ID 与当前目录一致时生成 UI Sync 布局，将已知区域映射到地图组件。`livi-cp/src/stack/setup.rs` 在手机提供 uiSync 且存在主题显示名称时启用它，`stack/control.rs` 随后输出空 uiSyncInfo，并与 Vehicle State 信息一起添加 displayPanels。这些是参考行为和 Host 证据，不能直接当作完整官方实现的验收清单。
 

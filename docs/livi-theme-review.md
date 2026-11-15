@@ -1,6 +1,6 @@
-# LIVI theme inventory and renderer evidence
+[English](livi-theme-review.md) | [简体中文](zh-CN/livi-theme-review.md)
 
-[简体中文](zh-CN/livi-theme-review.md)
+# LIVI theme inventory and renderer evidence
 
 Review basis: original LIVI revision `64a05b68358db52ed887169143afd5944fd6f1f7`, by Lasse Heitgres, GPL-3.0-or-later with NOTICE terms. This review adds source/test evidence to the [Ultra foundation report](ultra-foundation.md). It does not establish official Ultra capability for LIVI or this SDK.
 

@@ -166,11 +166,18 @@ static int pair_attempt(rtcp_lockdown_session_t *session,
 
         session->operation = "GeneratePairRecord";
         RTCP_LOGI("lockdown", "generating pair record");
+        uint32_t generation_start = config->now_ms ? config->now_ms() : 0U;
         ret = rtcp_pair_record_generate(record, device_key, device_key_length,
                                         wifi_address, config->host_id,
                                         config->system_buid, config->rng,
                                         config->rng_context);
         RTCP_LOGI("lockdown", "pair record generation ret=%d", ret);
+        if (config->now_ms) {
+            uint32_t generation_elapsed = config->now_ms() - generation_start;
+            RTCP_LOGI("lockdown", "pair record generation elapsed_ms=%u",
+                      (unsigned)generation_elapsed);
+            (void)generation_elapsed; /* Logging can be compiled out. */
+        }
         if (ret != RTCP_OK) {
             return ret;
         }

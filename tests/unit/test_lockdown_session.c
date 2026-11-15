@@ -685,6 +685,13 @@ static void fake_close(void *user, const rtcp_stream_t *stream)
 }
 
 static unsigned s_pair_sleeps;
+static unsigned s_generation_clock_calls;
+
+static uint32_t fake_generation_clock(void)
+{
+    /* Deliberately cross the monotonic 32-bit millisecond wrap. */
+    return s_generation_clock_calls++ == 0U ? UINT32_MAX - 15U : 16U;
+}
 
 static void fake_sleep(void *user, uint32_t ms)
 {
@@ -740,8 +747,11 @@ static void test_full_session(void)
     memset(&session, 0, sizeof(session));
     make_config(&config, &record);
     s_pair_sleeps = 0U;
+    s_generation_clock_calls = 0U;
+    config.now_ms = fake_generation_clock;
 
     assert(rtcp_lockdown_session_open(&session, &config) == RTCP_OK);
+    assert(s_generation_clock_calls == 2U);
     assert(s_phone.pair_requests == 2U);
     assert(s_pair_sleeps == 1U);
     assert(session.paired);

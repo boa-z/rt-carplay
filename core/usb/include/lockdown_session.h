@@ -76,6 +76,10 @@ typedef struct {
     /* Maximum Pair attempts; 0 uses 300 (five minutes at the default
      * retry delay). */
     uint32_t pair_attempts;
+
+    /* Optional monotonic clock for key-generation diagnostics (wrap-safe for
+     * intervals below 2^32 ms). NULL leaves timing unavailable. */
+    uint32_t (*now_ms)(void);
 } rtcp_lockdown_session_config_t;
 
 typedef struct {

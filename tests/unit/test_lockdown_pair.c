@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "mbedtls/bignum.h"
 #include "mbedtls/pk.h"
@@ -77,12 +78,16 @@ static void test_generate_and_verify(void)
     static rtcp_pair_record_t record;
     memset(&record, 0, sizeof(record));
 
+    clock_t started = clock();
     int ret = rtcp_pair_record_generate(
         &record, (const uint8_t *)device_public_key_pem,
         sizeof(device_public_key_pem) - 1U, "00:11:22:33:44:55",
         "11111111-2222-4333-8444-555555555555",
         "66666666-7777-4888-8999-AAAAAAAAAAAA", test_rng, NULL);
     assert(ret == RTCP_OK);
+    printf("pair generation: limb_bits=%u cpu_ms=%.1f (host only)\n",
+           (unsigned)(8U * sizeof(mbedtls_mpi_uint)),
+           1000.0 * (double)(clock() - started) / CLOCKS_PER_SEC);
 
     assert(strcmp(record.wifi_address, "00:11:22:33:44:55") == 0);
     assert(record.device_public_key_length ==
@@ -139,6 +144,14 @@ static void test_generate_and_verify(void)
     /* The root identity is what lockdown presents over TLS. */
     assert(mbedtls_pk_check_pair(&root.pk, &root_key) == 0);
     assert(mbedtls_pk_check_pair(&host.pk, &host_key) == 0);
+    assert(mbedtls_pk_get_bitlen(&root_key) == 2048U);
+    assert(mbedtls_pk_get_bitlen(&host_key) == 2048U);
+    assert(mbedtls_rsa_check_privkey(mbedtls_pk_rsa(root_key)) == 0);
+    assert(mbedtls_rsa_check_privkey(mbedtls_pk_rsa(host_key)) == 0);
+    assert(mbedtls_mpi_cmp_int(&mbedtls_pk_rsa(root_key)->E, 65537) == 0);
+    assert(mbedtls_mpi_cmp_int(&mbedtls_pk_rsa(host_key)->E, 65537) == 0);
+    assert(mbedtls_mpi_cmp_mpi(&mbedtls_pk_rsa(root_key)->N,
+                              &mbedtls_pk_rsa(host_key)->N) != 0);
 
     /* The device certificate embeds the phone's public key unchanged. */
     static mbedtls_pk_context input;

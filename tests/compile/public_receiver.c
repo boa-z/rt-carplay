@@ -8,6 +8,7 @@
 #include "rtcp/opack.h"
 #include "rtcp/vehicle.h"
 #include "rtcp/data_stream.h"
+#include "rtcp/ui_sync.h"
 
 int public_receiver_host(const rtcp_platform_t *platform,
                          const rtcp_media_backend_t *media,
@@ -41,4 +42,9 @@ int public_receiver_data_stream(rtcp_receiver_t *receiver,
 int public_receiver_vehicle(rtcp_receiver_t *receiver, rtcp_vehicle_delivery_status_t *status)
 {
     return rtcp_receiver_get_vehicle_delivery_status(receiver, status);
+}
+
+int public_receiver_ui_sync(rtcp_receiver_t *receiver, rtcp_ui_sync_delivery_status_t *status)
+{
+    return rtcp_receiver_get_ui_sync_delivery_status(receiver, status);
 }

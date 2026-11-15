@@ -12,6 +12,7 @@
 #include "rtcp/diagnostics.h"
 #include "rtcp/data_stream.h"
 #include "rtcp/vehicle.h"
+#include "rtcp/ui_sync.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,6 +44,11 @@ typedef struct {
      * registration, and owns replies/notification retry. Does not modify /info
      * or advertise enabledFeatures. NULL preserves the Classic path. */
     rtcp_vehicle_t *vehicle;
+    /* Optional borrowed UI Sync processor, exclusive to this Receiver until
+     * destroy. Owns UI output/retry; rejects overlapping raw UI registration.
+     * Channel close/authentication loss/start/stop resets the handshake and
+     * pending output, retaining desired layout/appearance. No /info declaration. */
+    rtcp_ui_sync_t *ui_sync;
 } rtcp_receiver_config_t;
 
 /* All functions on an instance belong to one ordinary thread. The host
@@ -74,14 +80,16 @@ bool rtcp_receiver_send_iap(rtcp_receiver_t *, const uint8_t *, size_t);
  * bytes into a bounded queue; success is not phone receipt. EINVAL denotes
  * invalid kind/body, ESTATE an absent connection, ENOMEM a full queue.
  * Status works while stopped (zero counters/idle, registration preserved).
- * Sending to an attached vehicle processor's lanes returns ESTATE; change
- * values with rtcp_vehicle_set on the owner instead. */
+ * Sending to attached Vehicle State/UI Sync lanes returns ESTATE; update
+ * their models through the corresponding owner-thread APIs instead. */
 int rtcp_receiver_send_data_stream(rtcp_receiver_t *, rtcp_data_stream_kind_t,
                                     const uint8_t *, size_t);
 int rtcp_receiver_get_data_stream_status(const rtcp_receiver_t *,
     rtcp_data_stream_kind_t, rtcp_data_stream_status_t *);
 int rtcp_receiver_get_vehicle_delivery_status(const rtcp_receiver_t *,
     rtcp_vehicle_delivery_status_t *);
+int rtcp_receiver_get_ui_sync_delivery_status(const rtcp_receiver_t *,
+    rtcp_ui_sync_delivery_status_t *);
 
 #ifdef __cplusplus
 }

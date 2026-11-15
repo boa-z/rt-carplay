@@ -51,6 +51,8 @@ static void expect_empty_diagnostics(rtcp_receiver_t *receiver)
 }
 static int failed_listen(uint8_t family, uint16_t port)
 { (void)family; (void)port; return RTCP_EIO; }
+static bool raw_body(rtcp_data_stream_kind_t kind, const uint8_t *b, size_t n, void *ctx)
+{ (void)kind; (void)b; (void)n; (void)ctx; return true; }
 
 int main(void)
 {
@@ -95,6 +97,7 @@ int main(void)
     assert(rtcp_vehicle_create(&vehicle_config, &vehicle) == RTCP_OK);
     config.vehicle = vehicle;
     config.data_stream.channel_mask = RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE);
+    config.data_stream.on_body = raw_body;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_EINVAL && receiver == NULL);
     config.data_stream.channel_mask = 0;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_OK);
@@ -105,7 +108,22 @@ int main(void)
     assert(attached_stream.registered && !attached_stream.offered && attached_stream.state == RTCP_DATA_STREAM_IDLE);
     assert(rtcp_receiver_destroy(receiver) == RTCP_OK); receiver = NULL;
     config.vehicle = NULL; rtcp_vehicle_destroy(vehicle);
+    rtcp_ui_sync_config_t ui_config={.struct_size=sizeof(ui_config),.display_uuid="display"};
+    rtcp_ui_sync_t *ui;
+    assert(rtcp_ui_sync_create(&ui_config,&ui) == RTCP_OK);
+    config.ui_sync=ui; config.data_stream.channel_mask=RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
+    assert(rtcp_receiver_create(&config,&receiver) == RTCP_EINVAL && receiver == NULL);
+    config.data_stream.channel_mask=RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE);
+    assert(rtcp_receiver_create(&config,&receiver) == RTCP_OK);
+    rtcp_ui_sync_delivery_status_t ui_delivery;
+    assert(rtcp_receiver_get_ui_sync_delivery_status(receiver,&ui_delivery) == RTCP_OK && ui_delivery.attached);
+    assert(rtcp_receiver_get_data_stream_status(receiver,RTCP_DATA_STREAM_UI_SYNC,&attached_stream) == RTCP_OK && attached_stream.registered);
+    assert(rtcp_receiver_destroy(receiver) == RTCP_OK); receiver=NULL;
+    rtcp_ui_sync_destroy(ui); config.ui_sync=NULL; config.data_stream.channel_mask=0; config.data_stream.on_body=NULL;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_OK);
+    assert(rtcp_receiver_get_ui_sync_delivery_status(receiver,&ui_delivery) == RTCP_OK && !ui_delivery.attached);
+    assert(rtcp_receiver_get_ui_sync_delivery_status(NULL,&ui_delivery) == RTCP_EINVAL);
+    assert(rtcp_receiver_get_ui_sync_delivery_status(receiver,NULL) == RTCP_EINVAL);
     assert(rtcp_receiver_get_vehicle_delivery_status(receiver, &delivery) == RTCP_OK && !delivery.attached);
     assert(rtcp_receiver_get_vehicle_delivery_status(NULL, &delivery) == RTCP_EINVAL);
     assert(rtcp_receiver_get_vehicle_delivery_status(receiver, NULL) == RTCP_EINVAL);

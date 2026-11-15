@@ -2,7 +2,7 @@
 
 # CarPlay Ultra 协议基础
 
-最终产品目标是完整官方 CarPlay Ultra。本里程碑提供可移植的显示元数据、OPACK 和有界 Vehicle State 处理器，尚不能证明 Ultra 协商、官方认证或 Ultra 渲染器可用。Classic 视频与本地仪表融合是独立的集成成果。这些 API 不会自动向手机声明新的 Ultra 能力。
+最终产品目标是完整官方 CarPlay Ultra。当前基础提供可移植的显示元数据、OPACK，以及可选接入 Receiver 的有界 Vehicle State/UI Sync 处理器，尚不能证明 Ultra 协商、官方认证或 Ultra 渲染器可用。Classic 视频与本地仪表融合是独立的集成成果。这些 API 不会自动向手机声明新的 Ultra 能力。
 
 ## 参考与署名
 
@@ -42,7 +42,7 @@ Host 测试覆盖独立 TCP/加密帧/包分片、65,536 字节包体、短 sync
 
 ## Receiver 注册及 SETUP 生命周期
 
-公共 rtcp/data_stream.h 接口与 Receiver 配置接收显式通道掩码、完整包体处理器及可选关闭处理器。注册为零时保留 Classic 行为。三类传输对应 Vehicle State 普通/高优先级和 UI Sync UUID。注册不会自动生成应用协议、enabledFeatures 项、vehicleStateProtocolInfo、uiSyncInfo 或 displayPanels 声明。集成宿主只能注册已实现的处理器，D213 开发配置当前仍不注册任何此类处理器。下述显式 Vehicle State 处理器接入已经实现；UI Sync 应用集成仍待完成。
+公共 rtcp/data_stream.h 接口与 Receiver 配置接收显式通道掩码、完整包体处理器及可选关闭处理器。注册为零时保留 Classic 行为。三类传输对应 Vehicle State 普通/高优先级和 UI Sync UUID。注册不会自动生成应用协议、enabledFeatures 项、vehicleStateProtocolInfo、uiSyncInfo 或 displayPanels 声明。集成宿主只能注册已实现的处理器，D213 开发配置当前仍不注册任何此类处理器。可选 Vehicle State 和 UI Sync 应用处理器接入均已实现，两者都不自动生成能力声明。
 
 仅在初始手机 SETUP 成功后保存能力提议快照。已注册通道还要求对应的 vehicleStateProtocol 或 uiSync 提议、完成 Pair-Verify、活动的加密控制连接及初始 SETUP，缺失或无效前提会拒绝建立。每次 Type 130 SETUP 当前只包含一条流，与原有 iAP 限制一致；混合/批量 Type 130 请求在启动端点前被拒绝。分别发送请求可以同时建立三条通道，各自拥有独立端口、流 ID、密钥、加密计数器、队列及状态。iAP 保留 streamID 1，注册传输采用递增且大于一的 ID。完全一致的活动 SETUP 返回原有端点，不能通过改变 seed 或连接元数据隐式替换。
 
@@ -70,8 +70,8 @@ SDK Host 测试在 ASan/UBSan 下覆盖 LIVI configRequest 字节样本、负事
 
 2026-11-15，上述参考版本的原始 LIVI 源码在 Ubuntu 24.04/WSL、Rust/Cargo 1.100.0 和 OpenSSL 3.0.13 下执行 cargo test --locked -p livi-cp --lib，179 个通过，失败/忽略/过滤均为零，包括 15 个 info、27 个 Vehicle State、一个 UI Sync 综合测试及四个 iAP 隧道测试。[选取的原始输出与环境](../evidence/livi-cp-host-20261115.txt)保留测试身份及范围，源码和 Cargo.lock 未改动，构建输出位于源码目录之外。Windows 尝试无法编译 livi-base 的 Unix 文件权限 API，因此没有在 Windows 执行参考测试。成功命令不包含 livi-core 的 theme_catalog 测试，后者保持 NOT_RUN。参考 Host 通过不能证明 D213、真实手机或完整官方 Ultra 验收。
 
-L1 仍为部分完成，Vehicle State Receiver 集成已有加密 Host 覆盖，UI Sync 基础仍需实现并通过测试。注册 Type 130 传输已有加密 Host SETUP 覆盖，尚未由真实手机验证。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
+L1 仍为部分完成，Vehicle State 和 UI Sync Receiver 集成均有加密 Host 覆盖，仍需完成能力声明门控。注册 Type 130 传输已有加密 Host SETUP 覆盖，尚未由真实手机验证。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
 
 ## 后续实现
 
-后续协议工作为由完整处理器门控的能力声明，以及二进制 plist UI Sync 状态/ACK。现有 iAP 隧道保持原样且仅接收。宿主可显式将 Vehicle State 处理器接入 Receiver，接入不会在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。
+后续协议工作为由完整处理器及实际宿主目录门控的能力声明。[UI Sync 状态/ACK 和 Receiver 集成](ui-sync.md)已有独立 plistlib 消息验证与加密应用协议测试，覆盖队列耗尽及通道隔离。现有 iAP 隧道保持原样且仅接收。宿主可显式将 Vehicle State 处理器接入 Receiver，接入不会在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。

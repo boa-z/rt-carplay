@@ -236,7 +236,8 @@ airplay_bplist_result_t airplay_bplist_get_type(
     airplay_bplist_result_t result = resolve_object(doc, object, &info);
     if (result != AIRPLAY_BPLIST_OK) return result;
     switch (info.type) {
-    case 0x00U: *type = AIRPLAY_BPLIST_NULL; break;
+    case 0x00U: *type = (info.marker == 0x08U || info.marker == 0x09U)
+                            ? AIRPLAY_BPLIST_BOOL : AIRPLAY_BPLIST_NULL; break;
     case 0x01U: *type = (info.marker >> 4U) == 0U
                               ? AIRPLAY_BPLIST_BOOL : AIRPLAY_BPLIST_INTEGER; break;
     case 0x02U: *type = AIRPLAY_BPLIST_REAL; break;
@@ -292,6 +293,34 @@ airplay_bplist_result_t airplay_bplist_dict_get(
         }
     }
     return AIRPLAY_BPLIST_NOT_FOUND;
+}
+
+airplay_bplist_result_t airplay_bplist_dict_get_unique(
+    const airplay_bplist_doc_t *doc, airplay_bplist_object_t dictionary,
+    const char *key, airplay_bplist_object_t *value)
+{
+    if (!key || !value) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_object_info_t info;
+    airplay_bplist_result_t rc = resolve_object(doc, dictionary, &info);
+    if (rc != AIRPLAY_BPLIST_OK) return rc;
+    if (info.type != 0x0dU) return AIRPLAY_BPLIST_WRONG_TYPE;
+    bool found = false;
+    for (uint64_t i = 0; i < info.count; ++i) {
+        airplay_bplist_object_t k;
+        rc = read_reference(doc, info.payload_offset + (size_t)i * doc->reference_size, &k);
+        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        bplist_object_info_t ki;
+        rc = resolve_object(doc, k, &ki);
+        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        if (ki.type != 5 && ki.type != 6) return AIRPLAY_BPLIST_WRONG_TYPE;
+        if (!key_equals(doc, k, key)) continue;
+        if (found) return AIRPLAY_BPLIST_INVALID_OBJECT;
+        rc = read_reference(doc, info.payload_offset + ((size_t)info.count + (size_t)i) *
+            doc->reference_size, value);
+        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        found = true;
+    }
+    return found ? AIRPLAY_BPLIST_OK : AIRPLAY_BPLIST_NOT_FOUND;
 }
 
 airplay_bplist_result_t airplay_bplist_get_main_display_size(

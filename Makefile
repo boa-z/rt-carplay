@@ -55,7 +55,7 @@ TESTS := test_rtthread_headless test_receiver test_receiver_vehicle test_rtthrea
          test_usb_device test_usbmux test_usbmux_host test_lockdown test_plist \
          test_lockdown_pair test_lockdown_tls test_lockdown_session \
          test_port_linux test_input_bridge \
-         test_media_timestamp test_display test_opack test_vehicle test_airplay_data_stream
+         test_media_timestamp test_display test_opack test_vehicle test_ui_sync test_airplay_data_stream
 
 # These tests drive the poll seams through the POSIX port.
 PORT_TESTS := test_receiver test_airplay_control_port test_airplay_timing_port \
@@ -142,6 +142,8 @@ check: all check-public-api check-docs
 	done; \
 	./$(BUILD)/test_airplay_pairing_e2e --legacy-config || status=1; \
 	./$(BUILD)/test_airplay_pairing_e2e --vehicle || status=1; \
+	./$(BUILD)/test_airplay_pairing_e2e --ultra-apps || status=1; \
+	python3 tests/check_ui_sync_wire.py $(BUILD)/test_ui_sync || status=1; \
 	./check-boundary.sh || status=1; \
 	exit $$status
 

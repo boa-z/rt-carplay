@@ -67,6 +67,10 @@ airplay_bplist_result_t airplay_bplist_dict_get(
     airplay_bplist_object_t dictionary,
     const char *key,
     airplay_bplist_object_t *value);
+/* Protocol routing lookup: reject duplicate matching keys and malformed keys
+ * instead of accepting the first match. Existing Classic lookup is unchanged. */
+airplay_bplist_result_t airplay_bplist_dict_get_unique(
+    const airplay_bplist_doc_t *, airplay_bplist_object_t, const char *, airplay_bplist_object_t *);
 /* Read widthPixels/heightPixels from the first (main) entry in an AirPlay /info displays array. */
 airplay_bplist_result_t airplay_bplist_get_main_display_size(
     const airplay_bplist_doc_t *doc,

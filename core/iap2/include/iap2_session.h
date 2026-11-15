@@ -88,6 +88,11 @@ typedef enum {
 typedef bool (*iap2_session_get_wifi_cb_t)(iap2_session_wifi_t *out, void *context);
 typedef bool (*iap2_session_get_airplay_cb_t)(iap2_session_airplay_t *out, void *context);
 typedef void (*iap2_session_event_cb_t)(iap2_session_event_t event, void *context);
+/* Optional synchronous observer. Body is borrowed until return; do not retain
+ * it or reenter/destroy the session. Outgoing means queued, not peer accepted. */
+typedef void (*iap2_session_message_cb_t)(bool outgoing, uint16_t message_id,
+                                         const uint8_t *body, size_t body_len,
+                                         void *context);
 
 typedef struct {
     iap2_identity_config_t identity; /* strings are borrowed for the session lifetime */
@@ -110,6 +115,7 @@ typedef struct {
     /* Application compatibility policy, not an iAP2 timing requirement.
      * Zero disables it. One extra wired invitation is allowed before TCP. */
     uint32_t wired_reinvite_delay_ms;
+    iap2_session_message_cb_t observe_message;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES 4U

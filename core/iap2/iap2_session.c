@@ -100,9 +100,13 @@ static bool send_csm(iap2_session_t *session,
                      uint64_t now_ms)
 {
     if (session->core == NULL) return false;
-    return iap2_core_send_csm_with_ack_callback(session->core, message_id, body,
+    bool queued = iap2_core_send_csm_with_ack_callback(session->core, message_id, body,
                                                 body_len, acked_callback,
                                                 acked_context, now_ms);
+    if (queued && session->config.observe_message != NULL)
+        session->config.observe_message(true, message_id, body, body_len,
+                                         session->config.context);
+    return queued;
 }
 
 static void reset_wireless_negotiation(iap2_session_t *session)
@@ -676,6 +680,9 @@ void iap2_session_handle_message(iap2_session_t *session,
 {
     if (session == NULL) return;
     session->now_ms = now_ms;
+    if (session->config.observe_message != NULL)
+        session->config.observe_message(false, message_id, body, body_len,
+                                         session->config.context);
     switch (message_id) {
     case IAP2_MSG_START_IDENTIFICATION:
         (void)send_identification_information(session, now_ms);

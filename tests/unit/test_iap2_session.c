@@ -25,9 +25,22 @@ typedef struct {
     size_t message_count;
     unsigned events[64];
     unsigned event_count;
+    unsigned observed_rx, observed_tx;
+    csm_record_t observed;
 } harness_t;
 
 static harness_t g_harness;
+
+static void observe_message(bool outgoing, uint16_t id, const uint8_t *body,
+                            size_t length, void *context)
+{
+    harness_t *h = context;
+    if (outgoing) ++h->observed_tx;
+    else ++h->observed_rx;
+    assert(length <= sizeof(h->observed.body));
+    h->observed.id = id; h->observed.body_len = length;
+    if (length) memcpy(h->observed.body, body, length);
+}
 
 static bool capture_tx(const uint8_t *bytes, size_t len, void *context)
 {
@@ -450,6 +463,7 @@ int main(void)
         .available_current_ma = 0U,
         .battery_should_charge = false,
         .wired_reinvite_delay_ms = wired_case ? 10000U : 0U,
+        .observe_message = observe_message,
     };
     session = iap2_session_create(&wired_config);
     assert(session != NULL);
@@ -461,6 +475,9 @@ int main(void)
     drain_tx(session, 11);
     const csm_record_t *wired_identification = last_message(h, 0x1d01);
     assert(wired_identification != NULL);
+    assert(h->observed_rx == 1 && h->observed_tx == 1);
+    assert(h->observed.id == 0x1d01 && h->observed.body_len == wired_identification->body_len);
+    assert(!memcmp(h->observed.body, wired_identification->body, h->observed.body_len));
     const uint8_t *field = NULL;
     size_t field_len = 0U;
     assert(find_body_parameter(wired_identification->body,

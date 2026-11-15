@@ -645,9 +645,10 @@ static airplay_rtsp_session_result_t handle_setup(
             session->timing_port = timing_port;
             started_timing_now = true;
         }
-        if (airplay_bplist_build_initial_setup_response_vehicle(
+        if (airplay_bplist_build_initial_setup_response_features(
                 session->timing_port, session->event_port,
-                session->config.negotiate_vehicle && (offered & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE)), body,
+                session->config.negotiate_vehicle && (offered & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE)),
+                session->config.negotiate_ui_sync && (offered & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC)), body,
                 sizeof(body), &body_len) != AIRPLAY_BPLIST_OK) {
             if (started_timing_now && session->config.stop_timing != NULL) {
                 session->config.stop_timing(session->config.media_context);
@@ -669,9 +670,10 @@ static airplay_rtsp_session_result_t handle_setup(
         if (result == AIRPLAY_RTSP_SESSION_OK) {
             session->data_stream_offered = offered;
             session->initial_setup_complete = true;
-            RTCP_LOGI(TAG, "setup=initial timing_port=%u event_port=%u enabled_features=iAPChannel,viewAreas vehicle=%u",
+            RTCP_LOGI(TAG, "setup=initial timing_port=%u event_port=%u enabled_features=iAPChannel,viewAreas vehicle=%u ui_sync=%u",
                      (unsigned)session->timing_port, (unsigned)session->event_port,
-                     session->config.negotiate_vehicle && (offered & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE)) ? 1U : 0U);
+                     session->config.negotiate_vehicle && (offered & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE)) ? 1U : 0U,
+                     session->config.negotiate_ui_sync && (offered & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC)) ? 1U : 0U);
         }
         memset(body, 0, sizeof(body));
         if (result != AIRPLAY_RTSP_SESSION_OK) {
@@ -1207,6 +1209,8 @@ static airplay_rtsp_session_result_t session_create(
         RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE_HIGH);
     if (config->negotiate_vehicle && (config->data_stream_mask & vehicle_mask) != vehicle_mask)
         return AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT;
+    if (config->negotiate_ui_sync && !(config->data_stream_mask & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC)))
+        return AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT;
     airplay_bplist_doc_t info_doc;
     airplay_bplist_object_t info_root;
     airplay_bplist_type_t info_type;
@@ -1644,7 +1648,8 @@ bool airplay_rtsp_session_data_stream_offered(const airplay_rtsp_session_t *s, r
 bool airplay_rtsp_session_data_stream_enabled(const airplay_rtsp_session_t *s,
     rtcp_data_stream_kind_t kind)
 {
-    return s && (unsigned)kind < RTCP_DATA_STREAM_COUNT && kind != RTCP_DATA_STREAM_UI_SYNC &&
-        s->initial_setup_complete && s->config.negotiate_vehicle &&
+    return s && (unsigned)kind < RTCP_DATA_STREAM_COUNT &&
+        s->initial_setup_complete &&
+        (kind == RTCP_DATA_STREAM_UI_SYNC ? s->config.negotiate_ui_sync : s->config.negotiate_vehicle) &&
         (s->data_stream_offered & RTCP_DATA_STREAM_MASK(kind)) != 0;
 }

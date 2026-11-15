@@ -55,6 +55,14 @@ typedef struct {
      * controller. SETUP enables only when the phone offers the protocol.
      * Does not enable UI Sync, HEVC, altScreen or official Ultra. */
     bool negotiate_vehicle;
+    /* Experimental UI Sync opt-in. Requires attached ui_sync, bound actual
+     * host inventory and matching single-Main-Display /info metadata. Invalid
+     * initial/refresh metadata is refused. SETUP additionally requires the
+     * phone's uiSync offer. The host must provide its actual asset/renderer/
+     * presentation implementation; neither this flag nor the inventory proves
+     * those capabilities or official Ultra. Keep inventory immutable while
+     * attached. D213's independent LVGL dashboard does not satisfy this contract. */
+    bool negotiate_ui_sync;
 } rtcp_receiver_config_t;
 
 /* All functions on an instance belong to one ordinary thread. The host

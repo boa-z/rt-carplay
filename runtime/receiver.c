@@ -30,7 +30,8 @@ static bool receiver_info(const uint8_t **bytes, size_t *length, void *context)
     if (r->host_info) {
         if (!r->host_info(bytes,length,r->host_info_context)) return false;
     } else { *bytes=r->info; *length=r->airplay.info_plist_len; }
-    return airplay_info_plist_matches_vehicle(*bytes,*length,r->vehicle_model);
+    return (!r->airplay.negotiate_vehicle || airplay_info_plist_matches_vehicle(*bytes,*length,r->vehicle_model)) &&
+        (!r->airplay.negotiate_ui_sync || airplay_info_plist_matches_ui_sync(*bytes,*length,r->ui_sync));
 }
 
 static int ui_flush(rtcp_receiver_t *r)
@@ -180,6 +181,9 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
     if (config->negotiate_vehicle && (!config->vehicle ||
         !airplay_info_plist_matches_vehicle(platform->info_plist,platform->info_plist_len,config->vehicle)))
         return RTCP_EINVAL;
+    if (config->negotiate_ui_sync && (!config->ui_sync ||
+        !airplay_info_plist_matches_ui_sync(platform->info_plist,platform->info_plist_len,config->ui_sync)))
+        return RTCP_EINVAL;
     rtcp_receiver_t *r = calloc(1, sizeof(*r));
     if (r == NULL) return RTCP_ENOMEM;
     if (config->vehicle) {
@@ -221,8 +225,9 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .iap_context = config->iap2.context,
         .data_stream = config->data_stream,
         .negotiate_vehicle = config->negotiate_vehicle,
+        .negotiate_ui_sync = config->negotiate_ui_sync,
     };
-    if (config->negotiate_vehicle) {
+    if (config->negotiate_vehicle || config->negotiate_ui_sync) {
         r->vehicle_model=config->vehicle;
         r->host_info=platform->get_info_plist; r->host_info_context=platform->info_context;
         r->airplay.get_info_plist=receiver_info; r->airplay.info_context=r;

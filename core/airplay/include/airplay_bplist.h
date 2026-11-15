@@ -155,6 +155,9 @@ bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *,
 airplay_bplist_result_t airplay_bplist_dict_get_utf8_unique(const airplay_bplist_doc_t *,
     airplay_bplist_object_t, const uint8_t *, size_t, airplay_bplist_object_t *);
 
-/* Internal opt-in extension; false emits the original Classic response bytes. */
+/* Internal independent opt-ins; false/false retains Classic response bytes. */
+airplay_bplist_result_t airplay_bplist_build_initial_setup_response_features(
+    uint16_t, uint16_t, bool, bool, uint8_t *, size_t, size_t *);
+/* Compatibility vehicle-only extension. */
 airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
     uint16_t, uint16_t, bool, uint8_t *, size_t, size_t *);

@@ -294,8 +294,36 @@ static void test_builds_multi_stream_setup_response(void)
            AIRPLAY_BPLIST_INVALID_ARGUMENT);
 }
 
+static void test_independent_initial_features(void)
+{
+    uint8_t classic[512],bytes[512]; size_t original,length;
+    assert(airplay_bplist_build_initial_setup_response(49152,49153,classic,sizeof(classic),&original)==AIRPLAY_BPLIST_OK);
+    for (unsigned mask=0;mask<4;++mask) {
+        bool vehicle=(mask&1)!=0,ui=(mask&2)!=0;
+        assert(airplay_bplist_build_initial_setup_response_features(49152,49153,vehicle,ui,bytes,sizeof(bytes),&length)==AIRPLAY_BPLIST_OK);
+        if (!mask) assert(length==original && !memcmp(bytes,classic,length));
+        airplay_bplist_doc_t d; airplay_bplist_object_t root,features,item; airplay_bplist_type_t type; uint64_t count;
+        assert(airplay_bplist_open(bytes,length,&d)==AIRPLAY_BPLIST_OK && airplay_bplist_root(&d,&root)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&d,root,"enabledFeatures",&features)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_type(&d,features,&type,&count)==AIRPLAY_BPLIST_OK && type==AIRPLAY_BPLIST_ARRAY);
+        assert(count==2U+(vehicle ? 1U : 0U)+(ui ? 1U : 0U));
+        const char *expected[4]={"iAPChannel","viewAreas"}; size_t n=2;
+        if (vehicle) expected[n++]="vehicleStateProtocol";
+        if (ui) expected[n++]="uiSync";
+        for (size_t i=0;i<n;++i) {
+            char text[64]; size_t size;
+            assert(airplay_bplist_array_get(&d,features,i,&item)==AIRPLAY_BPLIST_OK);
+            assert(airplay_bplist_get_string(&d,item,text,sizeof(text),&size)==AIRPLAY_BPLIST_OK && !strcmp(text,expected[i]));
+        }
+        size_t full=length;
+        for (size_t i=0;i<full;++i)
+            assert(airplay_bplist_build_initial_setup_response_features(49152,49153,vehicle,ui,bytes,i,&length)==AIRPLAY_BPLIST_OUTPUT_TOO_SMALL);
+    }
+}
+
 int main(void)
 {
+    test_independent_initial_features();
     test_setup_stream_lookup();
     test_main_display_size();
     test_rejects_malformed_documents();

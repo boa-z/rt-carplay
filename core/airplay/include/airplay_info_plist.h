@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include "rtcp/display.h"
 #include "rtcp/vehicle.h"
+#include "rtcp/ui_sync.h"
 
 #define AIRPLAY_INFO_PLIST_MAX_BYTES 6144U
 
@@ -58,6 +59,12 @@ typedef struct {
     /* Optional catalogue from the actual processor. Owner-thread only; emits
      * vehicleStateProtocolInfo, not enabledFeatures or UI/cluster support. */
     rtcp_vehicle_t *vehicle;
+    /* Experimental single-Main-Display UI Sync metadata. Requires a bound
+     * host inventory with matching UUID/pixel/physical geometry. Emits one
+     * actual panel and empty uiSyncInfo; no virtual cluster, plugin, HEVC or
+     * official rendering claim. The host supplies renderer/asset/timing support.
+     * NULL preserves existing output bytes. Does not enable SETUP by itself. */
+    rtcp_ui_sync_t *ui_sync;
 } airplay_info_plist_config_t;
 
 /*
@@ -77,3 +84,6 @@ uint64_t airplay_info_plist_features(const airplay_info_plist_config_t *config);
 /* Exact, bounded catalogue check used by the Receiver opt-in and each refreshed
  * session snapshot. Dictionary ordering is irrelevant; duplicates are refused. */
 bool airplay_info_plist_matches_vehicle(const uint8_t *, size_t, rtcp_vehicle_t *);
+/* Exact single-panel/stream geometry and empty UI info check. Requires bound
+ * inventory; refuses duplicate fields, extra panels/displays and wrong types. */
+bool airplay_info_plist_matches_ui_sync(const uint8_t *, size_t, const rtcp_ui_sync_t *);

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Minimal binary property-list writer for the AirPlay /info response.
- * Optional Vehicle catalogue follows LIVI by Lasse Heitgres; see NOTICE.
+ * Optional Vehicle/UI panel metadata follows LIVI by Lasse Heitgres; see NOTICE.
  *
  * Objects are emitted depth-first: children first, then their parent container.
  * Object IDs are assigned in emission order and the offset table maps IDs back
@@ -643,6 +643,35 @@ static uint32_t emit_vehicle(ip_writer_t *w, const rtcp_opack_node_t *nodes, siz
     return w->ok ? ids[0] : 0;
 }
 
+static bool ui_geometry(const airplay_info_plist_config_t *config)
+{
+    if (!config->ui_sync) return true;
+    const rtcp_ui_sync_inventory_t *v=rtcp_ui_sync_get_inventory(config->ui_sync);
+    const rtcp_display_profile_t *p=config->main_display_profile;
+    const char *uuid=p && p->uuid ? p->uuid : IP_DISPLAY_UUID;
+    return v && !strcmp(v->display_uuid,uuid) && v->width_pixels==config->width_pixels &&
+        v->height_pixels==config->height_pixels &&
+        v->width_physical_mm==(config->width_physical_mm ? config->width_physical_mm : IP_DEFAULT_WIDTH_PHYSICAL) &&
+        v->height_physical_mm==(config->height_physical_mm ? config->height_physical_mm : IP_DEFAULT_HEIGHT_PHYSICAL);
+}
+
+/* Single actual Main Display panel, deliberately no invented instrument panel
+ * or display plugin. Based on LIVI info.rs panel fields; see NOTICE. */
+static uint32_t emit_ui_panel(ip_writer_t *w, const rtcp_ui_sync_inventory_t *v)
+{
+    const char *stream_keys[]={"uuid","originXPixels","originYPixels","zIndex"};
+    uint32_t zero=ip_emit_int(w,0);
+    uint32_t stream_values[]={ip_emit_string(w,v->display_uuid),zero,zero,zero};
+    uint32_t stream=ip_emit_literal_dict(w,stream_keys,stream_values,4);
+    const char *keys[]={"uid","widthPixels","heightPixels","widthPhysical","heightPhysical",
+        "properties","initialVideoStreams"};
+    uint32_t values[]={ip_emit_string(w,v->panel_uid),ip_emit_int(w,v->width_pixels),
+        ip_emit_int(w,v->height_pixels),ip_emit_int(w,v->width_physical_mm),ip_emit_int(w,v->height_physical_mm),
+        ip_emit_array(w,NULL,0),ip_emit_array(w,&stream,1)};
+    uint32_t panel=ip_emit_literal_dict(w,keys,values,7);
+    return ip_emit_array(w,&panel,1);
+}
+
 static uint32_t emit_root(ip_writer_t *w,
                           const airplay_info_plist_config_t *config,
                           const char *name,
@@ -656,7 +685,7 @@ static uint32_t emit_root(ip_writer_t *w,
         "keepAliveLowPower", "keepAliveSendStatsAsBody", "modes",
         "extendedFeatures", "displays", "hidDevices",
     };
-    const char *keys[18];
+    const char *keys[20];
     memcpy(keys, base_keys, sizeof(base_keys));
 
     uint32_t bluetooth;
@@ -673,7 +702,7 @@ static uint32_t emit_root(ip_writer_t *w,
     uint32_t modes = emit_modes(w);
     uint32_t extended = emit_extended_features(w);
 
-    uint32_t values[18];
+    uint32_t values[20];
     values[0] = ip_emit_string(w, config->source_version != NULL
                                       ? config->source_version
                                       : AIRPLAY_INFO_DEFAULT_SOURCE_VERSION);
@@ -710,6 +739,12 @@ static uint32_t emit_root(ip_writer_t *w,
         keys[entry_count]="vehicleStateProtocolInfo";
         values[entry_count++]=vehicle_info;
     }
+    if (config->ui_sync) {
+        keys[entry_count]="uiSyncInfo";
+        values[entry_count++]=ip_emit_literal_dict(w,NULL,NULL,0);
+        keys[entry_count]="displayPanels";
+        values[entry_count++]=emit_ui_panel(w,rtcp_ui_sync_get_inventory(config->ui_sync));
+    }
     return ip_emit_literal_dict(w, keys, values, entry_count);
 }
 
@@ -723,7 +758,7 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
         config->device_id[0] == '\0' || config->width_pixels == 0U ||
         config->height_pixels == 0U || output == NULL || output_len == NULL ||
         !rtcp_display_profile_validate(config->main_display_profile,
-                                       config->width_pixels, config->height_pixels)) {
+                                       config->width_pixels, config->height_pixels) || !ui_geometry(config)) {
         return false;
     }
 
@@ -737,13 +772,13 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
     }
 
     if (output_capacity < 8U) return false;
-    ip_vehicle_workspace_t *vehicle = config->vehicle ? calloc(1,sizeof(*vehicle)) : NULL;
-    if (config->vehicle && !vehicle) return false;
+    ip_vehicle_workspace_t *vehicle = (config->vehicle || config->ui_sync) ? calloc(1,sizeof(*vehicle)) : NULL;
+    if ((config->vehicle || config->ui_sync) && !vehicle) return false;
     uint32_t classic_offsets[IP_MAX_OBJECTS];
     ip_writer_t writer;
     memset(&writer, 0, sizeof(writer));
     writer.out = output;
-    writer.capacity = config->vehicle && output_capacity > AIRPLAY_INFO_PLIST_MAX_BYTES
+    writer.capacity = vehicle && output_capacity > AIRPLAY_INFO_PLIST_MAX_BYTES
         ? AIRPLAY_INFO_PLIST_MAX_BYTES : output_capacity;
     writer.ok = true;
     writer.offsets = vehicle ? vehicle->offsets : classic_offsets;
@@ -755,7 +790,7 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
                            ? config->name
                            : IP_DEFAULT_NAME;
     uint32_t vehicle_info=0; size_t node_count=0;
-    if (vehicle) {
+    if (config->vehicle) {
         if (!vehicle_nodes(config->vehicle,vehicle,&node_count)) { free(vehicle); return false; }
         vehicle_info=emit_vehicle(&writer,vehicle->nodes,node_count,vehicle->ids);
     }
@@ -862,4 +897,55 @@ bool airplay_info_plist_matches_vehicle(const uint8_t *bytes, size_t length, rtc
     bool matches=vehicle_nodes(model,workspace,&count) && matches_node(&doc,info,workspace->nodes,0,0);
     free(workspace);
     return matches;
+}
+
+static bool info_type(const airplay_bplist_doc_t *d, airplay_bplist_object_t o,
+    airplay_bplist_type_t wanted, uint64_t expected)
+{
+    airplay_bplist_type_t type; uint64_t count;
+    return airplay_bplist_get_type(d,o,&type,&count)==AIRPLAY_BPLIST_OK && type==wanted && count==expected;
+}
+static bool info_text(const airplay_bplist_doc_t *d, airplay_bplist_object_t o, const char *key, const char *text)
+{
+    airplay_bplist_object_t value;
+    return airplay_bplist_dict_get_unique(d,o,key,&value)==AIRPLAY_BPLIST_OK &&
+        airplay_bplist_string_equals_utf8(d,value,(const uint8_t *)text,strlen(text));
+}
+static bool info_number(const airplay_bplist_doc_t *d, airplay_bplist_object_t o, const char *key, uint64_t expected)
+{
+    airplay_bplist_object_t value; uint64_t number;
+    return airplay_bplist_dict_get_unique(d,o,key,&value)==AIRPLAY_BPLIST_OK &&
+        airplay_bplist_get_uint(d,value,&number)==AIRPLAY_BPLIST_OK && number==expected;
+}
+static bool info_one(const airplay_bplist_doc_t *d, airplay_bplist_object_t o,
+    const char *key, airplay_bplist_object_t *item)
+{
+    airplay_bplist_object_t array;
+    return airplay_bplist_dict_get_unique(d,o,key,&array)==AIRPLAY_BPLIST_OK &&
+        info_type(d,array,AIRPLAY_BPLIST_ARRAY,1) && airplay_bplist_array_get(d,array,0,item)==AIRPLAY_BPLIST_OK;
+}
+static bool info_geometry(const airplay_bplist_doc_t *d, airplay_bplist_object_t o,
+    const rtcp_ui_sync_inventory_t *v)
+{
+    return info_number(d,o,"widthPixels",v->width_pixels) && info_number(d,o,"heightPixels",v->height_pixels) &&
+        info_number(d,o,"widthPhysical",v->width_physical_mm) && info_number(d,o,"heightPhysical",v->height_physical_mm);
+}
+bool airplay_info_plist_matches_ui_sync(const uint8_t *bytes, size_t length, const rtcp_ui_sync_t *model)
+{
+    const rtcp_ui_sync_inventory_t *v=rtcp_ui_sync_get_inventory(model);
+    if (!bytes || !v || length > AIRPLAY_INFO_PLIST_MAX_BYTES) return false;
+    airplay_bplist_doc_t d; airplay_bplist_object_t root,ui,panel,display,properties,stream;
+    return airplay_bplist_open(bytes,length,&d)==AIRPLAY_BPLIST_OK &&
+        airplay_bplist_root(&d,&root)==AIRPLAY_BPLIST_OK &&
+        airplay_bplist_dict_get_unique(&d,root,"uiSyncInfo",&ui)==AIRPLAY_BPLIST_OK &&
+        info_type(&d,ui,AIRPLAY_BPLIST_DICTIONARY,0) &&
+        info_one(&d,root,"displays",&display) && info_text(&d,display,"uuid",v->display_uuid) &&
+        info_number(&d,display,"type",110) && info_geometry(&d,display,v) &&
+        info_one(&d,root,"displayPanels",&panel) && info_type(&d,panel,AIRPLAY_BPLIST_DICTIONARY,7) &&
+        info_text(&d,panel,"uid",v->panel_uid) && info_geometry(&d,panel,v) &&
+        airplay_bplist_dict_get_unique(&d,panel,"properties",&properties)==AIRPLAY_BPLIST_OK &&
+        info_type(&d,properties,AIRPLAY_BPLIST_ARRAY,0) &&
+        info_one(&d,panel,"initialVideoStreams",&stream) && info_type(&d,stream,AIRPLAY_BPLIST_DICTIONARY,4) &&
+        info_text(&d,stream,"uuid",v->display_uuid) && info_number(&d,stream,"originXPixels",0) &&
+        info_number(&d,stream,"originYPixels",0) && info_number(&d,stream,"zIndex",0);
 }

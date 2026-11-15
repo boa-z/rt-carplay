@@ -1266,8 +1266,12 @@ static uint16_t run_initial_setup(rtcp_receiver_t *server,
     assert(airplay_bplist_dict_get(&doc,root,"enabledFeatures",&features) == AIRPLAY_BPLIST_OK);
     assert(airplay_bplist_get_type(&doc,features,&type,&count) == AIRPLAY_BPLIST_OK && type == AIRPLAY_BPLIST_ARRAY);
     bool enabled=data_status(RTCP_DATA_STREAM_VEHICLE).enabled;
-    assert(count == (enabled ? 3U : 2U));
-    const char *expected[]={"iAPChannel","viewAreas","vehicleStateProtocol"};
+    bool ui_enabled=data_status(RTCP_DATA_STREAM_UI_SYNC).enabled;
+    assert(count == 2U+(enabled ? 1U : 0U)+(ui_enabled ? 1U : 0U));
+    const char *expected[4]={"iAPChannel","viewAreas"};
+    size_t nfeatures=2;
+    if (enabled) expected[nfeatures++]="vehicleStateProtocol";
+    if (ui_enabled) expected[nfeatures++]="uiSync";
     for (uint64_t i=0;i<count;++i) {
         char text[64]; size_t n;
         assert(airplay_bplist_array_get(&doc,features,i,&item) == AIRPLAY_BPLIST_OK);
@@ -1567,10 +1571,14 @@ static void send_ui_fixture(int fd, airplay_control_cipher_t *cipher, unsigned f
 {
     uint8_t packet[RTCP_UI_SYNC_MAX_MESSAGE+32]={0}, sealed[9000]; size_t length;
     assert(fixture<sizeof(ui_fixtures)/sizeof(ui_fixtures[0]) && ui_fixtures[fixture].length<=RTCP_UI_SYNC_MAX_MESSAGE);
-    size_t body=ui_fixtures[fixture].length;
+    rtcp_opack_node_t nodes[128]; size_t count,body;
+    assert(rtcp_opack_decode(ui_fixtures[fixture].bytes,ui_fixtures[fixture].length,nodes,128,&count)==RTCP_OPACK_OK);
+    size_t display=rtcp_opack_dict_get(nodes,count,0,"displayUUID"); assert(display!=SIZE_MAX);
+    const char *uuid="b7e6c5a0-1111-4000-8000-000000000001";
+    nodes[display].value.blob.bytes=(const uint8_t *)uuid; nodes[display].value.blob.length=strlen(uuid);
+    assert(rtcp_opack_encode(nodes,count,packet+32,sizeof(packet)-32,&body)==RTCP_OPACK_OK);
     write_be32(packet,(uint32_t)(body+32)); memcpy(packet+4,sync ? "sync" : "asyn",4);
     memcpy(packet+16,"comm",4); write_be64(packet+20,UINT64_C(0x8877665544332211));
-    memcpy(packet+32,ui_fixtures[fixture].bytes,body);
     assert(airplay_control_cipher_encrypt(cipher,packet,body+32,sealed,sizeof(sealed),&length) == AIRPLAY_CONTROL_CIPHER_OK);
     if (bad_tag) sealed[length-1]^=1;
     assert(rtcp_net_linux.send(fd,sealed,length) == (int)length);
@@ -1961,7 +1969,7 @@ typedef struct {
     airplay_info_plist_config_t config;
     uint8_t *bytes;
     size_t *length;
-    bool omit;
+    bool omit, omit_ui;
     unsigned calls;
 } vehicle_info_refresh_t;
 static bool refresh_vehicle_info(const uint8_t **bytes, size_t *length, void *context)
@@ -1970,6 +1978,7 @@ static bool refresh_vehicle_info(const uint8_t **bytes, size_t *length, void *co
     ++r->calls;
     airplay_info_plist_config_t config=r->config;
     if (r->omit) config.vehicle=NULL;
+    if (r->omit_ui) config.ui_sync=NULL;
     if (!airplay_info_plist_build(&config,r->bytes,AIRPLAY_INFO_PLIST_MAX_BYTES,r->length)) return false;
     *bytes=r->bytes; *length=*r->length; return true;
 }
@@ -1981,7 +1990,7 @@ int main(int argc, char **argv)
     rtcp_vehicle_t *vehicle = vehicle_mode ? vehicle_test_create() : NULL;
     rtcp_ui_sync_t *ui=NULL;
     if (ui_mode) {
-        rtcp_ui_sync_config_t config={.struct_size=sizeof(config),.display_uuid="Cluster_Display",
+        rtcp_ui_sync_config_t config={.struct_size=sizeof(config),.display_uuid="b7e6c5a0-1111-4000-8000-000000000001",
             .allow_layout_change=true,.give_focus=true,.focus_token=12345};
         assert(rtcp_ui_sync_create(&config,&ui) == RTCP_OK);
         const char *palettes[]={"blue"}, *remote_palettes[]={"dark","red"};
@@ -1989,7 +1998,7 @@ int main(int argc, char **argv)
             {"0D38B526",palettes,1,NULL,0},{"DB7C6944",remote_palettes,2,NULL,0}
         };
         rtcp_ui_sync_inventory_t inventory={.struct_size=sizeof(inventory),.theme_id="synthetic-e2e:1",
-            .panel_uid="synthetic-panel",.display_uuid="Cluster_Display",
+            .panel_uid="synthetic-panel",.display_uuid="b7e6c5a0-1111-4000-8000-000000000001",
             .width_pixels=1920,.height_pixels=1080,.width_physical_mm=200,.height_physical_mm=120,
             .layouts=installed,.layout_count=2};
         assert(rtcp_ui_sync_bind_inventory(ui,&inventory) == RTCP_OK);
@@ -2011,6 +2020,7 @@ int main(int argc, char **argv)
     info.height_pixels = 1080U;
     info.max_fps = 30U;
     info.vehicle = vehicle;
+    info.ui_sync = ui;
     size_t info_len = 0U;
     assert(airplay_info_plist_build(&info, info_plist, sizeof(info_plist),
                                     &info_len));
@@ -2043,7 +2053,7 @@ int main(int argc, char **argv)
         receiver_config.platform.get_info_plist=refresh_vehicle_info;
         receiver_config.platform.info_context=&info_refresh;
         receiver_config.data_stream.channel_mask = RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
-        if (ui_mode) { receiver_config.ui_sync=ui; receiver_config.data_stream.channel_mask=0; }
+        if (ui_mode) { receiver_config.ui_sync=ui; receiver_config.negotiate_ui_sync=true; receiver_config.data_stream.channel_mask=0; }
     } else if (argc > 1) {
         assert(argc == 2 && strcmp(argv[1], "--legacy-config") == 0);
         /* Execute the same encrypted exchanges through the migration API.
@@ -2092,7 +2102,7 @@ int main(int argc, char **argv)
     uint16_t event_port = run_initial_setup(server, &client, &cseq, true);
     assert(data_status(RTCP_DATA_STREAM_VEHICLE).enabled == vehicle_mode);
     assert(data_status(RTCP_DATA_STREAM_VEHICLE_HIGH).enabled == vehicle_mode);
-    assert(!data_status(RTCP_DATA_STREAM_UI_SYNC).enabled);
+    assert(data_status(RTCP_DATA_STREAM_UI_SYNC).enabled == ui_mode);
     if (vehicle_mode) assert(run_initial_setup(server,&client,&cseq,false) == event_port);
     run_event_channel(server, shared_secret, event_port);
     if (vehicle_mode) run_vehicle_processor(&client, shared_secret, &cseq, vehicle,!ui_mode);
@@ -2131,6 +2141,18 @@ int main(int argc, char **argv)
         assert(info_refresh.calls > calls && !receiver_connected(server));
         rtcp_net_linux.close(fd); info_refresh.omit=false;
     }
+    if (ui_mode) {
+        /* Vehicle metadata still matches; missing UI metadata alone must refuse
+         * this new controller before authentication or endpoint allocation. */
+        info_refresh.omit_ui=true; unsigned calls=info_refresh.calls;
+        rtcp_addr_t address={.family=RTCP_AF_INET,.port=rtcp_receiver_port(server),.addr={127,0,0,1}};
+        int fd=rtcp_net_linux.connect(&address); assert(fd>=0);
+        uint64_t start=rtcp_os_linux.now_ms();
+        while (info_refresh.calls==calls && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS)
+            receiver_poll(server,10);
+        assert(info_refresh.calls>calls && !receiver_connected(server));
+        rtcp_net_linux.close(fd); info_refresh.omit_ui=false;
+    }
     client_t client2;
     client_connect(server, &client2);
     uint8_t shared_secret2[KEY_BYTES];
@@ -2139,6 +2161,7 @@ int main(int argc, char **argv)
     cseq = 60U;
     uint16_t event_port2 = run_initial_setup(server, &client2, &cseq, false);
     assert(!data_status(RTCP_DATA_STREAM_VEHICLE).enabled);
+    assert(!data_status(RTCP_DATA_STREAM_UI_SYNC).enabled);
     request_data(&client2, &guard_cseq, RTCP_DATA_STREAM_UI_SYNC, 8000, 503, &guard_id);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).registered && !data_status(RTCP_DATA_STREAM_UI_SYNC).offered);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state == RTCP_DATA_STREAM_IDLE);

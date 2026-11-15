@@ -2,7 +2,7 @@
 
 # UI Sync 协议基础
 
-可选的 rtcp/ui_sync.h 处理器实现了有界 UI Sync 消息及状态基础，参考 LIVI 版本 64a05b68358db52ed887169143afd5944fd6f1f7 的 ui_sync.rs。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)，署名要求见 NOTICE。处理器不提供主题资产、OpenGL 渲染器、帧合成器、呈现同步、官方授权或认证，不声明 uiSyncInfo 或 enabledFeatures。D213 应用尚未接入该处理器。
+可选的 rtcp/ui_sync.h 处理器实现了有界 UI Sync 消息及状态基础，参考 LIVI 版本 64a05b68358db52ed887169143afd5944fd6f1f7 的 ui_sync.rs。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)，署名要求见 NOTICE。处理器不提供主题资产、OpenGL 渲染器、帧合成器、呈现同步、官方授权或认证，仅接入不声明 uiSyncInfo 或 enabledFeatures；[单 Main Display 实验能力组合](ui-sync-capabilities.md)现有独立显式开关。D213 应用尚未接入该处理器。
 
 ## 宿主集成
 
@@ -40,7 +40,7 @@ UI 通道协商前，宿主可通过 `rtcp_ui_sync_bind_inventory()` 绑定 `rtc
 
 Receiver 发送状态增加 `last_rejection`，与拒绝计数一起保留准确的应用/发送拒绝原因。后续通道关闭的通用错误可能覆盖 `last_error`，但不会抹掉这个原因，因此能区分队列耗尽与目录不支持。该值跨重置保留，直到下次拒绝或 Receiver 销毁。
 
-目录是宿主实现契约，不是主题解析器、真实性校验器、渲染器或呈现回调。绑定不会生成 displayPanels/uiSyncInfo 或启用 uiSync。测试中的模拟标识不能当作已经实现的车辆主题向手机声明；能力组合仍需真实宿主渲染/主题目录和完整处理器。D213 配置尚未绑定或声明此协议。[LIVI 主题补充研究](livi-theme-review.md)说明了参考元数据测试为何不能证明完整官方 Local UI 渲染。
+目录是宿主实现契约，不是主题解析器、真实性校验器、渲染器或呈现回调。绑定不会生成 displayPanels/uiSyncInfo 或启用 uiSync。测试中的模拟标识不能当作已经实现的车辆主题向手机声明；独立的[实验能力门控](ui-sync-capabilities.md)要求已绑定目录及匹配 Main Display 元数据，宿主仍负责实际渲染/资产/呈现。D213 配置尚未绑定或声明此协议。[LIVI 主题补充研究](livi-theme-review.md)说明了参考元数据测试为何不能证明完整官方 Local UI 渲染。
 
 ## 验证与剩余验收
 
@@ -48,7 +48,7 @@ tests/check_ui_sync_wire.py 使用 Python plistlib 生成已保存的模拟输�
 
 加密 Receiver 场景通过真实 Host TCP/Pair-Verify/ControlCipher 同时使用实际 Vehicle State 与 UI Sync 应用处理器。检查四消息协商、精确传输同步 token、应用 ACK/noAck、阻塞 socket 后填满七个传输槽并保留第八个响应、应用第九个请求的布局前拒绝、新 seed 重开、错误认证标签隔离、车辆读操作继续工作及后续 Classic 音视频回归。保留一个未连接 UI 监听器，由认证会话销毁清理。这些均为模拟控制器 Host 测试，不是真实 iPhone 的 L3/L4 证据。
 
-完整官方 Ultra 目标仍需门控的 /info 能力组合、实际主题/显示目录和渲染、图形/HEVC/无线集成、呈现时序、真机协商及车辆/UI 交互，以及适用的官方集成和认证流程。参见[总体基础及 L0–L5 范围](ultra-foundation.md)。
+完整官方 Ultra 目标仍需经产品验证的 /info 能力组合、实际主题/显示目录和渲染、图形/HEVC/无线集成、呈现时序、真机协商及车辆/UI 交互，以及适用的官方集成和认证流程。参见[总体基础及 L0–L5 范围](ultra-foundation.md)。
 
 目录单元测试覆盖嵌套数据复制、标识/尺寸/数量/重复边界、显示匹配、原子替换、准确的区域/组件候选、按布局限定调色板、宿主选择拒绝、独立编码的非法手机选择、拒绝时不提交状态/ACK 及重置保留。加密 Receiver 场景绑定模拟目录，仅拒绝并关闭收到未知布局的 UI 通道，保留准确 last_rejection，车辆读取继续，随后在新 UI 通道接受支持的布局/调色板。Python 独立解析 35 条输出。2026-11-15 该里程碑通过 SDK Make、CMake 65/65 及完整集成 Host 测试，均不是真实手机或渲染器证据。
 

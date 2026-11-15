@@ -119,10 +119,37 @@ int main(void)
     assert(attached_stream.registered && !attached_stream.offered && attached_stream.state == RTCP_DATA_STREAM_IDLE);
     assert(rtcp_receiver_destroy(receiver) == RTCP_OK); receiver = NULL;
     config.vehicle = NULL; rtcp_vehicle_destroy(vehicle);
-    rtcp_ui_sync_config_t ui_config={.struct_size=sizeof(ui_config),.display_uuid="display"};
+    config.negotiate_ui_sync=true;
+    assert(rtcp_receiver_create(&config,&receiver)==RTCP_EINVAL && !receiver);
+    rtcp_ui_sync_config_t ui_config={.struct_size=sizeof(ui_config),
+        .display_uuid="b7e6c5a0-1111-4000-8000-000000000001"};
     rtcp_ui_sync_t *ui;
     assert(rtcp_ui_sync_create(&ui_config,&ui) == RTCP_OK);
-    config.ui_sync=ui; config.data_stream.channel_mask=RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
+    config.ui_sync=ui;
+    assert(rtcp_receiver_create(&config,&receiver)==RTCP_EINVAL && !receiver);
+    const char *ui_palettes[]={"synthetic"};
+    rtcp_ui_sync_inventory_layout_t ui_layout={.id="synthetic",.palettes=ui_palettes,.palette_count=1};
+    rtcp_ui_sync_inventory_t ui_inventory={.struct_size=sizeof(ui_inventory),.theme_id="synthetic:1",
+        .panel_uid="synthetic-main",.display_uuid=ui_config.display_uuid,.width_pixels=800,.height_pixels=480,
+        .width_physical_mm=200,.height_physical_mm=120,.layouts=&ui_layout,.layout_count=1};
+    assert(rtcp_ui_sync_bind_inventory(ui,&ui_inventory)==RTCP_OK);
+    assert(rtcp_receiver_create(&config,&receiver)==RTCP_EINVAL && !receiver); /* Classic-only metadata. */
+    info.ui_sync=ui;
+    assert(airplay_info_plist_build(&info,plist,sizeof(plist),&length));
+    config.platform.info_plist_len=length;
+    assert(rtcp_receiver_create(&config,&receiver)==RTCP_OK);
+    assert(rtcp_receiver_start(receiver)==RTCP_OK); /* UI-only refreshed snapshot, no Vehicle model. */
+    rtcp_addr_t ui_address={.family=RTCP_AF_INET,.port=rtcp_receiver_port(receiver),.addr={127,0,0,1}};
+    int ui_fd=rtcp_net_linux.connect(&ui_address); assert(ui_fd>=0);
+    assert(rtcp_receiver_poll(receiver,10)==RTCP_OK);
+    rtcp_receiver_state_t ui_state; assert(rtcp_receiver_get_state(receiver,&ui_state)==RTCP_OK && ui_state.transport_connected);
+    rtcp_net_linux.close(ui_fd);
+    assert(rtcp_receiver_stop(receiver)==RTCP_OK);
+    assert(rtcp_receiver_destroy(receiver)==RTCP_OK); receiver=NULL;
+    config.negotiate_ui_sync=false; info.ui_sync=NULL;
+    assert(airplay_info_plist_build(&info,plist,sizeof(plist),&length));
+    config.platform.info_plist_len=length;
+    config.data_stream.channel_mask=RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
     assert(rtcp_receiver_create(&config,&receiver) == RTCP_EINVAL && receiver == NULL);
     config.data_stream.channel_mask=RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE);
     assert(rtcp_receiver_create(&config,&receiver) == RTCP_OK);

@@ -124,8 +124,74 @@ static void test_vehicle_info(bool dump)
     rtcp_vehicle_destroy(vehicle);
 }
 
+static void test_ui_info(bool dump, const char *file, bool expected)
+{
+    /* Synthetic single-Main-Display inventory; no official asset/renderer. */
+    const char *uuid="b7e6c5a0-1111-4000-8000-000000000001";
+    rtcp_ui_sync_config_t cfg={.struct_size=sizeof(cfg),.display_uuid=uuid};
+    rtcp_ui_sync_t *ui; assert(rtcp_ui_sync_create(&cfg,&ui)==RTCP_OK);
+    airplay_info_plist_config_t info=k_config; info.ui_sync=ui;
+    uint8_t bytes[AIRPLAY_INFO_PLIST_MAX_BYTES]; size_t length=123;
+    assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length);
+    const char *palettes[]={"synthetic-light"};
+    rtcp_ui_sync_inventory_layout_t layout={.id="synthetic-layout",.palettes=palettes,.palette_count=1};
+    rtcp_ui_sync_inventory_t inv={.struct_size=sizeof(inv),.theme_id="synthetic:1",
+        .panel_uid="synthetic-main-panel",.display_uuid=uuid,.width_pixels=1280,.height_pixels=480,
+        .width_physical_mm=300,.height_physical_mm=120,.layouts=&layout,.layout_count=1};
+    assert(rtcp_ui_sync_bind_inventory(ui,&inv)==RTCP_OK);
+    assert(airplay_info_plist_build(&info,bytes,sizeof(bytes),&length));
+    assert(airplay_info_plist_matches_ui_sync(bytes,length,ui));
+    assert(!airplay_info_plist_matches_ui_sync(NULL,length,ui));
+    assert(!airplay_info_plist_matches_ui_sync(bytes,length,NULL));
+    assert(!airplay_info_plist_matches_ui_sync(bytes,sizeof(bytes)+1,ui));
+    for (size_t i=0;i<length;++i) assert(!airplay_info_plist_matches_ui_sync(bytes,i,ui));
+    size_t full=length;
+    if (file) {
+        FILE *input=fopen(file,"rb"); assert(input);
+        uint8_t supplied[AIRPLAY_INFO_PLIST_MAX_BYTES+1];
+        size_t n=fread(supplied,1,sizeof(supplied),input); assert(!ferror(input)); fclose(input);
+        assert(airplay_info_plist_matches_ui_sync(supplied,n,ui)==expected);
+    }
+    if (dump) {
+        printf("UI_INFO "); for (size_t i=0;i<length;++i) printf("%02x",bytes[i]); puts("");
+        for (unsigned mask=0;mask<4;++mask) {
+            uint8_t setup[512]; size_t n;
+            assert(airplay_bplist_build_initial_setup_response_features(49152,49153,(mask&1)!=0,(mask&2)!=0,setup,sizeof(setup),&n)==AIRPLAY_BPLIST_OK);
+            printf("UI_FEATURES %u ",mask); for (size_t i=0;i<n;++i) printf("%02x",setup[i]); puts("");
+        }
+    }
+    for (size_t i=0;i<full;++i) assert(!airplay_info_plist_build(&info,bytes,i,&length) && !length);
+    info.width_pixels++; assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length); info.width_pixels--;
+    info.height_pixels++; assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length); info.height_pixels--;
+    info.width_physical_mm++; assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length); info.width_physical_mm--;
+    info.height_physical_mm++; assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length); info.height_physical_mm--;
+    rtcp_display_profile_t profile={.struct_size=sizeof(profile),.uuid="11111111-2222-4333-8444-555555555555"};
+    info.main_display_profile=&profile;
+    assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length);
+    info.main_display_profile=NULL;
+    /* Default physical geometry must also agree with the installed display. */
+    info.width_physical_mm=0;
+    assert(!airplay_info_plist_build(&info,bytes,sizeof(bytes),&length) && !length);
+    info.width_physical_mm=300;
+    info.audio_output=true; info.audio_input=true;
+    rtcp_vehicle_characteristic_t c={.accessory_iid=1,.accessory_type=100,.service_iid=2,
+        .service_type=200,.iid=3,.type=1003,.format=RTCP_VEHICLE_UINT32,.owner=RTCP_VEHICLE_CAR};
+    rtcp_vehicle_config_t vc={.struct_size=sizeof(vc),.plugin_name="synthetic",.characteristics=&c,.count=1};
+    rtcp_vehicle_t *vehicle; assert(rtcp_vehicle_create(&vc,&vehicle)==RTCP_OK); info.vehicle=vehicle;
+    assert(airplay_info_plist_build(&info,bytes,sizeof(bytes),&length));
+    assert(airplay_info_plist_matches_ui_sync(bytes,length,ui) && airplay_info_plist_matches_vehicle(bytes,length,vehicle));
+    rtcp_vehicle_destroy(vehicle); info.vehicle=NULL;
+    assert(rtcp_ui_sync_bind_inventory(ui,NULL)==RTCP_OK);
+    assert(!airplay_info_plist_matches_ui_sync(bytes,length,ui));
+    rtcp_ui_sync_destroy(ui);
+    puts("UI /info: bound actual geometry, one Main panel, complete output bounds and independent validation passed");
+}
+
 int main(int argc, char **argv)
 {
+    if (argc == 2 && !strcmp(argv[1],"--ui-wire")) { test_ui_info(true,NULL,false); return 0; }
+    if (argc == 4 && !strcmp(argv[1],"--ui-match")) { test_ui_info(false,argv[2],!strcmp(argv[3],"yes")); return 0; }
+    test_ui_info(false,NULL,false);
     if (argc == 4 && !strcmp(argv[1],"--match")) { match_file=argv[2]; match_expected=!strcmp(argv[3],"yes"); }
     test_vehicle_info(argc == 2 && !strcmp(argv[1],"--wire"));
     uint8_t plist[AIRPLAY_INFO_PLIST_MAX_BYTES];

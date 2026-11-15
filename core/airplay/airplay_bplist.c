@@ -675,10 +675,11 @@ static airplay_bplist_result_t build_setup_response(
     return AIRPLAY_BPLIST_OK;
 }
 
-airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
+airplay_bplist_result_t airplay_bplist_build_initial_setup_response_features(
     uint16_t timing_port,
     uint16_t event_port,
     bool vehicle,
+    bool ui_sync,
     uint8_t *output,
     size_t output_capacity,
     size_t *output_len)
@@ -686,7 +687,7 @@ airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
     if (timing_port == 0U || event_port == 0U) {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
-    bplist_write_object_t objects[10] = {
+    bplist_write_object_t objects[11] = {
         {.kind = BPLIST_WRITE_DICTIONARY,
          /* Binary-plist dictionaries store all key references before values. */
          .references = {1U, 3U, 5U, 2U, 4U, 6U},
@@ -705,7 +706,20 @@ airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
         objects[6].references[2]=9U; objects[6].reference_count=3U;
         objects[9]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="vehicleStateProtocol"};
     }
-    return build_setup_response(objects, vehicle ? 10U : 9U, output, output_capacity, output_len);
+    size_t count=vehicle ? 10U : 9U;
+    if (ui_sync) {
+        objects[6].references[objects[6].reference_count++]=(uint8_t)count;
+        objects[count++]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="uiSync"};
+    }
+    return build_setup_response(objects, count, output, output_capacity, output_len);
+}
+
+airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
+    uint16_t timing_port, uint16_t event_port, bool vehicle, uint8_t *output,
+    size_t output_capacity, size_t *output_len)
+{
+    return airplay_bplist_build_initial_setup_response_features(timing_port,event_port,vehicle,false,
+        output,output_capacity,output_len);
 }
 
 airplay_bplist_result_t airplay_bplist_build_initial_setup_response(

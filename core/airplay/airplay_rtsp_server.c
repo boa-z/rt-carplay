@@ -905,6 +905,7 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.disable_bluetooth = server_disable_bluetooth;
     session_config.data_stream_mask = server->config.data_stream.channel_mask;
     session_config.negotiate_vehicle = server->config.negotiate_vehicle;
+    session_config.negotiate_ui_sync = server->config.negotiate_ui_sync;
     session_config.start_data_stream = server_start_data_stream;
     session_config.stop_data_stream = server_stop_data_stream;
 

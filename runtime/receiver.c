@@ -65,7 +65,11 @@ static bool receiver_data_body(rtcp_data_stream_kind_t kind,
     if (r->ui_sync && kind == RTCP_DATA_STREAM_UI_SYNC) {
         int rc=ui_flush(r);
         if (!rc) rc=rtcp_ui_sync_handle(r->ui_sync,body,length);
-        if (rc) { ++r->ui_delivery.rejected_requests; r->ui_delivery.last_error=rc; return false; }
+        if (rc) {
+            ++r->ui_delivery.rejected_requests;
+            r->ui_delivery.last_error=r->ui_delivery.last_rejection=rc;
+            return false;
+        }
         rc=ui_flush(r);
         return rc == RTCP_OK || rc == RTCP_ENOMEM;
     }

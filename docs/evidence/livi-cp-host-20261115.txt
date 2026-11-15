@@ -6,7 +6,7 @@ Command: cargo test --locked -p livi-cp --lib
 Source and Cargo.lock unchanged; build output stored outside the checkout.
 Selected original test output follows; compiler/download progress is omitted.
 This is reference Host evidence, not D213 or real-iPhone acceptance.
-The livi-core theme_catalog tests are outside this command and remain NOT_RUN.
+This command excludes livi-core theme_catalog; later separate results are in livi-theme-host-20261115.txt.
 rustc 1.100.0 (0ef1bc386 2026-11-09)
 cargo 1.100.0 (3acc79c0c 2026-11-05)
 OpenSSL 3.0.13

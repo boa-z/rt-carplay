@@ -24,8 +24,19 @@ typedef struct {
     int64_t phone_integer; bool phone_boolean;
 } state_t;
 typedef struct { size_t length; uint8_t bytes[RTCP_UI_SYNC_MAX_MESSAGE]; } output_t;
+typedef struct {
+    rtcp_ui_sync_inventory_t view;
+    char theme[ID], panel[ID], display[ID];
+    rtcp_ui_sync_inventory_layout_t layouts[RTCP_UI_SYNC_MAX_LAYOUTS];
+    char layout_ids[RTCP_UI_SYNC_MAX_LAYOUTS][ID];
+    char palette_ids[RTCP_UI_SYNC_MAX_LAYOUTS][RTCP_UI_SYNC_MAX_PALETTES][ID];
+    const char *palettes[RTCP_UI_SYNC_MAX_LAYOUTS][RTCP_UI_SYNC_MAX_PALETTES];
+    component_t component_ids[RTCP_UI_SYNC_MAX_LAYOUTS][RTCP_UI_SYNC_MAX_COMPONENTS];
+    rtcp_ui_sync_component_t components[RTCP_UI_SYNC_MAX_LAYOUTS][RTCP_UI_SYNC_MAX_COMPONENTS];
+} inventory_t;
 struct rtcp_ui_sync {
     char display[ID]; bool allow_layout_change, give_focus; int64_t focus_token;
+    inventory_t *inventory;
     state_t current, work;
     output_t outputs[RTCP_UI_SYNC_MAX_OUTPUTS]; size_t head, pending;
     rtcp_opack_node_t nodes[NODES], frame[RTCP_OPACK_MAX_NODES]; size_t used;
@@ -39,6 +50,101 @@ static bool identifier(const char *s)
     while (n<ID && s[n]) { if ((unsigned char)s[n] > 127) return false; ++n; }
     return n<ID;
 }
+static bool inventory_id(const char *s)
+{
+    if (!identifier(s)) return false;
+    for (;*s;++s) if ((unsigned char)*s < 32 || (unsigned char)*s == 127) return false;
+    return true;
+}
+static bool valid_inventory(const rtcp_ui_sync_inventory_t *v)
+{
+    if (v->struct_size != sizeof(*v) || !inventory_id(v->theme_id) ||
+        !inventory_id(v->panel_uid) || !inventory_id(v->display_uuid) ||
+        !v->width_pixels || !v->height_pixels || !v->width_physical_mm || !v->height_physical_mm ||
+        !v->layouts || !v->layout_count || v->layout_count > RTCP_UI_SYNC_MAX_LAYOUTS) return false;
+    for (size_t i=0;i<v->layout_count;++i) {
+        const rtcp_ui_sync_inventory_layout_t *l=&v->layouts[i];
+        if (!inventory_id(l->id) || !l->palettes || !l->palette_count ||
+            l->palette_count > RTCP_UI_SYNC_MAX_PALETTES || l->component_count > RTCP_UI_SYNC_MAX_COMPONENTS ||
+            (l->component_count && !l->components)) return false;
+        for (size_t j=0;j<i;++j) if (!strcmp(l->id,v->layouts[j].id)) return false;
+        for (size_t j=0;j<l->palette_count;++j) {
+            if (!inventory_id(l->palettes[j])) return false;
+            for (size_t k=0;k<j;++k) if (!strcmp(l->palettes[j],l->palettes[k])) return false;
+        }
+        for (size_t j=0;j<l->component_count;++j) {
+            const rtcp_ui_sync_component_t *c=&l->components[j];
+            if (!inventory_id(c->zone) || !inventory_id(c->component)) return false;
+            for (size_t k=0;k<j;++k)
+                if (!strcmp(c->zone,l->components[k].zone) && !strcmp(c->component,l->components[k].component)) return false;
+        }
+    }
+    return true;
+}
+static inventory_t *copy_inventory(const rtcp_ui_sync_inventory_t *v)
+{
+    inventory_t *owned=calloc(1,sizeof(*owned)); if (!owned) return NULL;
+    owned->view=*v;
+    strcpy(owned->theme,v->theme_id); strcpy(owned->panel,v->panel_uid); strcpy(owned->display,v->display_uuid);
+    owned->view.theme_id=owned->theme; owned->view.panel_uid=owned->panel; owned->view.display_uuid=owned->display;
+    owned->view.layouts=owned->layouts;
+    for (size_t i=0;i<v->layout_count;++i) {
+        const rtcp_ui_sync_inventory_layout_t *source=&v->layouts[i];
+        rtcp_ui_sync_inventory_layout_t *l=&owned->layouts[i]; *l=*source;
+        strcpy(owned->layout_ids[i],source->id); l->id=owned->layout_ids[i];
+        l->palettes=owned->palettes[i]; l->components=owned->components[i];
+        for (size_t j=0;j<source->palette_count;++j) {
+            strcpy(owned->palette_ids[i][j],source->palettes[j]); owned->palettes[i][j]=owned->palette_ids[i][j];
+        }
+        for (size_t j=0;j<source->component_count;++j) {
+            component_t *c=&owned->component_ids[i][j];
+            strcpy(c->zone,source->components[j].zone); strcpy(c->component,source->components[j].component);
+            owned->components[i][j]=(rtcp_ui_sync_component_t){c->zone,c->component};
+        }
+    }
+    return owned;
+}
+static const rtcp_ui_sync_inventory_layout_t *find_layout(const inventory_t *v, const char *id)
+{
+    for (size_t i=0;i<v->view.layout_count;++i) if (!strcmp(v->layouts[i].id,id)) return &v->layouts[i];
+    return NULL;
+}
+static bool supports_palette(const rtcp_ui_sync_inventory_layout_t *l, const char *palette)
+{
+    for (size_t i=0;i<l->palette_count;++i) if (!strcmp(l->palettes[i],palette)) return true;
+    return false;
+}
+static bool supports_component(const rtcp_ui_sync_inventory_layout_t *l, const char *zone, const char *component)
+{
+    for (size_t i=0;i<l->component_count;++i)
+        if (!strcmp(l->components[i].zone,zone) && !strcmp(l->components[i].component,component)) return true;
+    return false;
+}
+static bool supports_selection(const inventory_t *v, const char *id, const char *palette,
+    const component_t *active, size_t count)
+{
+    if (!v || !*id) return true;
+    const rtcp_ui_sync_inventory_layout_t *l=find_layout(v,id);
+    if (!l || !supports_palette(l,palette)) return false;
+    for (size_t i=0;i<count;++i) if (!supports_component(l,active[i].zone,active[i].component)) return false;
+    return true;
+}
+int rtcp_ui_sync_bind_inventory(rtcp_ui_sync_t *s, const rtcp_ui_sync_inventory_t *v)
+{
+    if (!s) return RTCP_EINVAL;
+    if (s->pending || s->current.status.state != RTCP_UI_SYNC_IDLE) return RTCP_ESTATE;
+    inventory_t *owned=NULL;
+    if (v) {
+        if (!valid_inventory(v) || strcmp(v->display_uuid,s->display)) return RTCP_EINVAL;
+        owned=copy_inventory(v); if (!owned) return RTCP_ENOMEM;
+        if (!supports_selection(owned,s->current.wanted,s->current.palette,s->current.active,s->current.active_count)) {
+            free(owned); return RTCP_ENOTSUP;
+        }
+    }
+    free(s->inventory); s->inventory=owned; return RTCP_OK;
+}
+const rtcp_ui_sync_inventory_t *rtcp_ui_sync_get_inventory(const rtcp_ui_sync_t *s)
+{ return s && s->inventory ? &s->inventory->view : NULL; }
 static size_t add(rtcp_ui_sync_t *s, rtcp_opack_type_t type)
 {
     if (s->used >= NODES) { s->builder_failed=true; return NODES-1; }
@@ -145,7 +251,7 @@ int rtcp_ui_sync_create(const rtcp_ui_sync_config_t *config, rtcp_ui_sync_t **ou
     s->current.status.requested_dark=config->initial_dark; *out=s; return RTCP_OK;
 }
 void rtcp_ui_sync_destroy(rtcp_ui_sync_t *s)
-{ if (s) { memset(s,0,sizeof(*s)); free(s); } }
+{ if (s) { free(s->inventory); memset(s,0,sizeof(*s)); free(s); } }
 void rtcp_ui_sync_reset_session(rtcp_ui_sync_t *s)
 {
     if (!s) return;
@@ -172,6 +278,12 @@ int rtcp_ui_sync_select(rtcp_ui_sync_t *s, const rtcp_ui_sync_layout_t *layout)
     for (size_t i=0;i<layout->active_count;++i) {
         if (!identifier(layout->active[i].zone) || !identifier(layout->active[i].component)) return RTCP_EINVAL;
         for (size_t j=0;j<i;++j) if (!strcmp(layout->active[i].zone,layout->active[j].zone)) return RTCP_EINVAL;
+    }
+    if (s->inventory) {
+        const rtcp_ui_sync_inventory_layout_t *l=find_layout(s->inventory,layout->id);
+        if (!l || !supports_palette(l,layout->palette)) return RTCP_ENOTSUP;
+        for (size_t i=0;i<layout->active_count;++i)
+            if (!supports_component(l,layout->active[i].zone,layout->active[i].component)) return RTCP_ENOTSUP;
     }
     s->work=s->current; strcpy(s->work.wanted,layout->id); strcpy(s->work.palette,layout->palette);
     s->work.active_count=layout->active_count;
@@ -292,14 +404,21 @@ static int follow(rtcp_ui_sync_t *s, const airplay_bplist_doc_t *d, airplay_bpli
     state_t *w=&s->work;
     if (type == 3) {
         rc=get_text(&command_doc,args,"layoutID",w->status.phone_layout); if (rc) return RTCP_EINVAL;
+        const rtcp_ui_sync_inventory_layout_t *layout=s->inventory ? find_layout(s->inventory,w->status.phone_layout) : NULL;
+        if (s->inventory && !layout) return RTCP_ENOTSUP;
         ++w->status.phone_choices;
         char palette[ID]; rc=get_text(&command_doc,args,"paletteID",palette);
         if (rc == RTCP_ENOENT) return RTCP_OK;
         if (rc) return rc;
+        if (layout && !supports_palette(layout,palette)) return RTCP_ENOTSUP;
         strcpy(w->status.phone_palette_layout,w->status.phone_layout); strcpy(w->status.phone_palette,palette);
     } else if (type == 0x10) {
         rc=get_text(&command_doc,args,"layoutIdentifier",w->status.phone_palette_layout); if (rc) return RTCP_EINVAL;
         rc=get_text(&command_doc,args,"paletteIdentifier",w->status.phone_palette); if (rc) return RTCP_EINVAL;
+        if (s->inventory) {
+            const rtcp_ui_sync_inventory_layout_t *layout=find_layout(s->inventory,w->status.phone_palette_layout);
+            if (!layout || !supports_palette(layout,w->status.phone_palette)) return RTCP_ENOTSUP;
+        }
     } else {
         uint64_t preference=UINT64_MAX; rc=optional_uint(&command_doc,args,"preference",&preference);
         if (rc || preference>2) return RTCP_EINVAL;

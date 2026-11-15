@@ -80,6 +80,10 @@ def fixtures():
         'id_unicode': frame(dict(reset, id='\u00e9')),
         'large_panel': opack({'displayUUID': 'Cluster_Display', 'extra': b'x'*1100,
                               'data': plistlib.dumps(reset, fmt=plistlib.FMT_BINARY)}),
+        'inventory_unknown_layout': command(3, {'layoutID': 'not-installed', 'paletteID': 'dark'}, psn=5),
+        'inventory_unknown_palette': command(0x10, {'layoutIdentifier': 'DB7C6944', 'paletteIdentifier': 'not-installed'}, psn=5),
+        'inventory_wrong_layout_palette': command(3, {'layoutID': 'DB7C6944', 'paletteID': 'blue'}, psn=5),
+        'inventory_layout_only': command(3, {'layoutID': 'DB7C6944'}, psn=5),
     }
     # Introduce a duplicate type key in a real plistlib object table, independent
     # of the SDK writer. Root has fewer than 15 fields and one-byte references.

@@ -1,0 +1,26 @@
+LIVI additional theme/layout reference Host verification, 2026-11-15
+Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
+Reference source: 64a05b68358db52ed887169143afd5944fd6f1f7
+Environment: Ubuntu 24.04 on WSL, x86_64-unknown-linux-gnu
+rustc 1.100.0 (0ef1bc386 2026-11-09)
+cargo 1.100.0 (3acc79c0c 2026-11-05)
+Source and Cargo.lock unchanged; CARGO_TARGET_DIR=/tmp/livi-ultra-core-target.
+These filters execute local synthetic tests, not fetch()/package_url() against Apple.
+No Apple theme package, proprietary assets or credentials downloaded or included.
+Selected original test output follows; compiler/download progress is omitted.
+This is reference Host evidence, not D213, asset authenticity, iPhone or official acceptance.
+
+Command: cargo test --locked -p livi-core --lib projection::theme_catalog::tests
+running 6 tests
+test projection::theme_catalog::tests::a_package_without_a_cluster_is_no_theme ... ok
+test projection::theme_catalog::tests::the_id_names_asset_and_version ... ok
+test projection::theme_catalog::tests::the_package_becomes_the_theme_the_cluster_runs ... ok
+test projection::theme_catalog::tests::the_catalog_token_lists_the_package ... ok
+test projection::theme_catalog::tests::a_fetched_theme_is_kept_per_version ... ok
+test projection::theme_catalog::tests::the_zip_directory_points_at_each_file ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 349 filtered out; finished in 0.01s
+
+Command: cargo test --locked -p livi-ui-model --lib dashboard::layout::tests
+running 1 test
+test dashboard::layout::tests::unknown_layouts_keep_the_gauges_over_the_map ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 113 filtered out; finished in 0.00s

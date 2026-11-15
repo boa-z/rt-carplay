@@ -14,6 +14,9 @@ extern "C" {
 #define RTCP_UI_SYNC_MAX_ACTIVE 8U
 #define RTCP_UI_SYNC_MAX_MESSAGE 8192U
 #define RTCP_UI_SYNC_MAX_OUTPUTS 4U
+#define RTCP_UI_SYNC_MAX_LAYOUTS 8U
+#define RTCP_UI_SYNC_MAX_PALETTES 8U
+#define RTCP_UI_SYNC_MAX_COMPONENTS 16U
 #define RTCP_UI_SYNC_DATASTREAM_UUID RTCP_DATA_STREAM_UI_SYNC_UUID
 typedef struct { const char *zone, *component; } rtcp_ui_sync_component_t;
 typedef struct {
@@ -21,6 +24,23 @@ typedef struct {
     const rtcp_ui_sync_component_t *active;
     size_t active_count;
 } rtcp_ui_sync_layout_t;
+/* Host inventory for one actual display/theme. Component pairs are allowed
+ * alternatives, not a Cartesian product of all zones and all components.
+ * This catalogue contains identifiers only, never Apple theme assets. */
+typedef struct {
+    const char *id;
+    const char *const *palettes;
+    size_t palette_count;
+    const rtcp_ui_sync_component_t *components;
+    size_t component_count;
+} rtcp_ui_sync_inventory_layout_t;
+typedef struct {
+    size_t struct_size;
+    const char *theme_id, *panel_uid, *display_uuid;
+    uint16_t width_pixels, height_pixels, width_physical_mm, height_physical_mm;
+    const rtcp_ui_sync_inventory_layout_t *layouts;
+    size_t layout_count;
+} rtcp_ui_sync_inventory_t;
 typedef struct {
     size_t struct_size;
     const char *display_uuid;
@@ -51,6 +71,10 @@ typedef struct {
     bool attached;
     uint64_t queued_messages, queue_retries, rejected_requests;
     int last_error;
+    /* Exact application/delivery refusal before lane retirement. The generic
+     * channel-close error may replace last_error; it must not erase this
+     * cause. Cumulative until the next rejected request or Receiver destroy. */
+    int last_rejection;
 } rtcp_ui_sync_delivery_status_t;
 
 /* One serialized owner, no internal thread. Configuration/layout strings are
@@ -59,6 +83,19 @@ typedef struct {
  * advertised and no official renderer/timing/retransmission policy is implied. */
 int rtcp_ui_sync_create(const rtcp_ui_sync_config_t *, rtcp_ui_sync_t **);
 void rtcp_ui_sync_destroy(rtcp_ui_sync_t *);
+/* Validate and copy inventory before channel negotiation. NULL unbinds it.
+ * Only IDLE with no retained output may bind/unbind; an existing desired
+ * layout must also be supported by a replacement. A failed bind is atomic.
+ * With a bound inventory, select and phone layout/palette choices outside it
+ * return ENOTSUP before committing state or generating ACK. Reset retains it.
+ * An unbound model retains the original bounded protocol-foundation behavior.
+ * Binding does not advertise /info, enable uiSync, authenticate theme assets,
+ * install a renderer or prove presentation. The host must implement those
+ * separate capabilities before opting into phone-facing declarations. */
+int rtcp_ui_sync_bind_inventory(rtcp_ui_sync_t *, const rtcp_ui_sync_inventory_t *);
+/* Borrowed read-only view of copied identifiers; NULL when unbound. Valid
+ * until successful rebind/unbind/destroy, on the same serialized owner. */
+const rtcp_ui_sync_inventory_t *rtcp_ui_sync_get_inventory(const rtcp_ui_sync_t *);
 /* Clear channel/session/output/phone state, retain requested layout/dark mode
  * and cumulative counters. Call at each authenticated session/channel reset. */
 void rtcp_ui_sync_reset_session(rtcp_ui_sync_t *);

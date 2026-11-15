@@ -242,10 +242,107 @@ static void codec_limits(void)
     nodes[18]=(rtcp_opack_node_t){.type=RTCP_OPACK_NULL,.end=19};
     assert(airplay_bplist_encode_nodes(nodes,19,last,sizeof(last),&length) == AIRPLAY_BPLIST_INVALID_OBJECT);
 }
+static void inventory_validation(void)
+{
+    /* Entirely synthetic installed IDs. No renderer or Apple asset is used. */
+    rtcp_ui_sync_t *s=create(false);
+    assert(!rtcp_ui_sync_get_inventory(s) && !rtcp_ui_sync_get_inventory(NULL));
+    assert(rtcp_ui_sync_bind_inventory(NULL,NULL) == RTCP_EINVAL);
+    char theme[]="synthetic:1", panel[]="test-panel", display[]="Cluster_Display";
+    char id[]="0D38B526", palette[]="blue", zone[]="F0786093", component[]="2B28C705";
+    const char *palettes[]={palette}, *remote_palettes[]={"dark","red"};
+    rtcp_ui_sync_component_t alternatives[]={{zone,component},{zone,"alternate"},{"second-zone","other"}};
+    rtcp_ui_sync_inventory_layout_t layouts[]={
+        {id,palettes,1,alternatives,3}, {"DB7C6944",remote_palettes,2,NULL,0}
+    };
+    rtcp_ui_sync_inventory_t inv={.struct_size=sizeof(inv),.theme_id=theme,.panel_uid=panel,
+        .display_uuid=display,.width_pixels=1024,.height_pixels=600,
+        .width_physical_mm=200,.height_physical_mm=120,.layouts=layouts,.layout_count=2};
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_OK);
+    const rtcp_ui_sync_inventory_t *copied=rtcp_ui_sync_get_inventory(s);
+    assert(copied && copied!=&inv && copied->layouts!=layouts && copied->layouts[0].palettes!=palettes);
+    assert(copied->layouts[0].components!=alternatives && copied->layouts[0].component_count==3);
+    memset(theme,'x',sizeof(theme)-1); memset(panel,'x',sizeof(panel)-1); memset(display,'x',sizeof(display)-1);
+    memset(id,'x',sizeof(id)-1); memset(palette,'x',sizeof(palette)-1);
+    memset(zone,'x',sizeof(zone)-1); memset(component,'x',sizeof(component)-1);
+    assert(!strcmp(copied->theme_id,"synthetic:1") && !strcmp(copied->panel_uid,"test-panel"));
+    assert(!strcmp(copied->layouts[0].id,"0D38B526") && !strcmp(copied->layouts[0].palettes[0],"blue"));
+    assert(!strcmp(copied->layouts[0].components[0].zone,"F0786093"));
+    want_layout(s);
+    rtcp_ui_sync_component_t active={"F0786093","alternate"};
+    rtcp_ui_sync_layout_t selected={"0D38B526","blue",&active,1};
+    assert(rtcp_ui_sync_select(s,&selected) == RTCP_OK);
+    active.component="other"; /* Declared for another zone; no Cartesian product. */
+    assert(rtcp_ui_sync_select(s,&selected) == RTCP_ENOTSUP);
+    active.component="2B28C705"; selected.palette="red";
+    assert(rtcp_ui_sync_select(s,&selected) == RTCP_ENOTSUP);
+    selected.palette="blue"; selected.id="missing";
+    assert(rtcp_ui_sync_select(s,&selected) == RTCP_ENOTSUP);
+    assert(!strcmp(status(s).requested_layout,"0D38B526") && !status(s).pending_outputs);
+
+    /* A replacement that cannot support the desired layout is not installed. */
+    rtcp_ui_sync_inventory_layout_t remote_only=copied->layouts[1];
+    inv=*copied; inv.layouts=&remote_only; inv.layout_count=1;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_ENOTSUP && rtcp_ui_sync_get_inventory(s)==copied);
+    inv=*copied; inv.display_uuid="another-display";
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    inv=*copied; inv.width_physical_mm=0;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    inv=*copied; inv.struct_size=0;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    inv=*copied; inv.layout_count=RTCP_UI_SYNC_MAX_LAYOUTS+1;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    inv=*copied; inv.theme_id="invalid\nidentifier";
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    char oversized[RTCP_UI_SYNC_MAX_ID+2]; memset(oversized,'a',sizeof(oversized)); oversized[sizeof(oversized)-1]=0;
+    inv=*copied; inv.panel_uid=oversized;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    inv=*copied; inv.layout_count=0;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    rtcp_ui_sync_inventory_layout_t bad[2]={copied->layouts[0],copied->layouts[0]};
+    inv=*copied; inv.layouts=bad;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    inv.layout_count=1; bad[0].palette_count=RTCP_UI_SYNC_MAX_PALETTES+1;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    const char *duplicate_palettes[]={"blue","blue"};
+    bad[0]=copied->layouts[0]; bad[0].palettes=duplicate_palettes; bad[0].palette_count=2;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    bad[0]=copied->layouts[0]; bad[0].component_count=RTCP_UI_SYNC_MAX_COMPONENTS+1;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    rtcp_ui_sync_component_t duplicate_components[]={{"zone","component"},{"zone","component"}};
+    bad[0]=copied->layouts[0]; bad[0].components=duplicate_components; bad[0].component_count=2;
+    assert(rtcp_ui_sync_bind_inventory(s,&inv) == RTCP_EINVAL);
+    assert(rtcp_ui_sync_get_inventory(s)==copied);
+    want_layout(s);
+    assert(HANDLE(s,reset) == RTCP_OK);
+    assert(rtcp_ui_sync_bind_inventory(s,NULL) == RTCP_ESTATE);
+    take(s,0,1,0);
+    assert(rtcp_ui_sync_bind_inventory(s,NULL) == RTCP_ESTATE); /* No output, still negotiating. */
+    assert(HANDLE(s,complete) == RTCP_OK); take_complete(s,2,true,false);
+    assert(rtcp_ui_sync_bind_inventory(s,NULL) == RTCP_ESTATE);
+    assert(HANDLE(s,layout) == RTCP_OK); take(s,3,5,3);
+    assert(HANDLE(s,palette) == RTCP_OK); take(s,3,6,4);
+    rtcp_ui_sync_status_t before=status(s);
+    assert(HANDLE(s,inventory_unknown_layout) == RTCP_ENOTSUP);
+    assert(HANDLE(s,inventory_unknown_palette) == RTCP_ENOTSUP);
+    assert(HANDLE(s,inventory_wrong_layout_palette) == RTCP_ENOTSUP);
+    rtcp_ui_sync_status_t after=status(s);
+    assert(after.rejected==before.rejected+3 && after.received==before.received+3);
+    assert(after.next_tx==before.next_tx && after.last_rx==before.last_rx && !after.pending_outputs);
+    assert(after.phone_choices==before.phone_choices && after.last_error==RTCP_ENOTSUP);
+    assert(!strcmp(after.phone_layout,before.phone_layout) && !strcmp(after.phone_palette,before.phone_palette));
+    assert(HANDLE(s,inventory_layout_only) == RTCP_OK); take(s,3,7,5);
+    rtcp_ui_sync_reset_session(s);
+    assert(rtcp_ui_sync_get_inventory(s)==copied && !strcmp(status(s).requested_layout,"0D38B526"));
+    assert(rtcp_ui_sync_bind_inventory(s,copied) == RTCP_OK); /* Rebinding a borrowed view copies before free. */
+    assert(rtcp_ui_sync_bind_inventory(s,NULL) == RTCP_OK && !rtcp_ui_sync_get_inventory(s));
+    rtcp_ui_sync_destroy(s);
+    puts("UI Sync inventory: copied ownership, identifier/geometry/duplicate bounds, alternatives, transactional local/phone rejection and reset retention passed");
+}
 int main(int argc, char **argv)
 {
     dump=argc==2 && !strcmp(argv[1],"--dump"); assert(argc==1 || dump);
-    main_scenario(); identifiers_and_errors(); codec_limits();
+    main_scenario(); identifiers_and_errors(); codec_limits(); inventory_validation();
     puts("UI Sync: independent input, reset/version/layout/palette/appearance/focus/ACK, duplicates, retained output, reset and malformed bounds passed");
     return 0;
 }

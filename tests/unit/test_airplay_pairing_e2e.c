@@ -1655,6 +1655,7 @@ static void run_ui_processor(client_t *client, const uint8_t shared[32], uint32_
     rtcp_ui_sync_delivery_status_t delivery;
     assert(rtcp_receiver_get_ui_sync_delivery_status(e2e_receiver,&delivery) == RTCP_OK);
     assert(delivery.attached && delivery.rejected_requests==1 && delivery.queue_retries>0);
+    assert(delivery.last_rejection==RTCP_ENOMEM);
     assert(data_status(RTCP_DATA_STREAM_VEHICLE).state==RTCP_DATA_STREAM_CONNECTED);
     vehicle_exchange(vehicle_fd,vehicle_cipher,"readRequest",false,0,"readResponse",42);
     rtcp_net_linux.close(fd); airplay_control_cipher_destroy(cipher);
@@ -1672,6 +1673,30 @@ static void run_ui_processor(client_t *client, const uint8_t shared[32], uint32_
     assert(data_status(RTCP_DATA_STREAM_VEHICLE).state==RTCP_DATA_STREAM_CONNECTED);
     rtcp_net_linux.close(fd); airplay_control_cipher_destroy(cipher);
     vehicle_exchange(vehicle_fd,vehicle_cipher,"readRequest",false,0,"readResponse",42);
+    /* Authenticated commands must also respect the installed host inventory.
+     * A valid envelope carrying an unsupported layout retires only UI. */
+    port=request_data(client,cseq,RTCP_DATA_STREAM_UI_SYNC,7530,200,&id);
+    fd=connect_data(port,RTCP_DATA_STREAM_UI_SYNC); cipher=data_phone_cipher(shared,7530);
+    ui_handshake(fd,cipher,ui);
+    assert(rtcp_ui_sync_get_inventory(ui) && rtcp_ui_sync_get_inventory(ui)->layout_count==2);
+    send_ui_fixture(fd,cipher,UI_FIXTURE_inventory_unknown_layout,false,false);
+    start=rtcp_os_linux.now_ms();
+    while (data_status(RTCP_DATA_STREAM_UI_SYNC).state!=RTCP_DATA_STREAM_FAILED && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS)
+        assert(receiver_poll(e2e_receiver,10) == RTCP_OK);
+    assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state==RTCP_DATA_STREAM_FAILED);
+    assert(rtcp_receiver_get_ui_sync_delivery_status(e2e_receiver,&delivery) == RTCP_OK);
+    assert(delivery.last_rejection==RTCP_ENOTSUP && delivery.rejected_requests==2);
+    assert(ui_status(ui).state==RTCP_UI_SYNC_IDLE && !ui_status(ui).phone_layout[0]);
+    assert(rtcp_ui_sync_get_inventory(ui) && data_status(RTCP_DATA_STREAM_VEHICLE).state==RTCP_DATA_STREAM_CONNECTED);
+    rtcp_net_linux.close(fd); airplay_control_cipher_destroy(cipher);
+    vehicle_exchange(vehicle_fd,vehicle_cipher,"readRequest",false,0,"readResponse",42);
+    port=request_data(client,cseq,RTCP_DATA_STREAM_UI_SYNC,7531,200,&id);
+    fd=connect_data(port,RTCP_DATA_STREAM_UI_SYNC); cipher=data_phone_cipher(shared,7531);
+    ui_handshake(fd,cipher,ui);
+    ui_exchange(fd,cipher,UI_FIXTURE_layout,ack,1);
+    ui_exchange(fd,cipher,UI_FIXTURE_palette,ack,1);
+    assert(!strcmp(ui_status(ui).phone_layout,"DB7C6944") && !strcmp(ui_status(ui).phone_palette,"red"));
+    request_data_teardown(client,cseq,id); rtcp_net_linux.close(fd); airplay_control_cipher_destroy(cipher);
     request_data_teardown(client,cseq,vehicle_id); rtcp_net_linux.close(vehicle_fd); airplay_control_cipher_destroy(vehicle_cipher);
     /* Session destruction must also reset an unconnected fresh UI listener. */
     request_data(client,cseq,RTCP_DATA_STREAM_UI_SYNC,7520,200,&id);
@@ -1959,6 +1984,15 @@ int main(int argc, char **argv)
         rtcp_ui_sync_config_t config={.struct_size=sizeof(config),.display_uuid="Cluster_Display",
             .allow_layout_change=true,.give_focus=true,.focus_token=12345};
         assert(rtcp_ui_sync_create(&config,&ui) == RTCP_OK);
+        const char *palettes[]={"blue"}, *remote_palettes[]={"dark","red"};
+        rtcp_ui_sync_inventory_layout_t installed[]={
+            {"0D38B526",palettes,1,NULL,0},{"DB7C6944",remote_palettes,2,NULL,0}
+        };
+        rtcp_ui_sync_inventory_t inventory={.struct_size=sizeof(inventory),.theme_id="synthetic-e2e:1",
+            .panel_uid="synthetic-panel",.display_uuid="Cluster_Display",
+            .width_pixels=1920,.height_pixels=1080,.width_physical_mm=200,.height_physical_mm=120,
+            .layouts=installed,.layout_count=2};
+        assert(rtcp_ui_sync_bind_inventory(ui,&inventory) == RTCP_OK);
         rtcp_ui_sync_layout_t layout={.id="0D38B526",.palette="blue"};
         assert(rtcp_ui_sync_select(ui,&layout) == RTCP_OK);
     }

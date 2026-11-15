@@ -1327,6 +1327,19 @@ static size_t receive_decrypted(rtcp_receiver_t *server, int fd,
 
 static unsigned data_messages[RTCP_DATA_STREAM_COUNT], data_closes[RTCP_DATA_STREAM_COUNT];
 static bool fail_next_listener;
+static uint16_t fail_poll_port;
+static int data_poll(struct rtcp_pollfd *fds, int count, int timeout)
+{
+    int ready=rtcp_net_linux.poll(fds,count,timeout);
+    if (ready<0) return ready;
+    for (int i=0;fail_poll_port && i<count;++i) {
+        if (rtcp_net_linux.local_port(fds[i].fd) != fail_poll_port) continue;
+        if (!fds[i].revents) ++ready;
+        fds[i].revents=RTCP_POLLERR; fail_poll_port=0;
+    }
+    return ready;
+}
+
 static int data_listen(uint8_t family, uint16_t port)
 {
     if (fail_next_listener) { fail_next_listener = false; return RTCP_EIO; }
@@ -1964,6 +1977,10 @@ static void video_wait(rtcp_receiver_t *r, unsigned main_frames, unsigned altern
     while ((screen_frames != main_frames || alt_status(r).screen.frames != alternate_frames ||
         alt_status(r).ready != ready) && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS) receiver_poll(r,10);
     assert(screen_frames == main_frames);
+    if (alt_status(r).screen.frames != alternate_frames || alt_status(r).ready != ready)
+        fprintf(stderr,"alternate wait: frames=%u expected=%u ready=%d expected=%d opened=%u closed=%u\n",
+            alt_status(r).screen.frames,alternate_frames,alt_status(r).ready,ready,
+            alt_status(r).opened,alt_status(r).closed);
     assert(alt_status(r).screen.frames == alternate_frames && alt_status(r).ready == ready);
     assert(receiver_connected(r));
 }
@@ -2011,8 +2028,13 @@ static void run_alt_video(rtcp_receiver_t *r, client_t *c, const uint8_t *secret
     rtcp_net_linux.close(alt_fd); video_wait(r,base+4,1,false); /* EOF isolated */
     assert(alt_status(r).opened == 4 && alt_status(r).closed == 4);
     assert(alt_frames == (null_sink ? 0U : 4U));
+    alt_port=video_request(r,c,seq,"SETUP",111,9007,200);
+    fail_poll_port=alt_port; /* error-only listener readiness must never accept */
+    receiver_poll(r,0);
+    assert(!fail_poll_port && !alt_status(r).ready && alt_status(r).last_error == RTCP_EIO);
+    assert(alt_status(r).opened == 5 && alt_status(r).closed == 5);
     video_send(main_fd,secret,9001,4,0xaa,false);
-    video_wait(r,base+5,1,false);
+    video_wait(r,base+5,0,false);
     video_request(r,c,seq,"TEARDOWN",110,9001,200); rtcp_net_linux.close(main_fd);
     extra_main_frames += 5;
 }
@@ -2183,6 +2205,7 @@ int main(int argc, char **argv)
     rtcp_receiver_config_t receiver_config = {0};
     struct rtcp_net registry_net = rtcp_net_linux;
     registry_net.listen = data_listen;
+    registry_net.poll = data_poll;
     registry_net.send = data_send;
     receiver_config.platform.os = &rtcp_os_linux;
     receiver_config.platform.net = &registry_net;
@@ -2344,7 +2367,7 @@ int main(int argc, char **argv)
         uint64_t start=rtcp_os_linux.now_ms();
         while (receiver_connected(server) && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS) receiver_poll(server,10);
         assert(!receiver_connected(server) && !alt_status(server).ready);
-        assert(alt_status(server).opened == 5 && alt_status(server).closed == 5);
+        assert(alt_status(server).opened == 6 && alt_status(server).closed == 6);
         assert(rtcp_receiver_stop(server) == RTCP_OK);
         assert(alt_status(server).configured && !alt_status(server).opened && !alt_status(server).closed);
         assert(rtcp_receiver_start(server) == RTCP_OK);

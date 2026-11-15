@@ -1291,8 +1291,12 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         airplay_screen_server_poll(server->screen_server);
     }
 
-    if (alt_screen_index >= 0 && fds[alt_screen_index].revents)
-        airplay_screen_server_poll(server->alt_screen_server);
+    if (alt_screen_index >= 0) {
+        if (fds[alt_screen_index].revents & RTCP_POLLERR)
+            server->alt_screen_failed = true;
+        else if (fds[alt_screen_index].revents & RTCP_POLLIN)
+            airplay_screen_server_poll(server->alt_screen_server);
+    }
     /* Retire before RTSP can replace the slot. No stale exit may close a new key. */
     retire_failed_alt_video(server);
 

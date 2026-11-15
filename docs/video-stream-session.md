@@ -1,6 +1,6 @@
 [English](video-stream-session.md) | [简体中文](zh-CN/video-stream-session.md)
 
-# Independent video slots in the RTSP session
+# Independent video sessions and experimental Receiver transport
 
 The RTSP session supports independent Type 110 Main and experimental Type 111 alternate slots. The public Receiver can explicitly attach separate authenticated H.264 TCP receivers through experimental_alt_video; default configuration retains the existing Main-only path. This transport bench adds no /info declaration, altScreen negotiation, HEVC or D213 rendering behavior. It does not establish L5 or official Ultra.
 
@@ -28,7 +28,7 @@ A start callback returning false must clean up its own partial resources before 
 
 IDs are reserved before callbacks because a backend may transmit immediately. Retiring IDs after a partial transaction is conservative reuse prevention, not an inferred phone retransmission policy. The ledger remains bounded; a fresh authenticated session remains the boundary for rebuilding it. Default initial SETUP enabledFeatures bytes remain iAPChannel/viewAreas. Receiving an altScreen offer alone adds no feature.
 
-## Host evidence and next integration
+## Session Host evidence
 
 tests/check_video_session_wire.py independently generates binary-plist fixtures and decodes actual session responses through Python plistlib. It checks distinct ports, unchanged initial features and the omitted unsupported alternate stream in the legacy configuration. C tests cover mixed SETUP, duplicate types/IDs, cross-video/audio collisions, live-key collision, idempotency, stale selective teardown, replacement/reuse refusal, either callback failing, a successful callback returning zero, audio failure, small response capacity, full teardown/destruction and incomplete callback-pair refusal.
 
@@ -42,6 +42,6 @@ Alternate unexpected exit retires only its endpoint and session slot, retaining 
 
 ## Encrypted Host evidence and remaining work
 
-The --alt-video and --alt-video-null end-to-end scenarios use the public Receiver, genuine TCP, Pair-Setup/Pair-Verify, ControlCipher and independently encrypted H.264 frames. They verify authentication and initial-SETUP gates, concurrent interleaved delivery with distinct markers/keys, independent ports/sinks/counters, idempotency, stale selective teardown, ID retirement, failed listener allocation, wrong-key and bad-tag isolation, EOF, recovery with fresh IDs, Main-loss cleanup and stop/start reset. Both continue the existing Classic audio/video/reconnect regression. These scenarios are part of Make check and CTest. Existing Python plistlib checks independently verify unchanged initial features and session response shape.
+The --alt-video and --alt-video-null end-to-end scenarios use the public Receiver, genuine TCP, Pair-Setup/Pair-Verify, ControlCipher and independently encrypted H.264 frames. They verify authentication and initial-SETUP gates, concurrent interleaved delivery with distinct markers/keys, independent ports/sinks/counters, idempotency, stale selective teardown, ID retirement, failed listener allocation, error-only listener readiness without blocking accept, wrong-key and bad-tag isolation, EOF, recovery with fresh IDs, Main-loss cleanup and stop/start reset. Both continue the existing Classic audio/video/reconnect regression. These scenarios are part of Make check and CTest. Existing Python plistlib checks independently verify unchanged initial features and session response shape.
 
 Phone-facing second-display metadata and altScreen negotiation still need a matching capability gate and real phone evidence. Real-iPhone Type 111 and physical/official rendering remain NOT_RUN. D213's Vehicle State simulator and independent LVGL fusion demo do not enable this experimental alternate transport. The current bench supports the existing H.264 wire format only; it does not demonstrate official Cluster codec, assets, presentation timing or official Ultra.

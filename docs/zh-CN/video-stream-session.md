@@ -1,6 +1,6 @@
 [English](../video-stream-session.md) | [简体中文](video-stream-session.md)
 
-# RTSP 会话中的独立视频槽位
+# 独立视频会话与实验性 Receiver 传输
 
 RTSP 会话支持独立 Type 110 Main 和实验性 Type 111 备用槽位。公共 Receiver 可通过 experimental_alt_video 显式接入独立且经过认证的 H.264 TCP 接收器，默认配置仍使用现有单 Main 路径。此传输实验不新增 /info 声明、altScreen 协商、HEVC 或 D213 渲染行为，不能作为 L5 或官方 Ultra 验收。
 
@@ -28,7 +28,7 @@ Type 111 还要求已完成初始 SETUP。与现有 Main 回调一样，后端�
 
 后端可能立即传输，因此在回调前预留 ID。部分事务后继续退役 ID 是保守的复用防护，不代表推测出的手机重传规则。台账仍有界，新的认证会话仍是重建台账的边界。缺省初始 SETUP enabledFeatures 字节仍为 iAPChannel/viewAreas，手机仅提出 altScreen 不会增加已启用能力。
 
-## Host 证据与后续集成
+## 会话 Host 证据
 
 tests/check_video_session_wire.py 使用 Python plistlib 独立生成二进制 plist 输入并解码实际会话响应，验证独立端口、未改变的初始能力及旧配置中省略的备用视频。C 测试覆盖混合 SETUP、重复类型/ID、视频/音频间碰撞、活动密钥冲突、幂等请求、过期选择性清理、替换/复用拒绝、任一回调失败、成功回调返回零端口、音频失败、过小响应缓冲、完整清理/销毁和不完整回调配对拒绝。
 
@@ -42,6 +42,6 @@ rtcp_receiver_get_alt_video_status 在所有者线程返回复制快照，停止
 
 ## 加密 Host 证据与剩余工作
 
---alt-video 和 --alt-video-null 端到端场景使用公共 Receiver、真实 TCP、Pair-Setup/Pair-Verify、ControlCipher 及分别加密的 H.264 帧，验证认证/初始 SETUP 门控、不同标记/密钥的并发交错交付、独立端口/Sink/计数器、幂等请求、过期选择性清理、ID 退役、监听分配失败、错误密钥/认证标签隔离、EOF、使用新 ID 恢复、Main 丢失清理和 stop/start 重置。两个场景均继续原有 Classic 音视频/重连回归，已接入 Make check 和 CTest。现有 Python plistlib 检查独立验证不变的初始能力及会话响应结构。
+--alt-video 和 --alt-video-null 端到端场景使用公共 Receiver、真实 TCP、Pair-Setup/Pair-Verify、ControlCipher 及分别加密的 H.264 帧，验证认证/初始 SETUP 门控、不同标记/密钥的并发交错交付、独立端口/Sink/计数器、幂等请求、过期选择性清理、ID 退役、监听分配失败、仅错误就绪时避免阻塞 accept、错误密钥/认证标签隔离、EOF、使用新 ID 恢复、Main 丢失清理和 stop/start 重置。两个场景均继续原有 Classic 音视频/重连回归，已接入 Make check 和 CTest。现有 Python plistlib 检查独立验证不变的初始能力及会话响应结构。
 
 手机侧第二显示元数据和 altScreen 协商仍需匹配的能力门控及真实手机证据。真实 iPhone Type 111 和物理/官方渲染保持 NOT_RUN。D213 Vehicle State 模拟器及独立 LVGL 融合演示不会启用此实验性备用传输。当前实验只支持现有 H.264 线格式，不能证明官方 Cluster 编解码、资产、呈现时序或官方 Ultra。

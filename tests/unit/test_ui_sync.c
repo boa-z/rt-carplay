@@ -331,6 +331,18 @@ static void inventory_validation(void)
     assert(after.next_tx==before.next_tx && after.last_rx==before.last_rx && !after.pending_outputs);
     assert(after.phone_choices==before.phone_choices && after.last_error==RTCP_ENOTSUP);
     assert(!strcmp(after.phone_layout,before.phone_layout) && !strcmp(after.phone_palette,before.phone_palette));
+    const unsigned nul_ids[]={UI_FIXTURE_nul_layout_id,UI_FIXTURE_nul_layout_palette,
+        UI_FIXTURE_nul_palette_layout,UI_FIXTURE_nul_palette_id};
+    for (size_t i=0;i<sizeof(nul_ids)/sizeof(nul_ids[0]);++i) {
+        before=status(s);
+        assert(rtcp_ui_sync_handle(s,ui_fixtures[nul_ids[i]].bytes,ui_fixtures[nul_ids[i]].length) == RTCP_EINVAL);
+        after=status(s);
+        assert(after.rejected==before.rejected+1 && after.received==before.received+1);
+        assert(after.next_tx==before.next_tx && after.last_rx==before.last_rx && after.peer_ack==before.peer_ack);
+        assert(!after.pending_outputs && after.phone_choices==before.phone_choices && after.last_error==RTCP_EINVAL);
+        assert(!strcmp(after.phone_layout,before.phone_layout) && !strcmp(after.phone_palette,before.phone_palette));
+        assert(!strcmp(after.phone_palette_layout,before.phone_palette_layout));
+    }
     assert(HANDLE(s,inventory_layout_only) == RTCP_OK); take(s,3,7,5);
     rtcp_ui_sync_reset_session(s);
     assert(rtcp_ui_sync_get_inventory(s)==copied && !strcmp(status(s).requested_layout,"0D38B526"));

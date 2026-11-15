@@ -84,6 +84,10 @@ def fixtures():
         'inventory_unknown_palette': command(0x10, {'layoutIdentifier': 'DB7C6944', 'paletteIdentifier': 'not-installed'}, psn=5),
         'inventory_wrong_layout_palette': command(3, {'layoutID': 'DB7C6944', 'paletteID': 'blue'}, psn=5),
         'inventory_layout_only': command(3, {'layoutID': 'DB7C6944'}, psn=5),
+        'nul_layout_id': command(3, {'layoutID': 'DB7C6944\x00suffix', 'paletteID': 'dark'}, psn=5),
+        'nul_layout_palette': command(3, {'layoutID': 'DB7C6944', 'paletteID': 'dark\x00suffix'}, psn=5),
+        'nul_palette_layout': command(0x10, {'layoutIdentifier': 'DB7C6944\x00suffix', 'paletteIdentifier': 'red'}, psn=5),
+        'nul_palette_id': command(0x10, {'layoutIdentifier': 'DB7C6944', 'paletteIdentifier': 'red\x00suffix'}, psn=5),
     }
     # Introduce a duplicate type key in a real plistlib object table, independent
     # of the SDK writer. Root has fewer than 15 fields and one-byte references.

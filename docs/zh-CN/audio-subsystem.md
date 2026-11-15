@@ -151,3 +151,7 @@ free
 | Codec + 麦克风 + 实验性 AEC | 2,735,184 | 1,054,340 | 3,695,072 | 7,484,596 |
 
 Voice 验证后工作区恢复默认 defconfig。生成的默认镜像为 `../luban-lite-jc-carplay-oss/output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img`，该次构建 SHA-256 为 `3623f14f82f263dd0e144b2a26017c83162d03a299bfcc6ac7eae2e8022a43b2`。镜像字节可能随构建时间戳／工具链变化。未烧录镜像，不声称执行过 D213 音频测试。
+
+## 接收阶段诊断
+
+owner 线程的 rtcp_receiver_get_diagnostics 快照提供活动音频流数量、datagrams、auth_failures、malformed、replay_drops、delivered、sink_rejected、sequence_missing、sequence_reordered 与 poll_gap_max_us。delivered 仅表示回调接受，不等于采样已解码或播放。正向序号缺口属于暂时的高水位观察，可能被后续乱序填补；RTP 序号字段本身不在 AEAD 关联数据内。调度间隔包含无可读音频/控制流量的时段。这些计数单独不足以证明网络丢包或 DAC 音质。前三次被拒绝的 AAC 帧会报告解码错误和格式/消费字节详情，不泄露音频负载，校验与重放保护保持不变。

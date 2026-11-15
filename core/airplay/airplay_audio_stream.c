@@ -42,6 +42,10 @@ struct airplay_audio_stream {
     uint32_t decrypted;
     uint32_t auth_failures;
     uint32_t short_packets;
+    rtcp_audio_stats_t stats;
+    bool sequence_seen, poll_seen;
+    uint16_t highest_sequence;
+    uint64_t last_poll_us;
     bool first_packet_logged;
     bool nonce_seen;
     uint64_t highest_nonce;
@@ -242,13 +246,14 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
     ++stream->datagrams;
     if (len < AIRPLAY_AUDIO_OVERHEAD_BYTES) {
         ++stream->short_packets;
+        ++stream->stats.malformed;
         if (stream->short_packets == 1U) {
             RTCP_LOGW(TAG, "stream=%u short_datagram bytes=%u",
                       (unsigned)stream->stream_type, (unsigned)len);
         }
         return RTCP_EINVAL;
     }
-    if (wire[0] != 0x80U) return RTCP_EINVAL; /* fixed RTP v2, no extensions/CSRC/padding */
+    if (wire[0] != 0x80U) { ++stream->stats.malformed; return RTCP_EINVAL; } /* fixed RTP v2, no extensions/CSRC/padding */
     if (len > stream->max_datagram_bytes) {
         return RTCP_EINVAL;
     }
@@ -275,6 +280,16 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
         return RTCP_EIO;
     }
 
+    uint16_t sequence = read_be16(wire + 2U);
+    if (!stream->sequence_seen) {
+        stream->sequence_seen = true; stream->highest_sequence = sequence;
+    } else {
+        int16_t step = (int16_t)(uint16_t)(sequence - stream->highest_sequence);
+        if (step > 0) {
+            stream->stats.sequence_missing += (unsigned)step - 1U;
+            stream->highest_sequence = sequence;
+        } else ++stream->stats.sequence_reordered;
+    }
     /* Commit the replay window only after successful authentication. */
     uint64_t counter = 0;
     for (unsigned i = 0; i < 8; ++i) counter |= (uint64_t)nonce[4 + i] << (8 * i);
@@ -288,11 +303,15 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
         stream->highest_nonce = counter;
     } else {
         uint64_t delta = stream->highest_nonce - counter;
-        if (delta >= 64 || (stream->nonce_window & (UINT64_C(1) << delta))) return RTCP_EINVAL;
+        if (delta >= 64 || (stream->nonce_window & (UINT64_C(1) << delta))) {
+            ++stream->stats.replay_drops; return RTCP_EINVAL;
+        }
         stream->nonce_window |= UINT64_C(1) << delta;
     }
     if (stream->format.codec == RTCP_AUDIO_LPCM) {
-    if (cipher_len % (2U * stream->format.channels) != 0U) return RTCP_EINVAL;
+    if (cipher_len % (2U * stream->format.channels) != 0U) {
+        ++stream->stats.malformed; return RTCP_EINVAL;
+    }
     /* RTP L16 is big endian. The sink contract is little endian. */
     for (size_t i = 0; i < cipher_len; i += 2) {
         uint8_t byte = payload[i]; payload[i] = payload[i + 1]; payload[i + 1] = byte;
@@ -306,9 +325,11 @@ static int process_buffer(airplay_audio_stream_t *stream, uint8_t *wire,
                   (unsigned)stream->stream_type, (unsigned)cipher_len,
                   (unsigned)read_be16(wire + 2U), (unsigned)timestamp);
     }
-    return stream->on_pcm(stream->stream_type, payload, cipher_len,
-                          &stream->format, timestamp, arrival_us,
-                          stream->context);
+    result = stream->on_pcm(stream->stream_type, payload, cipher_len,
+                            &stream->format, timestamp, arrival_us, stream->context);
+    if (result == RTCP_OK) ++stream->stats.delivered;
+    else ++stream->stats.sink_rejected;
+    return result;
 }
 
 int airplay_audio_stream_process_datagram(airplay_audio_stream_t *stream,
@@ -329,7 +350,18 @@ void airplay_audio_stream_poll(airplay_audio_stream_t *stream,
                                bool control_readable)
 {
     if (stream == NULL) return;
-    if (data_readable && stream->data_fd >= 0) {
+    uint64_t now = stream->os->now_us ? stream->os->now_us() : stream->os->now_ms() * 1000U;
+    if (stream->poll_seen && now >= stream->last_poll_us) {
+        uint64_t gap = now - stream->last_poll_us;
+        uint32_t bounded = gap > UINT32_MAX ? UINT32_MAX : (uint32_t)gap;
+        if (bounded > stream->stats.poll_gap_max_us) stream->stats.poll_gap_max_us = bounded;
+    }
+    stream->poll_seen = true; stream->last_poll_us = now;
+    /* Drain a bounded burst before returning to screen/control work. One
+     * datagram per owner iteration cannot recover from a delayed screen read.
+     * Recheck readiness with zero timeout: ports need not expose nonblocking
+     * recvfrom and a depleted socket must never block the receiver owner. */
+    for (unsigned budget = 0; data_readable && stream->data_fd >= 0 && budget < 32; ++budget) {
         rtcp_addr_t source;
         memset(&source, 0, sizeof(source));
         int received = stream->net->udp_recvfrom(stream->data_fd, stream->wire,
@@ -341,6 +373,10 @@ void airplay_audio_stream_poll(airplay_audio_stream_t *stream,
                                   : stream->os->now_ms() * 1000U;
             process_buffer(stream, stream->wire, (size_t)received, now_us);
         }
+        if (received <= 0 || stream->net->poll == NULL) break;
+        struct rtcp_pollfd fd = {0};
+        fd.fd = stream->data_fd; fd.events = RTCP_POLLIN;
+        data_readable = stream->net->poll(&fd, 1, 0) > 0 && (fd.revents & RTCP_POLLIN);
     }
     if (control_readable && stream->control_fd >= 0) {
         uint8_t control[128];
@@ -349,6 +385,14 @@ void airplay_audio_stream_poll(airplay_audio_stream_t *stream,
         (void)stream->net->udp_recvfrom(stream->control_fd, control,
                                         sizeof(control), &source);
     }
+}
+
+void airplay_audio_stream_get_stats(const airplay_audio_stream_t *stream, rtcp_audio_stats_t *stats)
+{
+    if (!stats) return;
+    if (!stream) { memset(stats, 0, sizeof(*stats)); return; }
+    *stats = stream->stats; stats->active_streams = 1;
+    stats->datagrams = stream->datagrams; stats->auth_failures = stream->auth_failures;
 }
 
 uint32_t airplay_audio_stream_datagrams(const airplay_audio_stream_t *stream)

@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/diagnostics.h"
 
 #include "rtcp/net.h"
 #include "rtcp/os.h"
@@ -99,11 +100,14 @@ int airplay_audio_stream_process_datagram(airplay_audio_stream_t *stream,
                                           uint64_t arrival_us);
 
 /* Call from the application poll loop.  Each readable flag must reflect
- * poll() on the matching descriptor.  Drains at most one data datagram per
+ * poll() on the matching descriptor. Drains at most 32 data datagrams per
  * call; the control port is read only to keep its queue empty. */
 void airplay_audio_stream_poll(airplay_audio_stream_t *stream,
                                bool data_readable,
                                bool control_readable);
+
+void airplay_audio_stream_get_stats(const airplay_audio_stream_t *stream,
+                                     rtcp_audio_stats_t *stats);
 
 uint32_t airplay_audio_stream_datagrams(const airplay_audio_stream_t *stream);
 uint32_t airplay_audio_stream_auth_failures(const airplay_audio_stream_t *stream);

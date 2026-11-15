@@ -25,7 +25,7 @@ rtcp_audio_voice_t *rtcp_audio_voice_create(bool ns,bool agc,bool aec)
     v->agc=agc;v->gain=1;
 #ifdef RTCP_AUDIO_CODECS
     if(aec) {
-        v->echo=speex_echo_state_init(RTCP_VOICE_FRAME,4800);if(!v->echo)goto fail;
+        v->echo=speex_echo_state_init(RTCP_VOICE_FRAME,9600);if(!v->echo)goto fail;
         int rate=48000;if(speex_echo_ctl(v->echo,SPEEX_ECHO_SET_SAMPLING_RATE,&rate))goto fail;
     }
     if(ns) {
@@ -33,7 +33,12 @@ rtcp_audio_voice_t *rtcp_audio_voice_create(bool ns,bool agc,bool aec)
         int yes=1,noise=-18;
         if(speex_preprocess_ctl(v->pre,SPEEX_PREPROCESS_SET_DENOISE,&yes) ||
            speex_preprocess_ctl(v->pre,SPEEX_PREPROCESS_SET_NOISE_SUPPRESS,&noise))goto fail;
-        if(v->echo && speex_preprocess_ctl(v->pre,SPEEX_PREPROCESS_SET_ECHO_STATE,v->echo))goto fail;
+        if(v->echo) {
+            int suppress=-40, active=-15;
+            if(speex_preprocess_ctl(v->pre,SPEEX_PREPROCESS_SET_ECHO_STATE,v->echo) ||
+               speex_preprocess_ctl(v->pre,SPEEX_PREPROCESS_SET_ECHO_SUPPRESS,&suppress) ||
+               speex_preprocess_ctl(v->pre,SPEEX_PREPROCESS_SET_ECHO_SUPPRESS_ACTIVE,&active))goto fail;
+        }
     }
 #endif
     return v;

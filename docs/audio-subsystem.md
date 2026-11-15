@@ -152,3 +152,7 @@ Both configurations completed `scons -j8` without compiler warnings. GNU size be
 | Codecs + microphone + experimental AEC | 2,735,184 | 1,054,340 | 3,695,072 | 7,484,596 |
 
 The workspace was returned to the default defconfig after voice validation. The generated default image is `../luban-lite-jc-carplay-oss/output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img`. Its SHA-256 for this build is `3623f14f82f263dd0e144b2a26017c83162d03a299bfcc6ac7eae2e8022a43b2`. Image bytes may change with build timestamps/toolchain. No image was flashed and no D213 audio test is claimed.
+
+## Receive-stage diagnostics
+
+The owner-thread rtcp_receiver_get_diagnostics snapshot exposes active audio streams, datagrams, auth_failures, malformed, replay_drops, delivered, sink_rejected, sequence_missing, sequence_reordered and poll_gap_max_us. Delivery counts callback acceptance, not decoded or presented samples. Forward sequence gaps are provisional high-water observations and can later be filled by reordering; the RTP sequence field is outside the AEAD associated data. Dispatch intervals include periods with no readable audio/control traffic. These counters do not establish network loss or DAC quality by themselves. The first three rejected AAC frames report decoder error and format/consumption details without exposing audio payloads; validation and replay protection are unchanged.

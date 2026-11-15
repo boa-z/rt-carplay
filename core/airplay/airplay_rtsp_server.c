@@ -1094,9 +1094,6 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
     if (event_index >= 0 && (fds[event_index].revents & RTCP_POLLIN) != 0) {
         airplay_event_port_poll(server->event_port);
     }
-    if (screen_index >= 0 && (fds[screen_index].revents & RTCP_POLLIN) != 0) {
-        airplay_screen_server_poll(server->screen_server);
-    }
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
         if (server->audio[slot] == NULL) continue;
         bool data_readable = audio_data_index[slot] >= 0 &&
@@ -1107,6 +1104,11 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
             airplay_audio_stream_poll(server->audio[slot], data_readable,
                                       control_readable);
         }
+    }
+
+    /* Service deadline-sensitive UDP before potentially expensive video work. */
+    if (screen_index >= 0 && (fds[screen_index].revents & RTCP_POLLIN) != 0) {
+        airplay_screen_server_poll(server->screen_server);
     }
 
     if (rtsp_index >= 0 && (fds[rtsp_index].revents != 0)) {
@@ -1166,9 +1168,14 @@ void airplay_rtsp_server_get_audio_stats(const airplay_rtsp_server_t *server, ai
     for (unsigned i=0; i<AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++i) {
         const airplay_audio_stream_t *stream=server->audio[i];
         if (!stream) continue;
+        rtcp_audio_stats_t lane;
+        airplay_audio_stream_get_stats(stream, &lane);
         ++stats->active_streams;
-        stats->datagrams+=airplay_audio_stream_datagrams(stream);
-        stats->auth_failures+=airplay_audio_stream_auth_failures(stream);
+#define ADD(field) stats->field += lane.field
+        ADD(datagrams); ADD(auth_failures); ADD(malformed); ADD(replay_drops);
+        ADD(delivered); ADD(sink_rejected); ADD(sequence_missing); ADD(sequence_reordered);
+#undef ADD
+        if (lane.poll_gap_max_us > stats->poll_gap_max_us) stats->poll_gap_max_us = lane.poll_gap_max_us;
     }
 }
 

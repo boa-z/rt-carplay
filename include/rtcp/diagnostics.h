@@ -42,6 +42,11 @@ typedef struct {
 typedef struct {
     unsigned active_streams;
     uint32_t datagrams, auth_failures;
+    uint32_t malformed, replay_drops, delivered, sink_rejected;
+    /* Authenticated sequence high-water observations, not proven network loss.
+     * Reordering/retransmission can subsequently fill forward gaps. */
+    uint32_t sequence_missing, sequence_reordered;
+    uint32_t poll_gap_max_us;
 } rtcp_audio_stats_t;
 
 /* datagrams precede authentication; active_streams counts active Audio SETUP.

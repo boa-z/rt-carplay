@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "include/audio_codec.h"
 #include "rtcp/rtcp.h"
+#include "rtcp/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
@@ -13,6 +14,7 @@ struct rtcp_audio_decoder {
     rtcp_audio_format_t format;
 #ifdef RTCP_AUDIO_CODECS
     NeAACDecHandle aac;
+    unsigned decode_errors;
     OpusDecoder *opus;
 #endif
 };
@@ -108,7 +110,13 @@ int rtcp_audio_decoder_decode(rtcp_audio_decoder_t *d, const uint8_t *data, size
         void *decoded = NeAACDecDecode(d->aac, &info, (unsigned char *)data, (unsigned long)len);
         if (info.error || !decoded || info.channels != d->format.channels ||
             info.samplerate != d->format.sample_rate || info.samples > cap ||
-            info.samples > 2048 || info.bytesconsumed != len) return RTCP_EIO;
+            info.samples > 2048 || info.bytesconsumed != len) {
+            if (d->decode_errors++ < 3)
+                RTCP_LOGW("audio_codec", "aac rejected error=%u bytes=%u/%u samples=%u channels=%u rate=%u",
+                    (unsigned)info.error, (unsigned)info.bytesconsumed, (unsigned)len,
+                    (unsigned)info.samples, (unsigned)info.channels, (unsigned)info.samplerate);
+            return RTCP_EIO;
+        }
         memcpy(pcm, decoded, info.samples * sizeof(*pcm));
         *samples = info.samples; return RTCP_OK;
     }

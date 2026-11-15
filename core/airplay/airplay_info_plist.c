@@ -475,33 +475,39 @@ static uint32_t emit_audio_formats(ip_writer_t *w,
     return ip_emit_array(w, refs, count);
 }
 
-static uint32_t emit_safe_area(ip_writer_t *w, uint16_t width, uint16_t height)
+static uint32_t emit_safe_area(ip_writer_t *w, const rtcp_display_rect_t *r,
+                               bool draw_outside)
 {
     static const char *const keys[] = {
         "widthPixels", "heightPixels", "originXPixels", "originYPixels",
         "drawUIOutsideSafeArea",
     };
     uint32_t values[5];
-    values[0] = ip_emit_int(w, width);
-    values[1] = ip_emit_int(w, height);
-    values[2] = ip_emit_int(w, 0);
-    values[3] = ip_emit_int(w, 0);
-    values[4] = ip_emit_bool(w, true);
+    values[0] = ip_emit_int(w, r->width);
+    values[1] = ip_emit_int(w, r->height);
+    values[2] = ip_emit_int(w, r->x);
+    values[3] = ip_emit_int(w, r->y);
+    values[4] = ip_emit_bool(w, draw_outside);
     return ip_emit_literal_dict(w, keys, values, 5U);
 }
 
-static uint32_t emit_view_area(ip_writer_t *w, uint16_t width, uint16_t height)
+static uint32_t emit_view_area(ip_writer_t *w, const airplay_info_plist_config_t *config)
 {
     static const char *const keys[] = {
         "widthPixels", "heightPixels", "originXPixels", "originYPixels",
         "safeArea",
     };
+    const rtcp_display_profile_t *p = config->main_display_profile;
+    rtcp_display_rect_t view = {0, 0, config->width_pixels, config->height_pixels};
+    if (p != NULL && p->view_area.width != 0U) view = p->view_area;
+    rtcp_display_rect_t safe = view;
+    if (p != NULL && p->safe_area.width != 0U) safe = p->safe_area;
     uint32_t values[5];
-    values[0] = ip_emit_int(w, width);
-    values[1] = ip_emit_int(w, height);
-    values[2] = ip_emit_int(w, 0);
-    values[3] = ip_emit_int(w, 0);
-    values[4] = emit_safe_area(w, width, height);
+    values[0] = ip_emit_int(w, view.width);
+    values[1] = ip_emit_int(w, view.height);
+    values[2] = ip_emit_int(w, view.x);
+    values[3] = ip_emit_int(w, view.y);
+    values[4] = emit_safe_area(w, &safe, p == NULL || p->draw_outside_safe_area);
     return ip_emit_literal_dict(w, keys, values, 5U);
 }
 
@@ -515,12 +521,12 @@ static uint32_t emit_display(ip_writer_t *w,
         "mapAppearanceSetting", "viewAreas", "initialViewArea",
     };
 
-    uint32_t view_area = emit_view_area(w, config->width_pixels,
-                                        config->height_pixels);
+    const rtcp_display_profile_t *p = config->main_display_profile;
+    uint32_t view_area = emit_view_area(w, config);
     uint32_t view_areas = ip_emit_array(w, &view_area, 1U);
 
     uint32_t values[15];
-    values[0] = ip_emit_string(w, IP_DISPLAY_UUID);
+    values[0] = ip_emit_string(w, p != NULL && p->uuid != NULL ? p->uuid : IP_DISPLAY_UUID);
     values[1] = ip_emit_int(w, IP_DISPLAY_TYPE);
     values[2] = ip_emit_int(w, config->max_fps != 0U ? config->max_fps
                                                      : IP_DEFAULT_MAX_FPS);
@@ -534,16 +540,17 @@ static uint32_t emit_display(ip_writer_t *w,
                                    : IP_DEFAULT_HEIGHT_PHYSICAL);
     values[7] = ip_emit_int(w, IP_DISPLAY_FEATURES);
     values[8] = ip_emit_int(w, 1);
-    values[9] = ip_emit_int(w, 0);
-    values[10] = ip_emit_int(w, 0);
-    values[11] = ip_emit_int(w, 0);
-    values[12] = ip_emit_int(w, 0);
+    values[9] = ip_emit_int(w, p != NULL && p->ui_night);
+    values[10] = ip_emit_int(w, p != NULL ? p->appearance_setting : 0);
+    values[11] = ip_emit_int(w, p != NULL && p->map_night);
+    values[12] = ip_emit_int(w, p != NULL ? p->appearance_setting : 0);
     values[13] = view_areas;
     values[14] = ip_emit_int(w, 0);
     return ip_emit_literal_dict(w, keys, values, 15U);
 }
 
-static uint32_t emit_hid_device(ip_writer_t *w, const uint8_t *descriptor,
+static uint32_t emit_hid_device(ip_writer_t *w, const airplay_info_plist_config_t *config,
+                                const uint8_t *descriptor,
                                 size_t descriptor_len)
 {
     static const char *const keys[] = {
@@ -556,7 +563,8 @@ static uint32_t emit_hid_device(ip_writer_t *w, const uint8_t *descriptor,
     values[2] = ip_emit_int(w, 0);
     values[3] = ip_emit_string(w, IP_HID_UUID);
     values[4] = ip_emit_string(w, IP_HID_NAME);
-    values[5] = ip_emit_string(w, IP_DISPLAY_UUID);
+    const rtcp_display_profile_t *p = config->main_display_profile;
+    values[5] = ip_emit_string(w, p != NULL && p->uuid != NULL ? p->uuid : IP_DISPLAY_UUID);
     values[6] = ip_emit_data(w, descriptor, descriptor_len);
     return ip_emit_literal_dict(w, keys, values, 7U);
 }
@@ -585,7 +593,7 @@ static uint32_t emit_root(ip_writer_t *w,
     }
     uint32_t display = emit_display(w, config);
     uint32_t displays = ip_emit_array(w, &display, 1U);
-    uint32_t hid = emit_hid_device(w, descriptor, descriptor_len);
+    uint32_t hid = emit_hid_device(w, config, descriptor, descriptor_len);
     uint32_t hids = ip_emit_array(w, &hid, 1U);
     uint32_t modes = emit_modes(w);
     uint32_t extended = emit_extended_features(w);
@@ -634,7 +642,9 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
     if (output_len != NULL) *output_len = 0U;
     if (config == NULL || config->device_id == NULL ||
         config->device_id[0] == '\0' || config->width_pixels == 0U ||
-        config->height_pixels == 0U || output == NULL || output_len == NULL) {
+        config->height_pixels == 0U || output == NULL || output_len == NULL ||
+        !rtcp_display_profile_validate(config->main_display_profile,
+                                       config->width_pixels, config->height_pixels)) {
         return false;
     }
 

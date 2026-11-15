@@ -294,6 +294,45 @@ int main(void)
         expect_uint(&doc, entry, "borrowConstraint", 100);
     }
 
+    /* Optional profile is coherent on the wire: custom UUID applies to HID
+     * and display; view/safe geometry is bounded in negotiated pixels. */
+    rtcp_display_profile_t profile = {
+        .struct_size = sizeof(profile),
+        .uuid = "01234567-89ab-cdef-0123-456789abcdef",
+        .view_area = {20, 10, 1240, 460},
+        .safe_area = {30, 20, 1220, 440},
+        .ui_night = true, .map_night = true, .appearance_setting = 2
+    };
+    airplay_info_plist_config_t custom = k_config;
+    custom.main_display_profile = &profile;
+    assert(airplay_info_plist_build(&custom, plist, sizeof(plist), &plist_len));
+    assert(airplay_bplist_open(plist, plist_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "displays", &object) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_type(&doc, object, &object_type, &item_count) == AIRPLAY_BPLIST_OK);
+    assert(item_count == 1); /* No implicit second display. */
+    assert(airplay_bplist_array_get(&doc, object, 0, &entry) == AIRPLAY_BPLIST_OK);
+    expect_string(&doc, entry, "uuid", profile.uuid);
+    expect_uint(&doc, entry, "type", 110);
+    expect_uint(&doc, entry, "uiAppearanceMode", 1);
+    expect_uint(&doc, entry, "mapAppearanceSetting", 2);
+    assert(airplay_bplist_dict_get(&doc, entry, "viewAreas", &object) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, object, 0, &entry) == AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, entry, "originXPixels", 20);
+    expect_uint(&doc, entry, "widthPixels", 1240);
+    assert(airplay_bplist_dict_get(&doc, entry, "safeArea", &entry) == AIRPLAY_BPLIST_OK);
+    expect_uint(&doc, entry, "originXPixels", 30);
+    expect_uint(&doc, entry, "heightPixels", 440);
+    assert(airplay_bplist_dict_get(&doc, root, "hidDevices", &object) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, object, 0, &entry) == AIRPLAY_BPLIST_OK);
+    expect_string(&doc, entry, "displayUUID", profile.uuid);
+    assert(airplay_bplist_dict_get(&doc, root, "hevcInfo", &object) == AIRPLAY_BPLIST_NOT_FOUND);
+    assert(airplay_bplist_dict_get(&doc, root, "vehicleStateProtocolInfo", &object) == AIRPLAY_BPLIST_NOT_FOUND);
+    assert(airplay_bplist_dict_get(&doc, root, "uiSyncInfo", &object) == AIRPLAY_BPLIST_NOT_FOUND);
+    profile.safe_area.x = 0;
+    assert(!airplay_info_plist_build(&custom, plist, sizeof(plist), &plist_len));
+    assert(plist_len == 0);
+
     /* Bounds and argument validation. */
     size_t unused = 0U;
     uint8_t tiny[64];

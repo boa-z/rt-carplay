@@ -12,6 +12,8 @@ Current state: the portable Receiver API and public media registration are imple
 
 ## Features
 
+The [Ultra protocol foundation](docs/ultra-foundation.md) adds optional Main Display metadata, OPACK and a bounded Vehicle State message processor. Live Type 130 and UI Sync integration are pending; these APIs do not claim official Ultra support.
+
 - AirPlay/CarPlay RTSP, Pair-Setup/Pair-Verify, encrypted control/event/media, H.264 and HID output.
 - USBMUX/Lockdown/TLS protocol support and wireless iAP2/MFi/Wi-Fi handover behind injected transport services.
 - Independent transport, authentication, session, video, audio and input readiness; explicit owner-thread lifecycle and failure retry.
@@ -66,7 +68,7 @@ cmake --build build-cmake -j8
 ctest --test-dir build-cmake --output-on-failure
 ```
 
-Make builds a private `libmbedcrypto.a` under `build/mbedtls` using `config/mbedtls_rtcp_host.h`; mbedTLS is fetched rather than committed. CMake uses its selected binary directory. Make enables ASan/UBSan by default; the CMake command above enables them explicitly. The suite executes 54 test binaries plus the legacy-configuration encrypted end-to-end variant (55 CTest cases), boundary checks and a public-header compilation without private include paths. Adapter-specific regressions are documented with the corresponding host integration.
+Make builds a private `libmbedcrypto.a` under `build/mbedtls` using `config/mbedtls_rtcp_host.h`; mbedTLS is fetched rather than committed. CMake uses its selected binary directory. Make enables ASan/UBSan by default; the CMake command above enables them explicitly. The suite executes 57 test binaries plus the legacy-configuration encrypted end-to-end variant (58 CTest cases), boundary checks and a public-header compilation without private include paths. Adapter-specific regressions are documented with the corresponding host integration.
 
 ## Quick start
 
@@ -118,7 +120,7 @@ Audio negotiation/output policy is frozen during this refactor. Existing iPhone 
 - [Bond reconnect](docs/bluetooth-bond-reconnect.md), [wired video performance](docs/wired-video-performance.md) and [wired stall investigation](docs/wired-video-stall-probe.md) also have full pairs with historical measurements and current ownership notes. [RT-Thread](port/rtthread/README.md) and [Luban-Lite](port/luban-lite/README.md) port notes, [synthetic audio fixtures](tests/fixtures/audio/README.md) and [audio dependency provenance](third_party/audio/README.md) have full pairs. Current build/entropy/lifecycle guidance is distinguished from preserved bring-up commands.
 - [Audio subsystem](docs/audio-subsystem.md), [audio reference review](docs/audio-routing-reference-review.md) and [wireless bring-up](docs/wireless-bringup.md) have full pairs, preserving implementation matrices, measured Host costs, historical phone/board feedback and unresolved limits. Audio behavior remains frozen during V2.1.
 - [USBMUX negotiation/validation](docs/usbmux-validation.md), [wired authentication investigation](docs/wired-auth-investigation.md) and the [retired RT-Thread board-template record](examples/rtthread_app/README.md) also have full counterparts. Historical commands and results remain version-scoped; current host ownership and command equivalents are identified.
-- Run `make check-docs` for all 26 pairs: discovery, naming, reciprocal navigation, local files/heading fragments, paragraph layout, language, heading hierarchy, exact fenced blocks, inline literals and external-reference parity. The gate reuses the Apache-2.0 checker from cherryusb-ipheth and runs its 17 isolated mutation regressions. External sites are not fetched. `docs/documentation-exceptions.json` exempts only preserved upstream Ed25519 attribution. Human review remains necessary for technical facts, numeric prose and translation meaning.
+- Run `make check-docs` for all 27 pairs: discovery, naming, reciprocal navigation, local files/heading fragments, paragraph layout, language, heading hierarchy, exact fenced blocks, inline literals and external-reference parity. The gate reuses the Apache-2.0 checker from cherryusb-ipheth and runs its 17 isolated mutation regressions. External sites are not fetched. `docs/documentation-exceptions.json` exempts only preserved upstream Ed25519 attribution. Human review remains necessary for technical facts, numeric prose and translation meaning.
 
 ## License
 
@@ -129,6 +131,8 @@ Audio negotiation/output policy is frozen during this refactor. Existing iPhone 
 - Realtek binaries, vendor firmware blobs and Apple MFi identity material are not distributed in this SDK repository.
 
 ## Acknowledgments
+
+Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
 
 The iAP2 work derives from `esp32-carplay-web-relay` and DiPlay, with original notices retained. The screen implementation records DiPlay's protocol behavior; relevant audio transport references and LIVI attribution are preserved in source and notices. orlp/ed25519, mbedTLS, FAAD2, Opus and SpeexDSP retain their respective third-party licenses. RT-Thread, Luban-Lite/ArtInChip and CherryUSB supply the host integration foundations; cherryusb-ipheth remains a separately maintained driver.
 

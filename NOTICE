@@ -69,3 +69,14 @@ checker from boa-z/cherryusb-ipheth at
 2c87b69fda0d2dbeeb9df5180dd10157791d7371.
 Their license is retained in scripts/LICENSE; the project GPL license
 continues to apply to its separately marked project sources.
+
+Ultra protocol foundation:
+Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
+Copyright (C) 2025-2026 Lasse Heitgres.
+The OPACK codec, Vehicle State envelope/catalogue and display metadata were
+informed by LIVI revision 64a05b68358db52ed887169143afd5944fd6f1f7.
+LIVI is GPL-3.0-or-later with an additional GPL section 7(b) attribution
+requirement, including translations. Retain this attribution in documentation
+and appropriate visible legal/About notices of integrating works.
+See https://github.com/f-io/LIVI/blob/main/NOTICE.
+No Apple theme assets, keys or private identity material are included.

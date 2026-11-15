@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/display.h"
 
 #define AIRPLAY_INFO_PLIST_MAX_BYTES 6144U
 
@@ -50,6 +51,9 @@ typedef struct {
     /* 0 offers both 44.1/48 kHz, as in catplay; explicit 44100/48000 restricts
      * entertainment formats. This never changes decoder or device settings. */
     uint32_t audio_sample_rate;
+    /* NULL retains the original Classic document. Optional, validated Main
+     * Display geometry/appearance; copied into the output, never retained. */
+    const rtcp_display_profile_t *main_display_profile;
 } airplay_info_plist_config_t;
 
 /*

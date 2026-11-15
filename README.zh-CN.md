@@ -12,6 +12,8 @@
 
 ## 功能
 
+[Ultra 协议基础](docs/zh-CN/ultra-foundation.md)提供可选 Main Display 元数据、OPACK 和有界 Vehicle State 消息处理器。实际 Type 130 和 UI Sync 接入仍待实现，这些 API 不代表完整官方 Ultra 支持。
+
 - AirPlay/CarPlay RTSP、Pair-Setup/Pair-Verify、加密控制与事件及媒体、H.264 和 HID 输出。
 - 通过注入的传输服务提供 USBMUX、Lockdown、TLS 协议支持及无线 iAP2、MFi、Wi-Fi Handover。
 - 独立的传输、认证、会话、视频、音频及输入就绪状态，明确的 Owner 线程生命周期和失败重试。
@@ -66,7 +68,7 @@ cmake --build build-cmake -j8
 ctest --test-dir build-cmake --output-on-failure
 ```
 
-Make 使用 `config/mbedtls_rtcp_host.h` 在 `build/mbedtls` 构建私有 `libmbedcrypto.a`；mbedTLS 通过获取脚本提供，不提交源码。CMake 使用指定二进制目录。Make 默认启用 ASan/UBSan，上述 CMake 命令显式启用。测试集执行 54 个测试程序及旧配置加密端到端变体（55 个 CTest 用例）、边界检查及不使用内部包含目录的公共头文件编译检查。适配器专用回归由对应宿主集成文档说明。
+Make 使用 `config/mbedtls_rtcp_host.h` 在 `build/mbedtls` 构建私有 `libmbedcrypto.a`；mbedTLS 通过获取脚本提供，不提交源码。CMake 使用指定二进制目录。Make 默认启用 ASan/UBSan，上述 CMake 命令显式启用。测试集执行 57 个测试程序及旧配置加密端到端变体（58 个 CTest 用例）、边界检查及不使用内部包含目录的公共头文件编译检查。适配器专用回归由对应宿主集成文档说明。
 
 ## 快速开始
 
@@ -118,7 +120,7 @@ Host 验证覆盖 `_airplay._tcp.local` 的 mDNS `PTR`、`SRV`、`TXT`、`A` 记
 - [配对重连](docs/zh-CN/bluetooth-bond-reconnect.md)、[有线视频性能](docs/zh-CN/wired-video-performance.md)和[有线停顿调查](docs/zh-CN/wired-video-stall-probe.md)也已有完整配对，包含历史测量与当前职责说明。[RT-Thread](port/rtthread/README.zh-CN.md)和 [Luban-Lite](port/luban-lite/README.zh-CN.md) Port 说明、[合成音频素材](tests/fixtures/audio/README.zh-CN.md)和[音频依赖来源](third_party/audio/README.zh-CN.md)已有完整配对；现行构建／熵源／生命周期用法与保留的早期移植命令明确区分。
 - [音频子系统](docs/zh-CN/audio-subsystem.md)、[音频参考复核](docs/zh-CN/audio-routing-reference-review.md)和[无线启动](docs/zh-CN/wireless-bringup.md)已有完整配对，保留实现矩阵、Host 实测开销、历史手机／板端反馈和未解决限制。V2.1 期间音频行为保持冻结。
 - [USBMUX 协商／验证](docs/zh-CN/usbmux-validation.md)、[有线认证调查](docs/zh-CN/wired-auth-investigation.md)和[已退役 RT-Thread 板级模板记录](examples/rtthread_app/README.zh-CN.md)也已有完整配对。历史命令和结果保持版本范围，并说明当前宿主职责与对应命令。
-- 运行 `make check-docs` 检查全部 26 对文档：发现、命名、双向导航、本地文件／标题锚点、段落格式、语言、标题层级、完整代码块、行内标识符及外部参考一致性。检查复用 cherryusb-ipheth 的 Apache-2.0 工具，并运行其 17 项独立变异回归。不访问外部网站。`docs/documentation-exceptions.json` 仅豁免保留的上游 Ed25519 署名。技术事实、正文数值和翻译含义仍需人工审查。
+- 运行 `make check-docs` 检查全部 27 对文档：发现、命名、双向导航、本地文件／标题锚点、段落格式、语言、标题层级、完整代码块、行内标识符及外部参考一致性。检查复用 cherryusb-ipheth 的 Apache-2.0 工具，并运行其 17 项独立变异回归。不访问外部网站。`docs/documentation-exceptions.json` 仅豁免保留的上游 Ed25519 署名。技术事实、正文数值和翻译含义仍需人工审查。
 
 ## 许可证
 
@@ -129,6 +131,8 @@ Host 验证覆盖 `_airplay._tcp.local` 的 mDNS `PTR`、`SRV`、`TXT`、`A` 记
 - 本 SDK 仓库不分发 Realtek 二进制、厂商固件 Blob 和 Apple MFi 身份材料。
 
 ## 致谢
+
+Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
 
 iAP2 工作源于 `esp32-carplay-web-relay` 与 DiPlay，保留原始声明。Screen 实现记录 DiPlay 的协议行为；相关音频传输参考和 LIVI 署名保留于源码与声明。orlp/ed25519、mbedTLS、FAAD2、Opus 和 SpeexDSP 保留各自第三方许可。RT-Thread、Luban-Lite/ArtInChip 和 CherryUSB 提供宿主集成基础；cherryusb-ipheth 继续作为独立维护的驱动。
 

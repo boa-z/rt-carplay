@@ -22,10 +22,10 @@ typedef struct rtcp_addr {
 #define RTCP_POLLOUT   0x02
 #define RTCP_POLLERR   0x04
 
-/* RTSP, iAP, event, timing, screen, eight audio data/control pairs and three
+/* RTSP, iAP, event, timing, Main/alternate screen, eight audio data/control pairs and three
  * optional duplex Type 130 endpoints can be ready together. */
 #ifndef RTCP_NET_POLL_MAX
-#define RTCP_NET_POLL_MAX 24
+#define RTCP_NET_POLL_MAX 25
 #endif
 
 struct rtcp_pollfd {

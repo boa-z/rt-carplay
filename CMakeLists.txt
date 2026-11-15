@@ -166,6 +166,10 @@ if(RTCP_BUILD_TESTS)
     endforeach()
     add_test(NAME test_receiver_legacy_config
         COMMAND test_airplay_pairing_e2e --legacy-config)
+    add_test(NAME test_receiver_alt_video_e2e
+        COMMAND test_airplay_pairing_e2e --alt-video)
+    add_test(NAME test_receiver_alt_video_null_e2e
+        COMMAND test_airplay_pairing_e2e --alt-video-null)
     add_test(NAME test_receiver_vehicle_e2e
         COMMAND test_airplay_pairing_e2e --vehicle)
     add_test(NAME test_receiver_ultra_applications_e2e

@@ -63,6 +63,12 @@ typedef struct {
      * those capabilities or official Ultra. Keep inventory immutable while
      * attached. D213's independent LVGL dashboard does not satisfy this contract. */
     bool negotiate_ui_sync;
+    /* Transport bench only: authenticated Type 111 with a separate listener,
+     * key/nonce epoch and media.on_alt_video (NULL = intentional Null Sink).
+     * Default false. Does not advertise altScreen or a second display, nor
+     * negotiate official Ultra. No board renderer/codec is added. */
+    bool experimental_alt_video;
+    uint16_t alt_screen_port; /* 0 requests an independent ephemeral port. */
 } rtcp_receiver_config_t;
 
 /* All functions on an instance belong to one ordinary thread. The host
@@ -83,6 +89,8 @@ uint16_t rtcp_receiver_port(const rtcp_receiver_t *);
 int rtcp_receiver_get_peer(const rtcp_receiver_t *, rtcp_addr_t *);
 int rtcp_receiver_get_diagnostics(const rtcp_receiver_t *,
                                   rtcp_receiver_diagnostics_t *);
+/* Separate from Main video_ready and Main diagnostics. Works while stopped. */
+int rtcp_receiver_get_alt_video_status(const rtcp_receiver_t *, rtcp_alt_video_status_t *);
 /* Owner-thread A/B diagnostic. Default chunked ControlCipher framing is
  * unchanged. Requires a running Receiver; stop/start resets this setting. */
 int rtcp_receiver_set_single_cipher_frame(rtcp_receiver_t *, bool enabled);

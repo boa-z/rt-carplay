@@ -97,6 +97,9 @@ struct airplay_rtsp_server {
     bool event_failed;
     bool event_stopping;
     bool screen_failed;
+    airplay_screen_server_t *alt_screen_server;
+    bool alt_screen_failed;
+    rtcp_alt_video_status_t alt_video;
     server_data_stream_t data_stream[RTCP_DATA_STREAM_COUNT];
 };
 
@@ -253,6 +256,62 @@ static bool server_start_screen(const airplay_rtsp_pairing_t *pairing,
               (unsigned)*bound_port, (unsigned)(stream_connection_id >> 32),
               (unsigned)(stream_connection_id & UINT32_MAX));
     return true;
+}
+
+static void server_alt_screen_exited(void *context)
+{
+    airplay_rtsp_server_t *s = context;
+    if (s && !s->stopping) s->alt_screen_failed = true;
+}
+
+static void server_stop_video(uint16_t type, void *context)
+{
+    airplay_rtsp_server_t *s = context;
+    if (type == 110) { server_stop_screen(s); return; }
+    if (type != 111 || !s->alt_screen_server) return;
+    airplay_screen_server_get_stats(s->alt_screen_server, &s->alt_video.screen);
+    airplay_screen_server_stop(s->alt_screen_server, s->net);
+    s->alt_screen_server = NULL;
+    s->alt_video.ready = false; s->alt_video.port = 0;
+    ++s->alt_video.closed;
+    s->alt_screen_failed = false;
+}
+
+static bool server_start_video(const airplay_rtsp_pairing_t *pairing,
+    uint16_t type, uint64_t id, uint16_t requested, uint16_t *port, void *context)
+{
+    airplay_rtsp_server_t *s = context;
+    if (type == 110) return server_start_screen(pairing, id, requested, port, s);
+    if (type != 111 || !s->config.experimental_alt_video || !s->connection.cipher ||
+        s->alt_screen_server) return false;
+    uint8_t key[AIRPLAY_SCREEN_KEY_BYTES] = {0};
+    int result = RTCP_ESTATE;
+    if (airplay_rtsp_pairing_derive_screen_output_key(pairing, id, key) == AIRPLAY_PAIR_VERIFY_OK) {
+        airplay_screen_server_config_t config = {
+            .requested_port = requested, .family = s->family,
+            .max_body_bytes = s->config.screen_max_body_bytes,
+            .on_message = s->config.on_alt_screen_message,
+            .message_context = s->config.alt_screen_message_context,
+            .on_unexpected_exit = server_alt_screen_exited, .exit_context = s,
+        };
+        result = airplay_screen_server_start(s->os, s->net, key, &config, &s->alt_screen_server);
+    }
+    mbedtls_platform_zeroize(key, sizeof(key));
+    s->alt_video.last_error = result;
+    if (result) return false;
+    memset(&s->alt_video.screen, 0, sizeof(s->alt_video.screen));
+    s->alt_video.port = *port = airplay_screen_server_get_port(s->alt_screen_server);
+    s->alt_video.ready = true; ++s->alt_video.opened;
+    s->alt_screen_failed = false;
+    return true;
+}
+
+static void retire_failed_alt_video(airplay_rtsp_server_t *s)
+{
+    if (!s->alt_screen_failed) return;
+    server_stop_video(111, s);
+    s->alt_video.last_error = RTCP_EIO;
+    airplay_rtsp_session_video_closed(s->session, 111);
 }
 
 static bool server_start_event(const airplay_rtsp_pairing_t *pairing,
@@ -889,6 +948,11 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.start_audio_ex = server_start_audio;
     session_config.configure_audio = server_configure_audio;
     session_config.stop_screen = server_stop_screen;
+    if (server->config.experimental_alt_video) {
+        session_config.start_video = server_start_video;
+        session_config.stop_video = server_stop_video;
+        session_config.alt_screen_requested_port = server->config.alt_screen_port;
+    }
     session_config.stop_event = server_stop_event;
     session_config.stop_timing = server_stop_timing;
     session_config.stop_audio_ex = server_stop_audio;
@@ -959,6 +1023,7 @@ int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
         config->info_plist == NULL || config->info_plist_len == 0U ||
         config->info_plist_len > AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES ||
         config->on_screen_message == NULL ||
+        (config->experimental_alt_video && !config->on_alt_screen_message) ||
         (config->data_stream.channel_mask & ~RTCP_DATA_STREAM_ALL_MASK) ||
         (config->data_stream.channel_mask && !config->data_stream.on_body)) {
         return RTCP_EINVAL;
@@ -998,6 +1063,7 @@ int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
         return RTCP_ENOMEM;
     }
     server->config = *config;
+    server->alt_video.configured = config->experimental_alt_video;
     server->os = config->os;
     server->net = config->net;
     server->config.screen_max_body_bytes =
@@ -1082,11 +1148,22 @@ void airplay_rtsp_server_get_screen_stats(const airplay_rtsp_server_t *server,
                                     stats);
 }
 
+void airplay_rtsp_server_get_alt_video_status(const airplay_rtsp_server_t *s, rtcp_alt_video_status_t *out)
+{
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!s) return;
+    *out = s->alt_video;
+    if (s->alt_screen_server)
+        airplay_screen_server_get_stats(s->alt_screen_server, &out->screen);
+}
+
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
 {
     if (server == NULL) return RTCP_EINVAL;
     if (server->stopping) return RTCP_ESTATE;
     airplay_screen_server_owner_tick(server->screen_server);
+    airplay_screen_server_owner_tick(server->alt_screen_server);
 
     int event_fd = airplay_event_port_get_fd(server->event_port);
     int timing_fd = airplay_timing_port_get_fd(server->timing_port);
@@ -1094,13 +1171,14 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
     int rtsp_fd = server->client_fd >= 0 ? server->client_fd
                                          : server->listener_fd;
 
-    struct rtcp_pollfd fds[5 + 2 * AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS + RTCP_DATA_STREAM_COUNT];
+    struct rtcp_pollfd fds[6 + 2 * AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS + RTCP_DATA_STREAM_COUNT];
     int count = 0;
     int rtsp_index = -1;
     int iap_index = -1;
     int event_index = -1;
     int timing_index = -1;
     int screen_index = -1;
+    int alt_screen_index = -1;
     int data_index[RTCP_DATA_STREAM_COUNT];
     uint32_t data_id[RTCP_DATA_STREAM_COUNT];
     for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) {
@@ -1145,6 +1223,11 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         fds[count].events = RTCP_POLLIN;
         fds[count].revents = 0;
         ++count;
+    }
+    int alt_fd = airplay_screen_server_get_fd(server->alt_screen_server);
+    if (alt_fd >= 0) {
+        alt_screen_index = count;
+        fds[count++] = (struct rtcp_pollfd){.fd=alt_fd, .events=RTCP_POLLIN};
     }
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot) {
         airplay_audio_stream_t *stream = server->audio[slot];
@@ -1207,6 +1290,11 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
     if (screen_index >= 0 && (fds[screen_index].revents & RTCP_POLLIN) != 0) {
         airplay_screen_server_poll(server->screen_server);
     }
+
+    if (alt_screen_index >= 0 && fds[alt_screen_index].revents)
+        airplay_screen_server_poll(server->alt_screen_server);
+    /* Retire before RTSP can replace the slot. No stale exit may close a new key. */
+    retire_failed_alt_video(server);
 
     if (rtsp_index >= 0 && (fds[rtsp_index].revents != 0)) {
         if (server->client_fd < 0) {

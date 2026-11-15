@@ -84,5 +84,9 @@ typedef struct {
     bool (*on_audio_duck)(bool ducked, float volume_db, uint32_t duration_ms, void *context);
     void (*on_volume)(float volume_db, void *context);
     void *volume_context;
+    /* Independent experimental Type 111 H.264 sink. NULL deliberately discards
+     * only when receiver.experimental_alt_video is explicitly enabled. */
+    rtcp_video_packet_cb_t on_alt_video;
+    void *alt_video_context;
 } rtcp_media_backend_t;
 #endif

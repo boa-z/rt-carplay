@@ -158,6 +158,10 @@ int rtcp_receiver_config_from_airplay(const struct airplay_rtsp_server_config *a
     config->iap2.disable_bluetooth = a->disable_bluetooth;
     config->iap2.context = a->iap_context;
     config->data_stream = a->data_stream;
+    config->experimental_alt_video = a->experimental_alt_video;
+    config->alt_screen_port = a->alt_screen_port;
+    config->media.on_alt_video = a->on_alt_screen_message;
+    config->media.alt_video_context = a->alt_screen_message_context;
     return RTCP_OK;
 }
 
@@ -226,6 +230,10 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .data_stream = config->data_stream,
         .negotiate_vehicle = config->negotiate_vehicle,
         .negotiate_ui_sync = config->negotiate_ui_sync,
+        .experimental_alt_video = config->experimental_alt_video,
+        .alt_screen_port = config->alt_screen_port,
+        .on_alt_screen_message = config->media.on_alt_video,
+        .alt_screen_message_context = config->media.alt_video_context,
     };
     if (config->negotiate_vehicle || config->negotiate_ui_sync) {
         r->vehicle_model=config->vehicle;
@@ -241,6 +249,8 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
     }
     if (r->airplay.on_screen_message == NULL)
         r->airplay.on_screen_message = discard_screen;
+    if (r->airplay.experimental_alt_video && !r->airplay.on_alt_screen_message)
+        r->airplay.on_alt_screen_message = discard_screen;
     memcpy(r->info, platform->info_plist, platform->info_plist_len);
     r->airplay.info_plist = r->info;
     r->on_state = config->on_state;
@@ -348,6 +358,14 @@ int rtcp_receiver_get_diagnostics(const rtcp_receiver_t *r,
     airplay_rtsp_server_get_audio_stats(r->server, &diagnostics->audio);
     airplay_rtsp_server_get_timing_stats(r->server, &diagnostics->timing);
     diagnostics->single_cipher_frame = airplay_rtsp_server_single_cipher_frame(r->server);
+    return RTCP_OK;
+}
+
+int rtcp_receiver_get_alt_video_status(const rtcp_receiver_t *r, rtcp_alt_video_status_t *out)
+{
+    if (!r || !out) return RTCP_EINVAL;
+    airplay_rtsp_server_get_alt_video_status(r->server, out);
+    out->configured = r->airplay.experimental_alt_video;
     return RTCP_OK;
 }
 

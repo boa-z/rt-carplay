@@ -90,8 +90,8 @@ typedef struct {
     /* Internal experimental multi-video backend. Both callbacks are required.
      * When supplied they own Type 110 and Type 111 independently; the legacy
      * start_screen/stop_screen remain unchanged when absent. This hook alone
-     * neither declares a second display nor negotiates altScreen. No public
-     * Receiver opt-in, second listener, HEVC or official Ultra is implied.
+     * neither declares a second display nor negotiates altScreen. No display
+     * metadata, HEVC or official Ultra is implied.
      * Start must clean its partial resources before returning false. A true
      * result with port zero is refused and followed by stop for that type. */
     bool (*start_video)(const airplay_rtsp_pairing_t *, uint16_t stream_type,
@@ -136,7 +136,9 @@ void airplay_rtsp_session_mark_control_cipher_active(
 void airplay_rtsp_session_destroy(airplay_rtsp_session_t *session);
 bool airplay_rtsp_session_is_established(const airplay_rtsp_session_t *session);
 
-/* Owner reports terminal socket loss; consumed seed remains non-reusable. */
+/* Owner reports an already closed endpoint without stopping it again.
+ * Consumed seeds remain non-reusable in the session key ledger. */
+void airplay_rtsp_session_video_closed(airplay_rtsp_session_t *, uint16_t stream_type);
 void airplay_rtsp_session_iap_closed(airplay_rtsp_session_t *session);
 void airplay_rtsp_session_data_stream_closed(airplay_rtsp_session_t *, rtcp_data_stream_kind_t);
 bool airplay_rtsp_session_data_stream_offered(const airplay_rtsp_session_t *, rtcp_data_stream_kind_t);

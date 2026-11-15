@@ -115,6 +115,17 @@ static void capture_event_state(bool connected, void *context)
     ++event_transitions;
 }
 
+static unsigned alt_frames, alt_context;
+static unsigned extra_main_frames;
+static int capture_alt(rtcp_video_message_type_t type, uint8_t *bytes, size_t n,
+    size_t prefix, uint64_t sender, uint64_t arrival, void *context)
+{
+    (void)prefix; (void)sender; (void)arrival;
+    assert(context == &alt_context && type == RTCP_VIDEO_FRAME_H264);
+    assert(n == 6 && !memcmp(bytes, "\0\0\0\1\x65\xbb", 6));
+    ++alt_frames; return RTCP_OK;
+}
+
 static unsigned screen_messages;
 static unsigned screen_frames;
 static uint8_t screen_frame[256];
@@ -1049,8 +1060,8 @@ static size_t build_feature_offer(uint8_t out[256], bool invalid)
 }
 
 /* {"streams": [{"type": 110, "streamConnectionID": id}]} */
-static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
-                                        uint64_t connection_id)
+static size_t build_bplist_video_setup(uint8_t *output, size_t capacity,
+                                        uint64_t connection_id, uint8_t type)
 {
     assert(capacity >= 128U);
     memcpy(output, "bplist00", 8U);
@@ -1092,7 +1103,7 @@ static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
 
     offsets[6] = at;
     output[at++] = 0x10U; /* one-byte integer */
-    output[at++] = 110U;
+    output[at++] = type;
 
     offsets[7] = at;
     output[at++] = 0x13U; /* eight-byte integer */
@@ -1101,6 +1112,9 @@ static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity,
 
     return bplist_finish(output, at, offsets, 8U, 2U);
 }
+
+static size_t build_bplist_screen_setup(uint8_t *output, size_t capacity, uint64_t id)
+{ return build_bplist_video_setup(output, capacity, id, 110); }
 
 /* {"streams": [{"type": 100, "streamConnectionID": id,
  *               "audioFormat": bits}]} */
@@ -1905,6 +1919,104 @@ static void run_screen_stream(rtcp_receiver_t *server, client_t *client,
 }
 
 
+/* Public Receiver bench: genuine authenticated control and concurrent encrypted
+ * TCP streams. No second-display metadata or altScreen negotiation is supplied. */
+static rtcp_alt_video_status_t alt_status(rtcp_receiver_t *r)
+{
+    rtcp_alt_video_status_t out;
+    assert(rtcp_receiver_get_alt_video_status(r, &out) == RTCP_OK);
+    return out;
+}
+static uint16_t video_request(rtcp_receiver_t *r, client_t *c, uint32_t *seq,
+    const char *method, uint8_t type, uint64_t id, unsigned expected)
+{
+    uint8_t body[256], request[512]; response_t response;
+    size_t n=build_bplist_video_setup(body,sizeof(body),id,type);
+    n=build_request(request,sizeof(request),method,"/stream",PLIST_TYPE,(*seq)++,body,n);
+    client_exchange_raw(r,c,request,n,&response); response_status_is(&response,expected);
+    if (expected != 200 || strcmp(method,"SETUP")) return 0;
+    assert(response_stream_uint(&response,0,"type") == type);
+    return response_data_port(&response);
+}
+static int video_connect(uint16_t port)
+{
+    rtcp_addr_t addr={.family=RTCP_AF_INET,.port=port,.addr={127,0,0,1}};
+    int fd=rtcp_net_linux.connect(&addr); assert(fd>=0); return fd;
+}
+static void video_send(int fd, const uint8_t *secret, uint64_t id,
+    uint64_t counter, uint8_t marker, bool tamper)
+{
+    uint8_t key[32], nonce[12]={0}, header[AIRPLAY_SCREEN_HEADER_BYTES]={0};
+    uint8_t plain[]={0,0,0,2,0x65,marker}, wire[sizeof(plain)+AIRPLAY_SCREEN_TAG_BYTES];
+    assert(airplay_screen_derive_output_key(secret,KEY_BYTES,id,key) == RTCP_OK);
+    write_le32(header,sizeof(wire)); write_le64(nonce+4,counter);
+    mbedtls_chachapoly_context cipher; mbedtls_chachapoly_init(&cipher);
+    assert(!mbedtls_chachapoly_setkey(&cipher,key));
+    assert(!mbedtls_chachapoly_encrypt_and_tag(&cipher,sizeof(plain),nonce,header,sizeof(header),plain,wire,wire+sizeof(plain)));
+    if (tamper) wire[sizeof(wire)-1]^=1;
+    assert(rtcp_net_linux.send(fd,header,sizeof(header)) == (int)sizeof(header));
+    assert(rtcp_net_linux.send(fd,wire,sizeof(wire)) == (int)sizeof(wire));
+    mbedtls_chachapoly_free(&cipher); mbedtls_platform_zeroize(key,sizeof(key));
+}
+static void video_wait(rtcp_receiver_t *r, unsigned main_frames, unsigned alternate_frames, bool ready)
+{
+    uint64_t start=rtcp_os_linux.now_ms();
+    while ((screen_frames != main_frames || alt_status(r).screen.frames != alternate_frames ||
+        alt_status(r).ready != ready) && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS) receiver_poll(r,10);
+    assert(screen_frames == main_frames);
+    assert(alt_status(r).screen.frames == alternate_frames && alt_status(r).ready == ready);
+    assert(receiver_connected(r));
+}
+static void run_alt_video(rtcp_receiver_t *r, client_t *c, const uint8_t *secret, uint32_t *seq, bool null_sink)
+{
+    unsigned base=screen_frames;
+    uint16_t main_port=video_request(r,c,seq,"SETUP",110,9001,200);
+    uint16_t alt_port=video_request(r,c,seq,"SETUP",111,9002,200);
+    assert(main_port != alt_port && alt_status(r).configured && alt_status(r).opened == 1);
+    assert(video_request(r,c,seq,"SETUP",111,9002,200) == alt_port); /* idempotent */
+    int main_fd=video_connect(main_port), alt_fd=video_connect(alt_port);
+    for (unsigned i=0;i<3;++i) {
+        video_send(alt_fd,secret,9002,i,0xbb,false);
+        video_send(main_fd,secret,9001,i,0xaa,false);
+        video_wait(r,base+i+1,i+1,true);
+        assert(screen_frame_len == 6 && screen_frame[5] == 0xaa);
+    }
+    assert(alt_frames == (null_sink ? 0U : 3U));
+    rtcp_receiver_diagnostics_t diag;
+    assert(!rtcp_receiver_get_diagnostics(r,&diag) && diag.screen.frames == 3);
+    assert(alt_status(r).screen.wire_bytes == diag.screen.wire_bytes);
+    /* A stale selective teardown cannot close this active key. */
+    video_request(r,c,seq,"TEARDOWN",111,8999,200); assert(alt_status(r).ready);
+    video_request(r,c,seq,"TEARDOWN",111,9002,200);
+    assert(!alt_status(r).ready && alt_status(r).closed == 1 && alt_status(r).screen.frames == 3);
+    rtcp_net_linux.close(alt_fd);
+    video_request(r,c,seq,"SETUP",111,9002,503); /* retired ID */
+    fail_next_listener=true;
+    video_request(r,c,seq,"SETUP",111,9003,503);
+    assert(alt_status(r).last_error == RTCP_EIO && !alt_status(r).ready);
+    video_request(r,c,seq,"SETUP",111,9003,503); /* failed open also retired */
+    alt_port=video_request(r,c,seq,"SETUP",111,9004,200); alt_fd=video_connect(alt_port);
+    video_send(alt_fd,secret,9001,0,0xbb,false); /* Main key on alternate must fail */
+    video_send(main_fd,secret,9001,3,0xaa,false);
+    video_wait(r,base+4,0,false);
+    assert(alt_status(r).last_error == RTCP_EIO && alt_status(r).closed == 2);
+    rtcp_net_linux.close(alt_fd);
+    video_request(r,c,seq,"SETUP",111,9004,503);
+    alt_port=video_request(r,c,seq,"SETUP",111,9005,200); alt_fd=video_connect(alt_port);
+    video_send(alt_fd,secret,9005,0,0xbb,true); /* bad authentication tag */
+    video_wait(r,base+4,0,false); rtcp_net_linux.close(alt_fd);
+    alt_port=video_request(r,c,seq,"SETUP",111,9006,200); alt_fd=video_connect(alt_port);
+    video_send(alt_fd,secret,9006,0,0xbb,false);
+    video_wait(r,base+4,1,true);
+    rtcp_net_linux.close(alt_fd); video_wait(r,base+4,1,false); /* EOF isolated */
+    assert(alt_status(r).opened == 4 && alt_status(r).closed == 4);
+    assert(alt_frames == (null_sink ? 0U : 4U));
+    video_send(main_fd,secret,9001,4,0xaa,false);
+    video_wait(r,base+5,1,false);
+    video_request(r,c,seq,"TEARDOWN",110,9001,200); rtcp_net_linux.close(main_fd);
+    extra_main_frames += 5;
+}
+
 static void write_be32(uint8_t *output, uint32_t value)
 {
     output[0] = (uint8_t)(value >> 24U);
@@ -2025,6 +2137,8 @@ static bool refresh_vehicle_info(const uint8_t **bytes, size_t *length, void *co
 
 int main(int argc, char **argv)
 {
+    bool null_alt = argc == 2 && !strcmp(argv[1], "--alt-video-null");
+    bool alt_mode = null_alt || (argc == 2 && !strcmp(argv[1], "--alt-video"));
     bool ui_mode = argc == 2 && !strcmp(argv[1], "--ultra-apps");
     bool vehicle_mode = ui_mode || (argc == 2 && !strcmp(argv[1], "--vehicle"));
     rtcp_vehicle_t *vehicle = vehicle_mode ? vehicle_test_create() : NULL;
@@ -2075,6 +2189,9 @@ int main(int argc, char **argv)
     fill_pairing(&fixture, &receiver_config.platform.pairing);
     receiver_config.platform.info_plist = info_plist;
     receiver_config.platform.info_plist_len = info_len;
+    receiver_config.experimental_alt_video = alt_mode;
+    receiver_config.media.on_alt_video = null_alt ? NULL : capture_alt;
+    receiver_config.media.alt_video_context = &alt_context;
     receiver_config.media.on_video = capture_screen;
     receiver_config.media.video_context = &video_context;
     receiver_config.media.on_audio = capture_audio;
@@ -2094,7 +2211,7 @@ int main(int argc, char **argv)
         receiver_config.platform.info_context=&info_refresh;
         receiver_config.data_stream.channel_mask = RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
         if (ui_mode) { receiver_config.ui_sync=ui; receiver_config.negotiate_ui_sync=true; receiver_config.data_stream.channel_mask=0; }
-    } else if (argc > 1) {
+    } else if (argc > 1 && !alt_mode) {
         assert(argc == 2 && strcmp(argv[1], "--legacy-config") == 0);
         /* Execute the same encrypted exchanges through the migration API.
          * Populate the original contract independently of the native one. */
@@ -2118,11 +2235,16 @@ int main(int argc, char **argv)
     assert(rtcp_receiver_start(e2e_receiver) == RTCP_OK);
     server = e2e_receiver;
     assert(server != NULL);
+    assert(alt_status(server).configured == alt_mode && !alt_status(server).ready);
 
     client_t client;
     client_connect(server, &client);
     expect_receiver_state(true, false, false, false, false);
     uint32_t guard_cseq = 900, guard_id = 0;
+    if (alt_mode) {
+        video_request(server,&client,&guard_cseq,"SETUP",111,8990,503);
+        assert(!alt_status(server).ready && !alt_status(server).opened);
+    }
     request_data(&client, &guard_cseq, RTCP_DATA_STREAM_VEHICLE, 7000, 503, &guard_id);
     run_pair_setup(server, &client, &fixture);
     expect_receiver_state(true, false, false, false, false);
@@ -2138,6 +2260,10 @@ int main(int argc, char **argv)
         PLIST_TYPE, guard_cseq++, invalid_offer, invalid_length);
     client_exchange_raw(server, &client, invalid_request, invalid_length, &invalid_response);
     response_status_is(&invalid_response, 400);
+    if (alt_mode) {
+        video_request(server,&client,&guard_cseq,"SETUP",111,8991,503);
+        assert(!alt_status(server).opened);
+    }
     uint32_t cseq = 30U;
     uint16_t event_port = run_initial_setup(server, &client, &cseq, true);
     assert(data_status(RTCP_DATA_STREAM_VEHICLE).enabled == vehicle_mode);
@@ -2148,6 +2274,7 @@ int main(int argc, char **argv)
     if (vehicle_mode) run_vehicle_processor(&client, shared_secret, &cseq, vehicle,!ui_mode);
     else run_duplex_registry(&client, shared_secret, &cseq);
     if (ui_mode) run_ui_processor(&client,shared_secret,&cseq,ui);
+    if (alt_mode) run_alt_video(server,&client,shared_secret,&cseq,null_alt);
     /* Audio runs before the screen stream: closing the screen socket ends the
      * session, so the RTSP connection must still be up for the audio SETUP. */
     run_audio_stream(server, &client, shared_secret, &cseq, false);
@@ -2208,7 +2335,21 @@ int main(int argc, char **argv)
     run_event_channel(server, shared_secret2, event_port2);
     run_set_parameter_volume(server, &client2, &cseq);
     run_audio_stream(server, &client2, shared_secret2, &cseq, false);
+    if (alt_mode) {
+        video_request(server,&client2,&cseq,"SETUP",111,9010,200);
+        assert(alt_status(server).ready);
+    }
     run_screen_stream(server, &client2, shared_secret2, &cseq);
+    if (alt_mode) {
+        uint64_t start=rtcp_os_linux.now_ms();
+        while (receiver_connected(server) && rtcp_os_linux.now_ms()-start<WAIT_LIMIT_MS) receiver_poll(server,10);
+        assert(!receiver_connected(server) && !alt_status(server).ready);
+        assert(alt_status(server).opened == 5 && alt_status(server).closed == 5);
+        assert(rtcp_receiver_stop(server) == RTCP_OK);
+        assert(alt_status(server).configured && !alt_status(server).opened && !alt_status(server).closed);
+        assert(rtcp_receiver_start(server) == RTCP_OK);
+        assert(alt_status(server).configured && !alt_status(server).ready && !alt_status(server).opened);
+    }
     mbedtls_platform_zeroize(shared_secret2, sizeof(shared_secret2));
 
     if (client2.cipher != NULL) airplay_control_cipher_destroy(client2.cipher);
@@ -2223,12 +2364,13 @@ int main(int argc, char **argv)
     airplay_ed25519_keypair_clear(&fixture.controller);
     mbedtls_platform_zeroize(&fixture, sizeof(fixture));
 
-    assert(screen_messages == 4U);
-    assert(screen_frames == 4U);
+    assert(screen_messages == 4U + extra_main_frames);
+    assert(screen_frames == 4U + extra_main_frames);
     assert(audio_packets == 4U);
     assert(volume_events == 1U);
     assert(event_transitions == 4U);
     if (!vehicle_mode) assert(data_closes[0] == 2 && data_closes[1] == 2 && data_closes[2] == 2);
+    if (alt_mode) puts("alternate video: authenticated concurrent independent H.264 TCP, teardown/reuse, listener failure, wrong key, bad tag, EOF, Main-loss and stop/start passed");
     puts(ui_mode ? "airplay Ultra applications: authenticated Vehicle State and UI Sync, four-message negotiation, queue exhaustion/reopen, channel isolation and Classic media passed" :
         vehicle_mode ? "airplay vehicle end-to-end: authenticated config/read/write/register, HIGH notification/reopen, session reset and Classic media passed" :
         "airplay pairing end-to-end host test passed (three duplex Type 130 channels, offer/auth gates, salt retirement, independent teardown)");

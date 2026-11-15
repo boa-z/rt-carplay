@@ -1646,6 +1646,12 @@ bool airplay_rtsp_session_is_established(const airplay_rtsp_session_t *session)
     return session != NULL && session->record_active;
 }
 
+void airplay_rtsp_session_video_closed(airplay_rtsp_session_t *s, uint16_t type)
+{
+    if (s && (type == 110 || type == 111))
+        memset(&s->screen[type-110], 0, sizeof(s->screen[0]));
+}
+
 void airplay_rtsp_session_data_stream_closed(airplay_rtsp_session_t *s, rtcp_data_stream_kind_t kind)
 {
     if (s && (unsigned)kind < RTCP_DATA_STREAM_COUNT) {

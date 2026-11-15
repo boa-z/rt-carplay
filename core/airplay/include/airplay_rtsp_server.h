@@ -94,6 +94,10 @@ typedef struct airplay_rtsp_server_config {
     rtcp_data_stream_backend_t data_stream;
     bool negotiate_ui_sync;
     bool negotiate_vehicle; /* Internal Receiver opt-in after exact catalogue validation. */
+    bool experimental_alt_video;
+    uint16_t alt_screen_port;
+    airplay_screen_message_cb_t on_alt_screen_message;
+    void *alt_screen_message_context;
 } airplay_rtsp_server_config_t;
 
 int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,
@@ -114,6 +118,7 @@ bool airplay_rtsp_server_get_peer(const airplay_rtsp_server_t *server,
 
 /* Services the RTSP connection and every media endpoint.  timeout_ms bounds
  * the wait for socket activity; 0 polls and returns immediately. */
+void airplay_rtsp_server_get_alt_video_status(const airplay_rtsp_server_t *, rtcp_alt_video_status_t *);
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms);
 /* Snapshot on the server thread, like the other server APIs. */
 void airplay_rtsp_server_get_screen_stats(const airplay_rtsp_server_t *server,

@@ -32,6 +32,17 @@ typedef struct {
     uint32_t sender_gap_max_us;
 } rtcp_screen_stats_t;
 
+/* Experimental alternate transport, owner-thread snapshot. Counters survive
+ * selective close until next open; open/close counts reset on stop/start.
+ * last_error is transport-level EIO on unexpected loss, not a codec verdict. */
+typedef struct {
+    bool configured, ready;
+    uint16_t port;
+    uint32_t opened, closed;
+    int last_error;
+    rtcp_screen_stats_t screen;
+} rtcp_alt_video_status_t;
+
 typedef struct {
     bool active;
     uint32_t requests_sent, responses_received;

@@ -54,7 +54,9 @@ rtcp_receiver_send_data_stream 将包体复制到指定已连接队列，区分�
 
 ## 测试与验收
 
-Host 测试在 ASan/UBSan 下覆盖 LIVI configRequest 字节样本、负事务编号回传、目录结构与权限、缺失值、订阅、数值界限及步长、宿主拒绝、按 IID 返回部分写入错误、字符串复制、回调时机、输出失败回滚、通知重试/合并/重置、未知控制命令、截断及确定性畸形输入集。显示测试覆盖几何及触摸映射，元数据测试确认默认仍为 Classic 且没有额外可选能力。这些测试不是 iPhone 互操作证据。本里程碑未运行 LIVI 自身测试。
+SDK Host 测试在 ASan/UBSan 下覆盖 LIVI configRequest 字节样本、负事务编号回传、目录结构与权限、缺失值、订阅、数值界限及步长、宿主拒绝、按 IID 返回部分写入错误、字符串复制、回调时机、输出失败回滚、通知重试/合并/重置、未知控制命令、截断及确定性畸形输入集。显示测试覆盖几何及触摸映射，元数据测试确认默认仍为 Classic 且没有额外可选能力。这些测试不是 iPhone 互操作证据。
+
+2026-11-15，上述参考版本的原始 LIVI 源码在 Ubuntu 24.04/WSL、Rust/Cargo 1.100.0 和 OpenSSL 3.0.13 下执行 cargo test --locked -p livi-cp --lib，179 个通过，失败/忽略/过滤均为零，包括 15 个 info、27 个 Vehicle State、一个 UI Sync 综合测试及四个 iAP 隧道测试。[选取的原始输出与环境](../evidence/livi-cp-host-20261115.txt)保留测试身份及范围，源码和 Cargo.lock 未改动，构建输出位于源码目录之外。Windows 尝试无法编译 livi-base 的 Unix 文件权限 API，因此没有在 Windows 执行参考测试。成功命令不包含 livi-core 的 theme_catalog 测试，后者保持 NOT_RUN。参考 Host 通过不能证明 D213、真实手机或完整官方 Ultra 验收。
 
 L1 仍为部分完成，需 Vehicle State 应用集成和 UI Sync 基础分别通过测试。注册 Type 130 传输已有加密 Host SETUP 覆盖，尚未由真实手机验证。对当前新增实现，L2 融合、L3 真机 Ultra 协商、L4 真机 Vehicle State/UI Sync、L5 Type 111 和完整官方产品验收均为 NOT_RUN。完整 Classic 回归由集成宿主另行维护。
 

@@ -37,7 +37,7 @@ PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
 PORT_LINUX_OBJS := $(PORT_LINUX_SRCS:%.c=$(BUILD)/%.o)
 PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
 
-TESTS := test_rtthread_headless test_receiver  test_rtthread_clock   test_audio_engine test_mfi2c  \
+TESTS := test_rtthread_headless test_receiver test_receiver_vehicle test_rtthread_clock test_audio_engine test_mfi2c  \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session test_iap2_stream \
          test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
@@ -141,6 +141,7 @@ check: all check-public-api check-docs
 	    ./$$t || status=1; \
 	done; \
 	./$(BUILD)/test_airplay_pairing_e2e --legacy-config || status=1; \
+	./$(BUILD)/test_airplay_pairing_e2e --vehicle || status=1; \
 	./check-boundary.sh || status=1; \
 	exit $$status
 

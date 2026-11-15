@@ -36,7 +36,7 @@ add_dependencies(rtcp_mbedcrypto rtcp_mbedtls)
 
 file(GLOB_RECURSE RTCP_CORE_SOURCES CONFIGURE_DEPENDS core/*.c)
 file(GLOB RTCP_ED25519_SOURCES CONFIGURE_DEPENDS third_party/ed25519/*.c)
-add_library(rtcp_core STATIC runtime/receiver.c ${RTCP_CORE_SOURCES} ${RTCP_ED25519_SOURCES})
+add_library(rtcp_core STATIC runtime/receiver.c runtime/receiver_vehicle.c ${RTCP_CORE_SOURCES} ${RTCP_ED25519_SOURCES})
 
 target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -102,7 +102,7 @@ if(RTCP_BUILD_TESTS)
     target_link_libraries(rtcp_test_support PUBLIC rtcp_core)
 
     set(RTCP_TESTS
-        test_rtthread_headless test_receiver  test_rtthread_clock test_audio_engine
+        test_rtthread_headless test_receiver test_receiver_vehicle test_rtthread_clock test_audio_engine
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
         test_iap2_parameter test_iap2_session test_iap2_stream
@@ -166,6 +166,8 @@ if(RTCP_BUILD_TESTS)
     endforeach()
     add_test(NAME test_receiver_legacy_config
         COMMAND test_airplay_pairing_e2e --legacy-config)
+    add_test(NAME test_receiver_vehicle_e2e
+        COMMAND test_airplay_pairing_e2e --vehicle)
 endif()
 
 if(RTCP_BUILD_TESTS)

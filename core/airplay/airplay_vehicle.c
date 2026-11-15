@@ -115,7 +115,6 @@ static bool same_value(const rtcp_vehicle_value_t *a, const rtcp_vehicle_value_t
 static bool valid_value(const rtcp_vehicle_characteristic_t *s, const rtcp_vehicle_value_t *v)
 {
     if (s->format != v->format) return false;
-    long double n = 0;
     switch (v->format) {
     case RTCP_VEHICLE_BOOL: return true;
     case RTCP_VEHICLE_STRING: case RTCP_VEHICLE_DATA: {
@@ -130,26 +129,35 @@ static bool valid_value(const rtcp_vehicle_characteristic_t *s, const rtcp_vehic
     }
     case RTCP_VEHICLE_UINT8:
         if (v->as.integer < 0 || v->as.integer > UINT8_MAX) return false;
-        n = v->as.integer; break;
+        break;
     case RTCP_VEHICLE_UINT32:
         if (v->as.integer < 0 || v->as.integer > UINT32_MAX) return false;
-        n = v->as.integer; break;
+        break;
     case RTCP_VEHICLE_UINT64:
         if (v->as.integer < 0) return false;
-        n = v->as.integer; break;
+        break;
     case RTCP_VEHICLE_INT32:
         if (v->as.integer < INT32_MIN || v->as.integer > INT32_MAX) return false;
-        n = v->as.integer; break;
+        break;
     case RTCP_VEHICLE_FLOAT:
         if (!isfinite(v->as.real)) return false;
-        n = v->as.real; break;
+        break;
     default: return false;
     }
     if (s->has_range) {
+        if (s->format != RTCP_VEHICLE_FLOAT) {
+            /* valid_spec bounds integral metadata before casting. UINT64 has
+             * nonnegative minimum; INT32 differences fit int64. Exact modulo
+             * also preserves low bits above double's 53-bit integer range. */
+            int64_t minimum = (int64_t)s->minimum, maximum = (int64_t)s->maximum;
+            return v->as.integer >= minimum && v->as.integer <= maximum &&
+                (v->as.integer - minimum) % (int64_t)s->step == 0;
+        }
+        double n = v->as.real;
         if (n < s->minimum || n > s->maximum) return false;
-        long double step = (n - s->minimum) / s->step;
+        double step = (n - s->minimum) / s->step;
         /* Tolerance only for binary rounding; do not clamp phone writes. */
-        if (fabsl(step - roundl(step)) > 1e-7L) return false;
+        if (!isfinite(step) || fabs(step - round(step)) > 1e-7) return false;
     }
     return true;
 }

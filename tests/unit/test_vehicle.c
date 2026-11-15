@@ -339,10 +339,37 @@ static void catalogue_validation(void)
     chars[0].step = 1; chars[0].maximum = 0x1p63;
     assert(rtcp_vehicle_create(&config, &v) == RTCP_EINVAL);
 }
+static void portable_step_validation(void)
+{
+    rtcp_vehicle_characteristic_t s = spec(3, RTCP_VEHICLE_UINT64, RTCP_VEHICLE_SHARED);
+    s.has_range = true; s.minimum = 0; s.maximum = 0x1p62; s.step = 2;
+    rtcp_vehicle_config_t config = {.struct_size = sizeof(config), .plugin_name = "steps",
+        .characteristics = &s, .count = 1};
+    rtcp_vehicle_t *v;
+    assert(rtcp_vehicle_create(&config, &v) == RTCP_OK);
+    rtcp_vehicle_value_t value = number(RTCP_VEHICLE_UINT64, (INT64_C(1)<<60)+1);
+    assert(rtcp_vehicle_set(v, 3, &value) == RTCP_EINVAL);
+    ++value.as.integer; assert(rtcp_vehicle_set(v, 3, &value) == RTCP_OK);
+    value.as.integer = (INT64_C(1)<<62)+1;
+    assert(rtcp_vehicle_set(v, 3, &value) == RTCP_EINVAL);
+    rtcp_vehicle_destroy(v);
+    s.format = RTCP_VEHICLE_INT32; s.minimum = INT32_MIN; s.maximum = INT32_MAX; s.step = 3;
+    assert(rtcp_vehicle_create(&config, &v) == RTCP_OK);
+    value = number(RTCP_VEHICLE_INT32, INT32_MAX);
+    assert(rtcp_vehicle_set(v, 3, &value) == RTCP_OK);
+    --value.as.integer; assert(rtcp_vehicle_set(v, 3, &value) == RTCP_EINVAL);
+    rtcp_vehicle_destroy(v);
+    s.format = RTCP_VEHICLE_FLOAT; s.minimum = -1; s.maximum = 1; s.step = 0.1;
+    assert(rtcp_vehicle_create(&config, &v) == RTCP_OK);
+    value.format = RTCP_VEHICLE_FLOAT; value.as.real = 0.3;
+    assert(rtcp_vehicle_set(v, 3, &value) == RTCP_OK);
+    value.as.real = 0.35; assert(rtcp_vehicle_set(v, 3, &value) == RTCP_EINVAL);
+    rtcp_vehicle_destroy(v);
+}
 int main(void)
 {
     config_fixture(); subscriptions_and_transactions(); writes_and_policy();
-    malformed_and_limits(); catalogue_validation();
+    malformed_and_limits(); catalogue_validation(); portable_step_validation();
     puts("Vehicle State: LIVI fixture, catalogue, ownership/ranges, rollback, subscriptions, copied values, notifications, malformed input passed");
     return 0;
 }

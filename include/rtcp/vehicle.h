@@ -74,6 +74,16 @@ typedef struct {
     uint32_t notifications;
 } rtcp_vehicle_status_t;
 
+/* Receiver-owned delivery workspace; counters are cumulative until destroy.
+ * Queued means copied by transport, not acknowledged or applied by the phone. */
+typedef struct {
+    bool attached;
+    size_t pending_reply_bytes[2], pending_notification_bytes;
+    uint64_t queued_messages, queue_retries, rejected_requests;
+    uint64_t abandoned_replies, abandoned_notifications;
+    int last_error;
+} rtcp_vehicle_delivery_status_t;
+
 int rtcp_vehicle_create(const rtcp_vehicle_config_t *, rtcp_vehicle_t **);
 void rtcp_vehicle_destroy(rtcp_vehicle_t *);
 /* Clear session subscriptions/pending events, retain current vehicle values. */

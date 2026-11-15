@@ -86,7 +86,29 @@ int main(void)
     config.data_stream.channel_mask = 1U << 12;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_EINVAL && receiver == NULL);
     config.data_stream.channel_mask = 0;
+    rtcp_vehicle_characteristic_t characteristic = {
+        .accessory_iid = 1, .accessory_type = 100, .service_iid = 2, .service_type = 200,
+        .iid = 3, .type = 1003, .format = RTCP_VEHICLE_UINT32, .owner = RTCP_VEHICLE_CAR};
+    rtcp_vehicle_config_t vehicle_config = {.struct_size = sizeof(vehicle_config), .plugin_name = "test",
+        .characteristics = &characteristic, .count = 1};
+    rtcp_vehicle_t *vehicle;
+    assert(rtcp_vehicle_create(&vehicle_config, &vehicle) == RTCP_OK);
+    config.vehicle = vehicle;
+    config.data_stream.channel_mask = RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE);
+    assert(rtcp_receiver_create(&config, &receiver) == RTCP_EINVAL && receiver == NULL);
+    config.data_stream.channel_mask = 0;
     assert(rtcp_receiver_create(&config, &receiver) == RTCP_OK);
+    rtcp_vehicle_delivery_status_t delivery;
+    assert(rtcp_receiver_get_vehicle_delivery_status(receiver, &delivery) == RTCP_OK && delivery.attached);
+    rtcp_data_stream_status_t attached_stream;
+    assert(rtcp_receiver_get_data_stream_status(receiver, RTCP_DATA_STREAM_VEHICLE_HIGH, &attached_stream) == RTCP_OK);
+    assert(attached_stream.registered && !attached_stream.offered && attached_stream.state == RTCP_DATA_STREAM_IDLE);
+    assert(rtcp_receiver_destroy(receiver) == RTCP_OK); receiver = NULL;
+    config.vehicle = NULL; rtcp_vehicle_destroy(vehicle);
+    assert(rtcp_receiver_create(&config, &receiver) == RTCP_OK);
+    assert(rtcp_receiver_get_vehicle_delivery_status(receiver, &delivery) == RTCP_OK && !delivery.attached);
+    assert(rtcp_receiver_get_vehicle_delivery_status(NULL, &delivery) == RTCP_EINVAL);
+    assert(rtcp_receiver_get_vehicle_delivery_status(receiver, NULL) == RTCP_EINVAL);
     rtcp_receiver_diagnostics_t diagnostics;
     rtcp_addr_t peer;
     assert(rtcp_receiver_get_diagnostics(NULL, &diagnostics) == RTCP_EINVAL);

@@ -37,3 +37,8 @@ int public_receiver_data_stream(rtcp_receiver_t *receiver,
     if (result) return result;
     return rtcp_receiver_send_data_stream(receiver, RTCP_DATA_STREAM_VEHICLE, body, length);
 }
+
+int public_receiver_vehicle(rtcp_receiver_t *receiver, rtcp_vehicle_delivery_status_t *status)
+{
+    return rtcp_receiver_get_vehicle_delivery_status(receiver, status);
+}

@@ -2,6 +2,7 @@
 #include "rtcp/receiver.h"
 #include "airplay_rtsp_server.h"
 #include "rtcp/receiver_compat.h"
+#include "receiver_vehicle.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,7 +14,33 @@ struct rtcp_receiver {
     void *context;
     rtcp_receiver_state_t state;
     bool busy;
+    receiver_vehicle_t *vehicle;
+    rtcp_data_stream_backend_t raw_data_stream;
 };
+
+static int vehicle_send(void *context, rtcp_data_stream_kind_t kind,
+    const uint8_t *body, size_t length)
+{
+    rtcp_receiver_t *r = context;
+    return airplay_rtsp_server_send_data_stream(r->server, kind, body, length);
+}
+static bool receiver_data_body(rtcp_data_stream_kind_t kind,
+    const uint8_t *body, size_t length, void *context)
+{
+    rtcp_receiver_t *r = context;
+    if (r->vehicle && (RTCP_RECEIVER_VEHICLE_MASK & RTCP_DATA_STREAM_MASK(kind)))
+        return receiver_vehicle_body(r->vehicle, kind, body, length);
+    return r->raw_data_stream.on_body && r->raw_data_stream.on_body(kind, body, length,
+        r->raw_data_stream.context);
+}
+static void receiver_data_closed(rtcp_data_stream_kind_t kind, int error, void *context)
+{
+    rtcp_receiver_t *r = context;
+    if (r->vehicle && (RTCP_RECEIVER_VEHICLE_MASK & RTCP_DATA_STREAM_MASK(kind)))
+        receiver_vehicle_closed(r->vehicle, kind, error);
+    else if (r->raw_data_stream.on_closed)
+        r->raw_data_stream.on_closed(kind, error, r->raw_data_stream.context);
+}
 
 /* An intentional Null Sink lets a headless host exercise the full protocol. */
 static int discard_screen(airplay_screen_message_type_t type, uint8_t *bytes,
@@ -32,6 +59,8 @@ static void refresh(rtcp_receiver_t *r, int error)
     next.last_error = error;
     next.running = r->server != NULL;
     airplay_rtsp_server_get_receiver_state(r->server, &next);
+    if (r->state.authenticated && !next.authenticated)
+        receiver_vehicle_reset(r->vehicle);
     bool changed = next.running != r->state.running ||
         next.transport_connected != r->state.transport_connected ||
         next.authenticated != r->state.authenticated ||
@@ -96,10 +125,16 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         (config->family != 0 && config->family != RTCP_AF_INET &&
          config->family != RTCP_AF_INET6) ||
         (config->data_stream.channel_mask & ~RTCP_DATA_STREAM_ALL_MASK) ||
-        (config->data_stream.channel_mask && !config->data_stream.on_body))
+        (config->data_stream.channel_mask && !config->data_stream.on_body) ||
+        (config->vehicle && (config->data_stream.channel_mask & RTCP_RECEIVER_VEHICLE_MASK)))
         return RTCP_EINVAL;
     rtcp_receiver_t *r = calloc(1, sizeof(*r));
     if (r == NULL) return RTCP_ENOMEM;
+    if (config->vehicle) {
+        r->vehicle = receiver_vehicle_create(config->vehicle, vehicle_send, r);
+        if (!r->vehicle) { free(r); return RTCP_ENOMEM; }
+    }
+    r->raw_data_stream = config->data_stream;
     r->airplay = (airplay_rtsp_server_config_t){
         .os = config->platform.os,
         .net = config->platform.net,
@@ -133,6 +168,12 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .iap_context = config->iap2.context,
         .data_stream = config->data_stream,
     };
+    if (r->vehicle) {
+        r->airplay.data_stream.channel_mask |= RTCP_RECEIVER_VEHICLE_MASK;
+        r->airplay.data_stream.on_body = receiver_data_body;
+        r->airplay.data_stream.on_closed = receiver_data_closed;
+        r->airplay.data_stream.context = r;
+    }
     if (r->airplay.on_screen_message == NULL)
         r->airplay.on_screen_message = discard_screen;
     memcpy(r->info, platform->info_plist, platform->info_plist_len);
@@ -149,6 +190,7 @@ int rtcp_receiver_start(rtcp_receiver_t *r)
     if (r->busy) return RTCP_ESTATE;
     if (r->server != NULL) return RTCP_OK;
     r->busy = true;
+    receiver_vehicle_reset(r->vehicle);
     int result = airplay_rtsp_server_start(&r->airplay, &r->server);
     if (result == RTCP_OK) ++r->state.generation;
     refresh(r, result);
@@ -161,8 +203,10 @@ int rtcp_receiver_poll(rtcp_receiver_t *r, int timeout_ms)
     if (r == NULL || timeout_ms < 0) return RTCP_EINVAL;
     if (r->busy || r->server == NULL) return RTCP_ESTATE;
     r->busy = true;
+    if (r->state.authenticated) receiver_vehicle_tick(r->vehicle);
     int result = airplay_rtsp_server_poll(r->server, timeout_ms);
     refresh(r, result);
+    if (r->state.authenticated) receiver_vehicle_tick(r->vehicle);
     r->busy = false;
     return result;
 }
@@ -175,6 +219,7 @@ int rtcp_receiver_stop(rtcp_receiver_t *r)
     airplay_rtsp_server_stop(r->server);
     r->server = NULL;
     refresh(r, RTCP_OK);
+    receiver_vehicle_reset(r->vehicle);
     r->busy = false;
     return RTCP_OK;
 }
@@ -185,6 +230,7 @@ int rtcp_receiver_destroy(rtcp_receiver_t *r)
     if (r->busy) return RTCP_ESTATE;
     int result = rtcp_receiver_stop(r);
     if (result != RTCP_OK) return result;
+    receiver_vehicle_destroy(r->vehicle);
     memset(r, 0, sizeof(*r));
     free(r);
     return RTCP_OK;
@@ -250,6 +296,8 @@ int rtcp_receiver_send_data_stream(rtcp_receiver_t *r, rtcp_data_stream_kind_t k
     const uint8_t *body, size_t length)
 {
     if (!r) return RTCP_EINVAL;
+    if (r->vehicle && (kind == RTCP_DATA_STREAM_VEHICLE || kind == RTCP_DATA_STREAM_VEHICLE_HIGH))
+        return RTCP_ESTATE; /* Attached processor owns these output queues. */
     return airplay_rtsp_server_send_data_stream(r->server, kind, body, length);
 }
 
@@ -260,5 +308,13 @@ int rtcp_receiver_get_data_stream_status(const rtcp_receiver_t *r,
     if (r->server) return airplay_rtsp_server_get_data_stream_status(r->server, kind, out);
     memset(out, 0, sizeof(*out));
     out->registered = (r->airplay.data_stream.channel_mask & RTCP_DATA_STREAM_MASK(kind)) != 0;
+    return RTCP_OK;
+}
+
+int rtcp_receiver_get_vehicle_delivery_status(const rtcp_receiver_t *r,
+    rtcp_vehicle_delivery_status_t *out)
+{
+    if (!r || !out) return RTCP_EINVAL;
+    receiver_vehicle_status(r->vehicle, out);
     return RTCP_OK;
 }

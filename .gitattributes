@@ -1,2 +1,17 @@
 
 *.sh text eol=lf
+/.clang-format text eol=lf
+/.clang-format-ignore text eol=lf
+/config/**/*.c text eol=lf
+/config/**/*.h text eol=lf
+/core/**/*.c text eol=lf
+/core/**/*.h text eol=lf
+/include/**/*.h text eol=lf
+/runtime/**/*.c text eol=lf
+/runtime/**/*.h text eol=lf
+/port/**/*.c text eol=lf
+/port/**/*.h text eol=lf
+/examples/**/*.c text eol=lf
+/examples/**/*.h text eol=lf
+/tests/**/*.c text eol=lf
+/tests/**/*.h text eol=lf

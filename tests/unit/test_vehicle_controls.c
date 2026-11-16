@@ -108,6 +108,8 @@ int main(int argc,char **argv)
     assert(rtcp_vehicle_handle(v,RTCP_VEHICLE_HIGH,control_empty,sizeof(control_empty),reply,sizeof(reply),&length)==RTCP_OK);
     assert(control_commits==4);hex("empty",reply,length);
     rtcp_vehicle_status_t status;assert(rtcp_vehicle_status(v,&status)==RTCP_OK && status.controls==3 && status.committed_controls==4);
+    assert(status.last_method==RTCP_VEHICLE_METHOD_CONTROL && status.last_lane==RTCP_VEHICLE_HIGH && status.last_result==RTCP_OK);
+    assert(status.method_responses[RTCP_VEHICLE_METHOD_CONTROL]==3);
     rtcp_vehicle_reset_session(v);assert(rtcp_vehicle_status(v,&status)==RTCP_OK && status.controls==3 && status.committed_controls==4);
     airplay_info_plist_config_t info={.device_id="AA:BB:CC:DD:EE:FF",.width_pixels=1024,.height_pixels=600,.vehicle=v};
     assert(airplay_info_plist_build(&info,reply,sizeof(reply),&length));

@@ -87,3 +87,11 @@ L1 仍为部分完成，Vehicle State 和 UI Sync Receiver 集成均有加密 Ho
 [双视频会话及实验性公共 Receiver 传输](video-stream-session.md)现已分离 Type 110 和 Type 111 生命周期、监听、密钥/nonce、媒体 Sink 和统计。显式启用后可通过合成加密 Host 接收验证备用失败隔离，默认仍为单 Main。匹配元数据/altScreen 协商、真实 iPhone 接收及 L5 尚未验证。
 
 [UI Sync 实验能力门控](ui-sync-capabilities.md)现已检查接入处理器、已绑定目录和匹配单 Main Display 元数据。后续仍需真实宿主资产/渲染器/呈现集成及手机验证，包括元数据提供时机、显示/plugin/车辆关系。UI Sync 模型现已复制有界宿主目录并拒绝不支持的布局、调色板和区域/组件组合，绑定不会自行声明能力。[UI Sync 状态/ACK 和 Receiver 集成](ui-sync.md)已有独立 plistlib 消息验证与加密应用协议测试，覆盖队列耗尽及通道隔离。现有 iAP 隧道保持原样且仅接收。宿主可显式将 Vehicle State 处理器接入 Receiver，接入不会在 /info 输出 vehicleStateProtocolInfo。UI Sync 资产、帧合成、HEVC 支持、官方接入及认证仍是独立要求。D213 构建需要先确认真实图形和编解码能力才能声明对应能力。可选 Type 111 必须有独立 Sink，不能因单屏布局而隐式声明。
+
+## 车辆请求诊断
+
+`rtcp_vehicle_status_t` 新增按 `rtcp_vehicle_method_t` 索引的累计 `method_requests`、`method_responses` 数组，以及 `last_method`、`last_lane`、`last_result`。方法区分配置、读取、订阅、写入、控制和 UNKNOWN。有效 API 调用计为一次尝试，包括畸形消息和本地输出容量不足；无法在校验插件封装和事务后选出已支持命令时记为 UNKNOWN，不保留上一请求类型。API 参数错误不计入。
+
+响应计数仅表示本地序列化成功，响应中仍可能包含逐 IID 拒绝错误，不能证明写入、控制提交、传输入队、手机接收或执行器动作。现有 `committed_writes`、`refused_writes`、`committed_controls`、通知及 Receiver 交付计数保留各自语义。输出不足记录尝试类型和最近错误，不增加响应数，也不改变原有消息拒绝计数规则。会话重置保留诊断，销毁模型才开始新的生命周期；最近字段仅在 `requests` 非零时有效。诊断字段不保存消息内容、事务 ID、配对材料或车辆数值。
+
+Host 测试覆盖五类命令、Normal/HIGH、输出不足、畸形和未知请求、API 参数错误、会话重置保留及控制响应次数与逐命令提交次数的区别。这些结果用于解释后续真实手机测试，不能代替实机交互证据。

@@ -549,7 +549,15 @@ static void control_response(builder_t *b, const rtcp_vehicle_control_t *c, cons
     finish(b,dict,values->count);
 }
 typedef enum { CONFIG, READ, REGISTER, WRITE, CONTROL } operation_t;
-static int reject(rtcp_vehicle_t *v, int rc) { ++v->stats.rejected_messages; return rc; }
+static int request_result(rtcp_vehicle_t *v, int rc)
+{
+    ++v->stats.method_requests[v->stats.last_method];
+    if (rc == RTCP_OK) ++v->stats.method_responses[v->stats.last_method];
+    v->stats.last_result=rc;
+    return rc;
+}
+static int reject(rtcp_vehicle_t *v, int rc)
+{ ++v->stats.rejected_messages; return request_result(v,rc); }
 
 int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
                         const uint8_t *input, size_t input_length,
@@ -559,6 +567,8 @@ int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
     if (!v || !input || !out || !length ||
         (lane != RTCP_VEHICLE_NORMAL && lane != RTCP_VEHICLE_HIGH)) return RTCP_EINVAL;
     ++v->stats.requests;
+    v->stats.last_method=RTCP_VEHICLE_METHOD_UNKNOWN;
+    v->stats.last_lane=lane;
     rtcp_opack_node_t *r = v->request; size_t n;
     if (rtcp_opack_decode(input, input_length, r, RTCP_OPACK_MAX_NODES, &n) != RTCP_OPACK_OK)
         return reject(v, RTCP_EINVAL);
@@ -583,6 +593,12 @@ int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
     else if (named(&r[cmd], "writeRequest")) { op = WRITE; response = "writeResponse"; }
     else if (named(&r[cmd], "controlRequest")) { op = CONTROL; response = "controlResponse"; }
     else return reject(v, RTCP_ENOTSUP);
+    static const rtcp_vehicle_method_t methods[] = {
+        RTCP_VEHICLE_METHOD_CONFIG, RTCP_VEHICLE_METHOD_READ,
+        RTCP_VEHICLE_METHOD_REGISTER, RTCP_VEHICLE_METHOD_WRITE,
+        RTCP_VEHICLE_METHOD_CONTROL
+    };
+    v->stats.last_method=methods[op];
     size_t items = 0; size_t indices[MAX]; int64_t ids[MAX]; int64_t errors[MAX];
     bool accepted[MAX] = {false};
     if (op != CONFIG) {
@@ -665,7 +681,7 @@ int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
     }
     finish(b, root, pairs);
     int rc = wrap(v, out, capacity, length);
-    if (rc != RTCP_OK) return rc;
+    if (rc != RTCP_OK) return request_result(v,rc);
     memcpy(v->entries, v->staged, v->count * sizeof(entry_t));
     if (op == WRITE) for (size_t i = 0; i < items; ++i) {
         if (accepted[i]) {
@@ -677,7 +693,7 @@ int rtcp_vehicle_handle(rtcp_vehicle_t *v, rtcp_vehicle_lane_t lane,
         ++v->stats.committed_controls;
         if (v->controls->commit) v->controls->commit(v->context,ids[i],&v->controls->request[find_control(v,ids[i])]);
     }
-    return RTCP_OK;
+    return request_result(v,RTCP_OK);
 }
 int rtcp_vehicle_notification(rtcp_vehicle_t *v, rtcp_vehicle_lane_t *lane,
                               uint8_t *out, size_t capacity, size_t *length)

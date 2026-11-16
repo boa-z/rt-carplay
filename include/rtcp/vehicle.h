@@ -101,6 +101,17 @@ typedef struct {
     void (*did_control)(void *, int64_t, const rtcp_vehicle_control_values_t *);
 } rtcp_vehicle_config_t;
 
+/* Local diagnostics, not wire command IDs or proof of phone receipt. */
+typedef enum {
+    RTCP_VEHICLE_METHOD_UNKNOWN = 0,
+    RTCP_VEHICLE_METHOD_CONFIG,
+    RTCP_VEHICLE_METHOD_READ,
+    RTCP_VEHICLE_METHOD_REGISTER,
+    RTCP_VEHICLE_METHOD_WRITE,
+    RTCP_VEHICLE_METHOD_CONTROL,
+    RTCP_VEHICLE_METHOD_COUNT
+} rtcp_vehicle_method_t;
+
 typedef struct rtcp_vehicle rtcp_vehicle_t;
 typedef struct {
     size_t characteristics, subscribed, pending_notifications;
@@ -108,6 +119,16 @@ typedef struct {
     uint32_t notifications;
     size_t controls;
     uint32_t committed_controls;
+    /* Cumulative until destroy, including failed attempts. UNKNOWN covers
+     * malformed/unrecognized envelopes. Responses count local serialization,
+     * including replies containing per-IID errors; no delivery is implied.
+     * Invalid API arguments do not change request diagnostics. Last fields
+     * are meaningful only when requests is nonzero and survive session reset. */
+    uint32_t method_requests[RTCP_VEHICLE_METHOD_COUNT];
+    uint32_t method_responses[RTCP_VEHICLE_METHOD_COUNT];
+    rtcp_vehicle_method_t last_method;
+    rtcp_vehicle_lane_t last_lane;
+    int last_result;
 } rtcp_vehicle_status_t;
 
 /* Receiver-owned delivery workspace; counters are cumulative until destroy.

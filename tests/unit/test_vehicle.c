@@ -366,9 +366,48 @@ static void portable_step_validation(void)
     value.as.real = 0.35; assert(rtcp_vehicle_set(v, 3, &value) == RTCP_EINVAL);
     rtcp_vehicle_destroy(v);
 }
+static void request_diagnostics(void)
+{
+    rtcp_vehicle_t *v=create(); rtcp_vehicle_status_t before, status;
+    assert(rtcp_vehicle_status(v,&before)==RTCP_OK && !before.requests);
+    size_t length=0;
+    assert(rtcp_vehicle_handle(v,(rtcp_vehicle_lane_t)99,request,1,response,sizeof(response),&length)==RTCP_EINVAL);
+    assert(rtcp_vehicle_status(v,&status)==RTCP_OK && !status.requests);
+    const char *commands[]={"configRequest","readRequest","registerRequest","writeRequest","controlRequest"};
+    const rtcp_vehicle_method_t methods[]={RTCP_VEHICLE_METHOD_CONFIG,RTCP_VEHICLE_METHOD_READ,
+        RTCP_VEHICLE_METHOD_REGISTER,RTCP_VEHICLE_METHOD_WRITE,RTCP_VEHICLE_METHOD_CONTROL};
+    for (size_t i=0;i<5;++i) {
+        size_t n=message(commands[i],i>=3,NULL,NULL,0);
+        rtcp_vehicle_lane_t lane=i%2 ? RTCP_VEHICLE_HIGH : RTCP_VEHICLE_NORMAL;
+        assert(rtcp_vehicle_handle(v,lane,request,n,response,sizeof(response),&length)==RTCP_OK);
+        assert(rtcp_vehicle_status(v,&status)==RTCP_OK);
+        assert(status.last_method==methods[i] && status.last_lane==lane && status.last_result==RTCP_OK);
+        assert(status.method_requests[methods[i]]==1 && status.method_responses[methods[i]]==1);
+    }
+    /* A recognized request with no room is observed, but has no response. */
+    size_t n=message("readRequest",false,NULL,NULL,0);
+    assert(rtcp_vehicle_handle(v,RTCP_VEHICLE_HIGH,request,n,response,0,&length)==RTCP_ENOMEM);
+    assert(rtcp_vehicle_status(v,&status)==RTCP_OK);
+    assert(status.last_method==RTCP_VEHICLE_METHOD_READ && status.last_result==RTCP_ENOMEM);
+    assert(status.method_requests[RTCP_VEHICLE_METHOD_READ]==2 && status.method_responses[RTCP_VEHICLE_METHOD_READ]==1);
+    /* Unknown and malformed messages cannot retain the preceding READ label. */
+    n=message("unknownRequest",false,NULL,NULL,0);
+    assert(rtcp_vehicle_handle(v,RTCP_VEHICLE_NORMAL,request,n,response,sizeof(response),&length)==RTCP_ENOTSUP);
+    assert(rtcp_vehicle_handle(v,RTCP_VEHICLE_HIGH,request,1,response,sizeof(response),&length)==RTCP_EINVAL);
+    assert(rtcp_vehicle_status(v,&status)==RTCP_OK);
+    assert(status.last_method==RTCP_VEHICLE_METHOD_UNKNOWN && status.last_lane==RTCP_VEHICLE_HIGH && status.last_result==RTCP_EINVAL);
+    assert(status.requests==8 && status.method_requests[RTCP_VEHICLE_METHOD_UNKNOWN]==2);
+    assert(!status.method_responses[RTCP_VEHICLE_METHOD_UNKNOWN] && status.rejected_messages==2);
+    before=status; rtcp_vehicle_reset_session(v);
+    assert(rtcp_vehicle_status(v,&status)==RTCP_OK && status.requests==before.requests);
+    assert(!memcmp(status.method_requests,before.method_requests,sizeof(status.method_requests)));
+    assert(!memcmp(status.method_responses,before.method_responses,sizeof(status.method_responses)));
+    assert(status.last_method==before.last_method && status.last_lane==before.last_lane && status.last_result==before.last_result);
+    rtcp_vehicle_destroy(v);
+}
 int main(void)
 {
-    config_fixture(); subscriptions_and_transactions(); writes_and_policy();
+    request_diagnostics(); config_fixture(); subscriptions_and_transactions(); writes_and_policy();
     malformed_and_limits(); catalogue_validation(); portable_step_validation();
     puts("Vehicle State: LIVI fixture, catalogue, ownership/ranges, rollback, subscriptions, copied values, notifications, malformed input passed");
     return 0;

@@ -4,9 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIRPLAY_CONTROL_CIPHER_KEY_BYTES 32U
+#define AIRPLAY_CONTROL_CIPHER_KEY_BYTES       32U
 #define AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES 4096U
-#define AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES 18U
+#define AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES  18U
 /* Apple's C control transport seals at most kMaxMessageWriteSize = 1024
  * plaintext bytes per frame; longer RTSP messages are split across frames and
  * the peer reassembles the byte stream. */
@@ -14,7 +14,8 @@
 
 typedef struct airplay_control_cipher airplay_control_cipher_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_CONTROL_CIPHER_OK = 0,
     AIRPLAY_CONTROL_CIPHER_INCOMPLETE,
     AIRPLAY_CONTROL_CIPHER_OUTPUT_TOO_SMALL,

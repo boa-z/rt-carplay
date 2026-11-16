@@ -9,7 +9,8 @@
 
 #define SERVICE "_carplay-ctrl._tcp.local"
 
-typedef struct {
+typedef struct
+{
     uint8_t data[768];
     size_t len;
     bool ok;
@@ -17,7 +18,8 @@ typedef struct {
 
 static void w8(packet_t *p, uint8_t value)
 {
-    if (!p->ok || p->len >= sizeof(p->data)) {
+    if (!p->ok || p->len >= sizeof(p->data))
+    {
         p->ok = false;
         return;
     }
@@ -38,7 +40,8 @@ static void w32(packet_t *p, uint32_t value)
 
 static void wbytes(packet_t *p, const void *bytes, size_t length)
 {
-    if (!p->ok || length > sizeof(p->data) - p->len) {
+    if (!p->ok || length > sizeof(p->data) - p->len)
+    {
         p->ok = false;
         return;
     }
@@ -50,7 +53,8 @@ static size_t wname(packet_t *p, const char *name)
 {
     size_t start = p->len;
     const char *label = name;
-    while (label != NULL && label[0] != '\0') {
+    while (label != NULL && label[0] != '\0')
+    {
         const char *dot = strchr(label, '.');
         size_t length = dot != NULL ? (size_t)(dot - label) : strlen(label);
         assert(length > 0U && length <= 63U);
@@ -108,9 +112,11 @@ static void test_query_builder(void)
     size_t offset = 12U;
     char name[MDNS_MAX_NAME];
     size_t used = 0U;
-    while (query[offset] != 0U) {
+    while (query[offset] != 0U)
+    {
         uint8_t label = query[offset++];
-        if (used != 0U) name[used++] = '.';
+        if (used != 0U)
+            name[used++] = '.';
         memcpy(name + used, query + offset, label);
         used += label;
         offset += label;
@@ -159,19 +165,21 @@ static packet_t build_response(bool include_a, bool address_first)
 
     const char *instance = "abcd._carplay-ctrl._tcp.local";
     const char *target = "iPhone-12.local";
-    const uint8_t address[4] = {192U, 168U, 43U, 2U};
+    const uint8_t address[4] = { 192U, 168U, 43U, 2U };
 
     unsigned additionals = 1U; /* SRV */
-    if (include_a || address_first) ++additionals;
+    if (include_a || address_first)
+        ++additionals;
 
-    if (address_first) {
+    if (address_first)
+    {
         wname(&packet, target);
         w_rr_header(&packet, 1U, 0x8001U, 120U, 4U);
         wbytes(&packet, address, 4U);
     }
 
     wname(&packet, instance);
-    w16(&packet, 33U);    /* SRV */
+    w16(&packet, 33U); /* SRV */
     w16(&packet, 0x8001U);
     w32(&packet, 4500U);
     size_t srv_rdlen_at = packet.len;
@@ -184,7 +192,8 @@ static packet_t build_response(bool include_a, bool address_first)
     packet.data[srv_rdlen_at] = (uint8_t)((packet.len - srv_start) >> 8U);
     packet.data[srv_rdlen_at + 1U] = (uint8_t)(packet.len - srv_start);
 
-    if (include_a && !address_first) {
+    if (include_a && !address_first)
+    {
         wname(&packet, target);
         w_rr_header(&packet, 1U, 0x8001U, 120U, 4U);
         wbytes(&packet, address, 4U);
@@ -239,7 +248,7 @@ static void test_address_before_srv(void)
 
 static void test_source_address_fallback(void)
 {
-    const uint8_t from[4] = {192U, 168U, 43U, 9U};
+    const uint8_t from[4] = { 192U, 168U, 43U, 9U };
     mdns_browser_t *browser = mdns_browser_create(SERVICE);
     assert(browser != NULL);
     packet_t packet = build_response(false, false);

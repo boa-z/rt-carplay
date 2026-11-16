@@ -13,7 +13,8 @@
 
 #define EVENT_RX_CHUNK_BYTES 1200U
 
-struct airplay_event_port {
+struct airplay_event_port
+{
     const struct rtcp_os *os;
     const struct rtcp_net *net;
     int listener_fd;
@@ -33,14 +34,17 @@ struct airplay_event_port {
 
 static void notify_state(airplay_event_port_t *port, bool connected)
 {
-    if (port->connected_notified == connected) return;
+    if (port->connected_notified == connected)
+        return;
     port->connected_notified = connected;
-    if (port->on_state != NULL) port->on_state(connected, port->context);
+    if (port->on_state != NULL)
+        port->on_state(connected, port->context);
 }
 
 static void close_fd(airplay_event_port_t *port, int *fd)
 {
-    if (*fd >= 0) {
+    if (*fd >= 0)
+    {
         port->net->close(*fd);
         *fd = -1;
     }
@@ -48,9 +52,11 @@ static void close_fd(airplay_event_port_t *port, int *fd)
 
 static void fail_event_port(airplay_event_port_t *port, const char *reason)
 {
-    if (port->failed) return;
+    if (port->failed)
+        return;
     RTCP_LOGW(TAG, "event_connection=failed reason=%s", reason);
-    if (port->control != NULL) {
+    if (port->control != NULL)
+    {
         airplay_control_port_destroy(port->control);
         port->control = NULL;
     }
@@ -67,12 +73,15 @@ static void fail_event_port(airplay_event_port_t *port, const char *reason)
 static bool socket_write(const uint8_t *bytes, size_t len, void *context)
 {
     airplay_event_port_t *port = context;
-    if (port == NULL || port->client_fd < 0 || bytes == NULL) return false;
+    if (port == NULL || port->client_fd < 0 || bytes == NULL)
+        return false;
     size_t offset = 0U;
-    while (offset < len) {
+    while (offset < len)
+    {
         int sent = port->net->send(port->client_fd, bytes + offset,
                                    len - offset);
-        if (sent <= 0) return false;
+        if (sent <= 0)
+            return false;
         offset += (size_t)sent;
     }
     return true;
@@ -83,21 +92,26 @@ int airplay_event_port_start(const struct rtcp_os *os,
                              const airplay_event_port_config_t *config,
                              airplay_event_port_t **out_port)
 {
-    if (out_port == NULL) return RTCP_EINVAL;
+    if (out_port == NULL)
+        return RTCP_EINVAL;
     *out_port = NULL;
-    if (os == NULL || net == NULL || config == NULL) return RTCP_EINVAL;
+    if (os == NULL || net == NULL || config == NULL)
+        return RTCP_EINVAL;
 
     uint8_t family = config->family == 0U ? RTCP_AF_INET : config->family;
-    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) return RTCP_EINVAL;
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6)
+        return RTCP_EINVAL;
 
     int listener_fd = net->listen(family, 0U);
-    if (listener_fd < 0) {
+    if (listener_fd < 0)
+    {
         RTCP_LOGE(TAG, "event_listener=socket_failed rc=%d", listener_fd);
         return listener_fd;
     }
 
     airplay_event_port_t *port = calloc(1U, sizeof(*port));
-    if (port == NULL) {
+    if (port == NULL)
+    {
         net->close(listener_fd);
         return RTCP_ENOMEM;
     }
@@ -109,7 +123,8 @@ int airplay_event_port_start(const struct rtcp_os *os,
     port->on_state = config->on_state;
     port->context = config->context;
 
-    if (port->port == 0U) {
+    if (port->port == 0U)
+    {
         net->close(listener_fd);
         free(port);
         return RTCP_EIO;
@@ -135,19 +150,25 @@ uint16_t airplay_event_port_get_port(const airplay_event_port_t *port)
 
 int airplay_event_port_get_fd(const airplay_event_port_t *port)
 {
-    if (port == NULL || port->failed) return -1;
-    if (port->client_fd >= 0) return port->client_fd;
+    if (port == NULL || port->failed)
+        return -1;
+    if (port->client_fd >= 0)
+        return port->client_fd;
     return port->listener_fd;
 }
 
 void airplay_event_port_poll(airplay_event_port_t *port)
 {
-    if (port == NULL || port->failed) return;
+    if (port == NULL || port->failed)
+        return;
 
-    if (port->client_fd < 0) {
-        if (port->listener_fd < 0) return;
+    if (port->client_fd < 0)
+    {
+        if (port->listener_fd < 0)
+            return;
         int client_fd = port->net->accept(port->listener_fd, NULL);
-        if (client_fd < 0) {
+        if (client_fd < 0)
+        {
             fail_event_port(port, "accept");
             return;
         }
@@ -157,7 +178,8 @@ void airplay_event_port_poll(airplay_event_port_t *port)
             airplay_control_port_create(
                 port->os, port->keys.read_key, port->keys.write_key,
                 port->stream_id, port->initial_cseq, socket_write, port,
-                &port->control) != RTCP_OK) {
+                &port->control) != RTCP_OK)
+        {
             fail_event_port(port, "control_create");
             return;
         }
@@ -171,20 +193,24 @@ void airplay_event_port_poll(airplay_event_port_t *port)
     }
 
     int received = port->net->recv(port->client_fd, port->rx, sizeof(port->rx));
-    if (received == 0) {
+    if (received == 0)
+    {
         fail_event_port(port, "peer_closed");
         return;
     }
-    if (received < 0) {
+    if (received < 0)
+    {
         fail_event_port(port, "receive");
         return;
     }
-    if (port->control == NULL) {
+    if (port->control == NULL)
+    {
         fail_event_port(port, "control_missing");
         return;
     }
     if (airplay_control_port_receive_encrypted(port->control, port->rx,
-                                               (size_t)received) != RTCP_OK) {
+                                               (size_t)received) != RTCP_OK)
+    {
         RTCP_LOGW(TAG, "event_rx_rejected");
         fail_event_port(port, "encrypted_payload");
         return;
@@ -197,7 +223,8 @@ bool airplay_event_port_send_hid_report(airplay_event_port_t *port,
                                         const uint8_t *report,
                                         size_t report_len)
 {
-    if (port == NULL || port->failed || port->control == NULL) return false;
+    if (port == NULL || port->failed || port->control == NULL)
+        return false;
     return airplay_control_port_send_hid_report(port->control, hid_uid, report,
                                                 report_len);
 }
@@ -205,16 +232,21 @@ bool airplay_event_port_send_hid_report(airplay_event_port_t *port,
 void airplay_event_port_stop(airplay_event_port_t *port,
                              const struct rtcp_net *net)
 {
-    if (port == NULL) return;
-    if (port->control != NULL) {
+    if (port == NULL)
+        return;
+    if (port->control != NULL)
+    {
         airplay_control_port_destroy(port->control);
         port->control = NULL;
     }
-    if (port->connected_notified) notify_state(port, false);
-    if (port->client_fd >= 0 && net != NULL && net->close != NULL) {
+    if (port->connected_notified)
+        notify_state(port, false);
+    if (port->client_fd >= 0 && net != NULL && net->close != NULL)
+    {
         net->close(port->client_fd);
     }
-    if (port->listener_fd >= 0 && net != NULL && net->close != NULL) {
+    if (port->listener_fd >= 0 && net != NULL && net->close != NULL)
+    {
         net->close(port->listener_fd);
     }
     mbedtls_platform_zeroize(port, sizeof(*port));
@@ -224,7 +256,7 @@ void airplay_event_port_stop(airplay_event_port_t *port,
 bool airplay_event_port_send_iap(airplay_event_port_t *port, const uint8_t *data, size_t len)
 {
     return port && !port->failed && port->connected_notified &&
-        airplay_control_port_send_iap(port->control, data, len);
+           airplay_control_port_send_iap(port->control, data, len);
 }
 
 bool airplay_event_port_request_siri(airplay_event_port_t *port)

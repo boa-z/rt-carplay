@@ -11,10 +11,10 @@
 #include <stdint.h>
 #include "rtcp/platform.h"
 
-#define AIRPLAY_PAIR_VERIFY_KEY_BYTES 32U
-#define AIRPLAY_PAIR_VERIFY_SIGNATURE_BYTES 64U
+#define AIRPLAY_PAIR_VERIFY_KEY_BYTES            32U
+#define AIRPLAY_PAIR_VERIFY_SIGNATURE_BYTES      64U
 #define AIRPLAY_PAIR_VERIFY_MAX_IDENTIFIER_BYTES 64U
-#define AIRPLAY_PAIR_VERIFY_MAX_MESSAGE_BYTES 4096U
+#define AIRPLAY_PAIR_VERIFY_MAX_MESSAGE_BYTES    4096U
 
 typedef struct airplay_pair_verify airplay_pair_verify_t;
 
@@ -39,7 +39,8 @@ typedef bool (*airplay_pair_verify_lookup_controller_cb_t)(
 
 typedef rtcp_pair_verify_provider_t airplay_pair_verify_config_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_PAIR_VERIFY_OK = 0,
     AIRPLAY_PAIR_VERIFY_INVALID_ARGUMENT,
     AIRPLAY_PAIR_VERIFY_NO_MEMORY,
@@ -50,13 +51,15 @@ typedef enum {
     AIRPLAY_PAIR_VERIFY_BUFFER_TOO_SMALL,
 } airplay_pair_verify_result_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t read_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES];
     uint8_t write_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES];
 } airplay_pair_verify_control_keys_t;
 
 /* Event-channel keys use a separate HKDF label set from RTSP ControlCipher. */
-typedef struct {
+typedef struct
+{
     uint8_t read_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES];
     uint8_t write_key[AIRPLAY_PAIR_VERIFY_KEY_BYTES];
 } airplay_pair_verify_event_keys_t;

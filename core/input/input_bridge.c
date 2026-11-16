@@ -12,7 +12,8 @@
 
 #define INPUT_BRIDGE_STALE_TOUCH_MS 1000U
 
-typedef struct {
+typedef struct
+{
     uint16_t pointer_id;
     uint16_t x;
     uint16_t y;
@@ -21,7 +22,8 @@ typedef struct {
     bool down;
 } input_contact_t;
 
-struct input_bridge {
+struct input_bridge
+{
     uint16_t width;
     uint16_t height;
     uint16_t rotation_degrees;
@@ -44,7 +46,8 @@ static void map_coordinates(const input_bridge_t *bridge, double x, double y,
 {
     double mapped_x = x;
     double mapped_y = y;
-    switch (bridge->rotation_degrees) {
+    switch (bridge->rotation_degrees)
+    {
     case 90:
         mapped_x = 1.0 - y;
         mapped_y = x;
@@ -68,7 +71,8 @@ static void encode_report(const input_bridge_t *bridge,
                           uint8_t report[INPUT_BRIDGE_HID_REPORT_BYTES])
 {
     memset(report, 0, INPUT_BRIDGE_HID_REPORT_BYTES);
-    for (size_t slot = 0; slot < INPUT_BRIDGE_TOUCH_CONTACTS; ++slot) {
+    for (size_t slot = 0; slot < INPUT_BRIDGE_TOUCH_CONTACTS; ++slot)
+    {
         const input_contact_t *contact = &bridge->contacts[slot];
         size_t offset = slot * 6U;
         report[offset] = (uint8_t)slot;
@@ -84,7 +88,8 @@ static bool emit_report(input_bridge_t *bridge)
 {
     encode_report(bridge, bridge->last_report);
     bridge->has_report = true;
-    if (bridge->report_cb == NULL) {
+    if (bridge->report_cb == NULL)
+    {
         return false;
     }
     return bridge->report_cb(INPUT_BRIDGE_HID_UID_TOUCH, bridge->last_report,
@@ -93,8 +98,10 @@ static bool emit_report(input_bridge_t *bridge)
 
 static int find_contact(const input_bridge_t *bridge, uint16_t pointer_id)
 {
-    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i) {
-        if (bridge->contacts[i].assigned && bridge->contacts[i].pointer_id == pointer_id) {
+    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i)
+    {
+        if (bridge->contacts[i].assigned && bridge->contacts[i].pointer_id == pointer_id)
+        {
             return (int)i;
         }
     }
@@ -109,11 +116,13 @@ input_bridge_t *input_bridge_create(uint16_t width,
 {
     if (width == 0 || height == 0 ||
         (rotation_degrees != 0 && rotation_degrees != 90 &&
-         rotation_degrees != 180 && rotation_degrees != 270)) {
+         rotation_degrees != 180 && rotation_degrees != 270))
+    {
         return NULL;
     }
     input_bridge_t *bridge = calloc(1, sizeof(*bridge));
-    if (bridge == NULL) {
+    if (bridge == NULL)
+    {
         return NULL;
     }
     bridge->width = width;
@@ -121,7 +130,8 @@ input_bridge_t *input_bridge_create(uint16_t width,
     bridge->rotation_degrees = rotation_degrees;
     bridge->report_cb = report_cb;
     bridge->context = context;
-    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i) {
+    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i)
+    {
         bridge->contacts[i].x = 0;
         bridge->contacts[i].y = 0;
     }
@@ -140,11 +150,13 @@ bool input_bridge_set_display(input_bridge_t *bridge,
 {
     if (bridge == NULL || width == 0 || height == 0 ||
         (rotation_degrees != 0 && rotation_degrees != 90 &&
-         rotation_degrees != 180 && rotation_degrees != 270)) {
+         rotation_degrees != 180 && rotation_degrees != 270))
+    {
         return false;
     }
     if (bridge->width != width || bridge->height != height ||
-        bridge->rotation_degrees != rotation_degrees) {
+        bridge->rotation_degrees != rotation_degrees)
+    {
         input_bridge_release_all(bridge);
     }
     bridge->width = width;
@@ -163,31 +175,40 @@ input_bridge_result_t input_bridge_touch(input_bridge_t *bridge,
     if (bridge == NULL || !isfinite(x_normalized) || !isfinite(y_normalized) ||
         x_normalized < 0.0 || x_normalized > 1.0 ||
         y_normalized < 0.0 || y_normalized > 1.0 ||
-        phase < INPUT_BRIDGE_TOUCH_DOWN || phase > INPUT_BRIDGE_TOUCH_CANCEL) {
-        if (bridge != NULL) {
+        phase < INPUT_BRIDGE_TOUCH_DOWN || phase > INPUT_BRIDGE_TOUCH_CANCEL)
+    {
+        if (bridge != NULL)
+        {
             ++bridge->invalid_events;
         }
         return INPUT_BRIDGE_INVALID_ARGUMENT;
     }
 
     int slot = find_contact(bridge, pointer_id);
-    if (phase == INPUT_BRIDGE_TOUCH_DOWN) {
-        if (slot < 0) {
-            for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i) {
-                if (!bridge->contacts[i].down) {
+    if (phase == INPUT_BRIDGE_TOUCH_DOWN)
+    {
+        if (slot < 0)
+        {
+            for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i)
+            {
+                if (!bridge->contacts[i].down)
+                {
                     slot = (int)i;
                     break;
                 }
             }
         }
-        if (slot < 0) {
+        if (slot < 0)
+        {
             ++bridge->invalid_events;
             return INPUT_BRIDGE_NO_CONTACT_SLOT;
         }
         bridge->contacts[slot].assigned = true;
         bridge->contacts[slot].pointer_id = pointer_id;
         bridge->contacts[slot].down = true;
-    } else if (slot < 0 || !bridge->contacts[slot].down) {
+    }
+    else if (slot < 0 || !bridge->contacts[slot].down)
+    {
         ++bridge->invalid_events;
         return INPUT_BRIDGE_UNKNOWN_CONTACT;
     }
@@ -195,7 +216,8 @@ input_bridge_result_t input_bridge_touch(input_bridge_t *bridge,
     input_contact_t *contact = &bridge->contacts[slot];
     map_coordinates(bridge, x_normalized, y_normalized, &contact->x, &contact->y);
     contact->updated_ms = now_ms;
-    if (phase == INPUT_BRIDGE_TOUCH_UP || phase == INPUT_BRIDGE_TOUCH_CANCEL) {
+    if (phase == INPUT_BRIDGE_TOUCH_UP || phase == INPUT_BRIDGE_TOUCH_CANCEL)
+    {
         contact->down = false;
         contact->assigned = false;
     }
@@ -204,47 +226,56 @@ input_bridge_result_t input_bridge_touch(input_bridge_t *bridge,
 
 void input_bridge_release_all(input_bridge_t *bridge)
 {
-    if (bridge == NULL) {
+    if (bridge == NULL)
+    {
         return;
     }
     bool had_down_contact = false;
-    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i) {
+    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i)
+    {
         had_down_contact |= bridge->contacts[i].down;
         bridge->contacts[i].down = false;
         bridge->contacts[i].assigned = false;
     }
-    if (had_down_contact) {
+    if (had_down_contact)
+    {
         (void)emit_report(bridge);
     }
 }
 
 void input_bridge_tick(input_bridge_t *bridge, uint64_t now_ms)
 {
-    if (bridge == NULL) {
+    if (bridge == NULL)
+    {
         return;
     }
     bool stale = false;
-    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i) {
+    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i)
+    {
         input_contact_t *contact = &bridge->contacts[i];
         if (contact->down && now_ms >= contact->updated_ms &&
-            now_ms - contact->updated_ms >= INPUT_BRIDGE_STALE_TOUCH_MS) {
+            now_ms - contact->updated_ms >= INPUT_BRIDGE_STALE_TOUCH_MS)
+        {
             contact->down = false;
             contact->assigned = false;
             stale = true;
         }
     }
-    if (stale) {
+    if (stale)
+    {
         (void)emit_report(bridge);
     }
 }
 
 size_t input_bridge_active_contacts(const input_bridge_t *bridge)
 {
-    if (bridge == NULL) {
+    if (bridge == NULL)
+    {
         return 0;
     }
     size_t active = 0;
-    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i) {
+    for (size_t i = 0; i < INPUT_BRIDGE_TOUCH_CONTACTS; ++i)
+    {
         active += bridge->contacts[i].down ? 1U : 0U;
     }
     return active;
@@ -258,7 +289,8 @@ uint32_t input_bridge_invalid_events(const input_bridge_t *bridge)
 bool input_bridge_last_report(const input_bridge_t *bridge,
                               uint8_t report[INPUT_BRIDGE_HID_REPORT_BYTES])
 {
-    if (bridge == NULL || report == NULL || !bridge->has_report) {
+    if (bridge == NULL || report == NULL || !bridge->has_report)
+    {
         return false;
     }
     memcpy(report, bridge->last_report, INPUT_BRIDGE_HID_REPORT_BYTES);

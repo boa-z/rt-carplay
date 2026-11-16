@@ -10,8 +10,8 @@
 
 int main(void)
 {
-    const uint8_t loopback[4] = {127, 0, 0, 1};
-    const uint8_t group[4] = {224, 0, 0, 251};
+    const uint8_t loopback[4] = { 127, 0, 0, 1 };
+    const uint8_t group[4] = { 224, 0, 0, 251 };
     int fd = rtcp_net_rtthread.udp_open(RTCP_AF_INET, 0, true);
     assert(fd >= 0);
     rtcp_net_rtthread_multicast_interface(loopback);

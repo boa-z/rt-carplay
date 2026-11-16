@@ -10,9 +10,10 @@
 #include <stdint.h>
 
 #define AIRPLAY_TLV8_MAX_MESSAGE_BYTES 4096U
-#define AIRPLAY_TLV8_MAX_ITEMS 32U
+#define AIRPLAY_TLV8_MAX_ITEMS         32U
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_TLV8_OK = 0,
     AIRPLAY_TLV8_NOT_FOUND,
     AIRPLAY_TLV8_MALFORMED,
@@ -20,7 +21,8 @@ typedef enum {
     AIRPLAY_TLV8_INVALID_ARGUMENT,
 } airplay_tlv8_result_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t type;
     const uint8_t *value;
     size_t value_len;

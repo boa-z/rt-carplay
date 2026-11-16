@@ -11,15 +11,18 @@ static const uint8_t request_one[] =
     "CSeq: 19\r\n"
     "Content-Type: application/x-apple-binary-plist\r\n"
     "content-length: 4\r\n\r\n";
-static const uint8_t binary_body[] = {0, '\r', '\n', 0xff};
+static const uint8_t binary_body[] = { 0, '\r', '\n', 0xff };
 static const uint8_t request_two[] = "OPTIONS * RTSP/1.0\r\nCSeq: 20\r\n\r\n";
 
 static bool contains(const uint8_t *haystack, size_t haystack_len,
                      const char *needle, size_t needle_len)
 {
-    if (needle_len > haystack_len) return false;
-    for (size_t i = 0; i <= haystack_len - needle_len; ++i) {
-        if (memcmp(haystack + i, needle, needle_len) == 0) return true;
+    if (needle_len > haystack_len)
+        return false;
+    for (size_t i = 0; i <= haystack_len - needle_len; ++i)
+    {
+        if (memcmp(haystack + i, needle, needle_len) == 0)
+            return true;
     }
     return false;
 }
@@ -35,7 +38,7 @@ int main(void)
     memcpy(combined + used, request_two, sizeof(request_two) - 1U);
     used += sizeof(request_two) - 1U;
 
-    airplay_rtsp_request_t request = {0};
+    airplay_rtsp_request_t request = { 0 };
     assert(airplay_rtsp_parse_request(combined, 9, &request) == AIRPLAY_RTSP_PARSE_INCOMPLETE);
     assert(airplay_rtsp_parse_request(combined, used, &request) == AIRPLAY_RTSP_PARSE_COMPLETE);
     assert(strcmp(request.method, "SETUP") == 0);
@@ -47,7 +50,7 @@ int main(void)
 
     uint8_t response[256];
     size_t response_len = 0;
-    static const uint8_t response_body[] = {1, 2, 0, 4};
+    static const uint8_t response_body[] = { 1, 2, 0, 4 };
     assert(airplay_rtsp_build_response(&request, 200, "OK",
                                        "application/x-apple-binary-plist",
                                        response_body, sizeof(response_body),

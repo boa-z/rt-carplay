@@ -12,5 +12,5 @@
  * Output length is zero on any failure; partial bytes must not be consumed.
  * No heap allocation; <=512 bytes of offset workspace plus bounded recursion. */
 airplay_bplist_result_t airplay_bplist_encode_nodes(const rtcp_opack_node_t *, size_t,
-    uint8_t *, size_t, size_t *);
+                                                    uint8_t *, size_t, size_t *);
 #endif

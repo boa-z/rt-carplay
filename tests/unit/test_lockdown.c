@@ -83,7 +83,8 @@ static void test_extract_string(void)
 
 #define FAKE_CAPACITY 4096U
 
-typedef struct {
+typedef struct
+{
     uint8_t written[FAKE_CAPACITY];
     size_t written_length;
     uint8_t incoming[FAKE_CAPACITY];
@@ -101,15 +102,18 @@ static int fake_read(void *context, void *buffer, size_t length,
     fake_stream_t *fake = context;
     (void)timeout_ms;
     ++fake->read_calls;
-    if (fake->closed) {
+    if (fake->closed)
+    {
         return 0;
     }
-    if (fake->incoming_offset >= fake->incoming_length) {
+    if (fake->incoming_offset >= fake->incoming_length)
+    {
         return RTCP_ETIMEDOUT;
     }
     size_t available = fake->incoming_length - fake->incoming_offset;
     size_t chunk = available < length ? available : length;
-    if (fake->max_read_chunk != 0U && chunk > fake->max_read_chunk) {
+    if (fake->max_read_chunk != 0U && chunk > fake->max_read_chunk)
+    {
         chunk = fake->max_read_chunk;
     }
     memcpy(buffer, fake->incoming + fake->incoming_offset, chunk);
@@ -120,10 +124,12 @@ static int fake_read(void *context, void *buffer, size_t length,
 static int fake_write(void *context, const void *data, size_t length)
 {
     fake_stream_t *fake = context;
-    if (fake->write_error != 0) {
+    if (fake->write_error != 0)
+    {
         return fake->write_error;
     }
-    if (length > FAKE_CAPACITY - fake->written_length) {
+    if (length > FAKE_CAPACITY - fake->written_length)
+    {
         return RTCP_ENOMEM;
     }
     memcpy(fake->written + fake->written_length, data, length);
@@ -200,7 +206,7 @@ static void test_exchange_errors(void)
     /* Nothing queued: the read times out. */
     memset(&fake, 0, sizeof(fake));
     rtcp_stream_t stream = {
-        .ops = &(rtcp_stream_ops_t){.read = fake_read, .write = fake_write},
+        .ops = &(rtcp_stream_ops_t){ .read = fake_read, .write = fake_write },
         .context = &fake,
     };
     assert(rtcp_lockdown_exchange(&stream, request, request_length, response,

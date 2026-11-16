@@ -14,8 +14,10 @@ static uint16_t read_be16(const uint8_t *p)
 static bool list_contains(const uint8_t *list, size_t list_len, uint16_t message_id)
 {
     assert((list_len & 1U) == 0U);
-    for (size_t i = 0U; i < list_len; i += 2U) {
-        if (read_be16(list + i) == message_id) return true;
+    for (size_t i = 0U; i < list_len; i += 2U)
+    {
+        if (read_be16(list + i) == message_id)
+            return true;
     }
     return false;
 }
@@ -24,10 +26,13 @@ static bool find_parameter(const uint8_t *body, size_t body_len, uint16_t id,
                            const uint8_t **payload, size_t *payload_len)
 {
     size_t offset = 0;
-    while (offset + 4 <= body_len) {
+    while (offset + 4 <= body_len)
+    {
         uint16_t len = read_be16(body + offset);
-        if (len < 4 || offset + len > body_len) return false;
-        if (read_be16(body + offset + 2) == id) {
+        if (len < 4 || offset + len > body_len)
+            return false;
+        if (read_be16(body + offset + 2) == id)
+        {
             *payload = body + offset + 4;
             *payload_len = len - 4;
             return true;
@@ -48,7 +53,7 @@ int main(void)
         .hardware_version = "ESP32",
         .language = "en",
         .wifi_ssid = "relay-test",
-        .bluetooth_address = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55},
+        .bluetooth_address = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 },
     };
     uint8_t body[1024];
     size_t body_len = 0;
@@ -79,8 +84,20 @@ int main(void)
     assert(ssid_len == sizeof("relay-test") && ssid[ssid_len - 1] == 0);
 
     uint8_t rejected[] = {
-        0, 8, 0, 6, 0x43, 0x01, 0x43, 0x00,
-        0, 6, 0, 7, 0x43, 0x01,
+        0,
+        8,
+        0,
+        6,
+        0x43,
+        0x01,
+        0x43,
+        0x00,
+        0,
+        6,
+        0,
+        7,
+        0x43,
+        0x01,
     };
     uint16_t omitted[IAP2_IDENTITY_MAX_OMITTED_MESSAGES];
     size_t omitted_count = 0U;
@@ -97,9 +114,9 @@ int main(void)
     assert(!list_contains(payload, payload_len, 0x4300));
     assert(list_contains(payload, payload_len, 0x5702));
 
-    const uint8_t auth_rejection[] = {0, 6, 0, 6, 0xaa, 0x02};
-    const uint8_t unrelated_rejection[] = {0, 4, 0, 3};
-    const uint8_t malformed_rejection[] = {0, 5, 0, 6, 0x43};
+    const uint8_t auth_rejection[] = { 0, 6, 0, 6, 0xaa, 0x02 };
+    const uint8_t unrelated_rejection[] = { 0, 4, 0, 3 };
+    const uint8_t malformed_rejection[] = { 0, 5, 0, 6, 0x43 };
     assert(!iap2_identity_parse_unsupported_messages(auth_rejection, sizeof(auth_rejection),
                                                      omitted, IAP2_IDENTITY_MAX_OMITTED_MESSAGES,
                                                      &omitted_count));

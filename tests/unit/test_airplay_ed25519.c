@@ -7,7 +7,8 @@
 
 static void decode_hex(const char *hex, uint8_t *output, size_t output_len)
 {
-    for (size_t i = 0U; i < output_len; ++i) {
+    for (size_t i = 0U; i < output_len; ++i)
+    {
         unsigned value = 0U;
         assert(sscanf(hex + i * 2U, "%2x", &value) == 1);
         output[i] = (uint8_t)value;
@@ -27,7 +28,8 @@ static void test_rfc8032_vector(const char *seed_hex,
     decode_hex(seed_hex, seed, sizeof(seed));
     decode_hex(public_hex, expected_public, sizeof(expected_public));
     decode_hex(signature_hex, expected_signature, sizeof(expected_signature));
-    if (message_len != 0U) decode_hex(message_hex, message, message_len);
+    if (message_len != 0U)
+        decode_hex(message_hex, message, message_len);
 
     airplay_ed25519_keypair_t keypair;
     assert(airplay_ed25519_keypair_from_seed(seed, &keypair));
@@ -42,7 +44,8 @@ static void test_rfc8032_vector(const char *seed_hex,
                                   expected_signature));
 
     /* Any single-bit change in message, signature or key must fail. */
-    if (message_len != 0U) {
+    if (message_len != 0U)
+    {
         message[0] ^= 0x01U;
         assert(!airplay_ed25519_verify(expected_public, message, message_len,
                                        expected_signature));
@@ -57,14 +60,15 @@ static void test_rfc8032_vector(const char *seed_hex,
                                    expected_signature));
 
     airplay_ed25519_keypair_clear(&keypair);
-    for (size_t i = 0U; i < sizeof(keypair.private_key); ++i) {
+    for (size_t i = 0U; i < sizeof(keypair.private_key); ++i)
+    {
         assert(keypair.private_key[i] == 0U);
     }
 }
 
 static void test_argument_checks(void)
 {
-    uint8_t seed[AIRPLAY_ED25519_SEED_BYTES] = {0};
+    uint8_t seed[AIRPLAY_ED25519_SEED_BYTES] = { 0 };
     airplay_ed25519_keypair_t keypair;
     uint8_t signature[AIRPLAY_ED25519_SIGNATURE_BYTES];
     assert(!airplay_ed25519_keypair_from_seed(NULL, &keypair));

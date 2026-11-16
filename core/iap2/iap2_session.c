@@ -19,31 +19,32 @@
 #include "iap2_parameter.h"
 #include "rtcp/rtcp.h"
 
-#define IAP2_SESSION_CERT_CAPACITY 1536U
-#define IAP2_SESSION_SIGNATURE_CAPACITY 512U
+#define IAP2_SESSION_CERT_CAPACITY           1536U
+#define IAP2_SESSION_SIGNATURE_CAPACITY      512U
 #define IAP2_SESSION_IDENTIFICATION_CAPACITY 1024U
-#define IAP2_SESSION_WIFI_BODY_CAPACITY 256U
-#define IAP2_SESSION_START_BODY_CAPACITY 1600U
-#define IAP2_SESSION_MAX_CHALLENGE_BYTES 128U
+#define IAP2_SESSION_WIFI_BODY_CAPACITY      256U
+#define IAP2_SESSION_START_BODY_CAPACITY     1600U
+#define IAP2_SESSION_MAX_CHALLENGE_BYTES     128U
 
-#define IAP2_MSG_START_IDENTIFICATION 0x1d00U
+#define IAP2_MSG_START_IDENTIFICATION       0x1d00U
 #define IAP2_MSG_IDENTIFICATION_INFORMATION 0x1d01U
-#define IAP2_MSG_IDENTIFICATION_ACCEPTED 0x1d02U
-#define IAP2_MSG_IDENTIFICATION_REJECTED 0x1d03U
-#define IAP2_MSG_MFI_AUTH_REQUEST 0xaa00U
-#define IAP2_MSG_MFI_CERTIFICATE 0xaa01U
-#define IAP2_MSG_MFI_CHALLENGE 0xaa02U
-#define IAP2_MSG_MFI_CHALLENGE_RESPONSE 0xaa03U
-#define IAP2_MSG_MFI_AUTH_FAILED 0xaa04U
-#define IAP2_MSG_MFI_AUTH_SUCCEEDED 0xaa05U
-#define IAP2_MSG_CARPLAY_AVAILABILITY 0x4300U
-#define IAP2_MSG_CARPLAY_START_SESSION 0x4301U
-#define IAP2_MSG_POWER_SOURCE_UPDATE 0xae03U
-#define IAP2_MSG_TRANSPORT_NOTIFICATION 0x4e0eU
-#define IAP2_MSG_WIFI_CONFIG_REQUEST 0x5702U
-#define IAP2_MSG_WIFI_CONFIGURATION 0x5703U
+#define IAP2_MSG_IDENTIFICATION_ACCEPTED    0x1d02U
+#define IAP2_MSG_IDENTIFICATION_REJECTED    0x1d03U
+#define IAP2_MSG_MFI_AUTH_REQUEST           0xaa00U
+#define IAP2_MSG_MFI_CERTIFICATE            0xaa01U
+#define IAP2_MSG_MFI_CHALLENGE              0xaa02U
+#define IAP2_MSG_MFI_CHALLENGE_RESPONSE     0xaa03U
+#define IAP2_MSG_MFI_AUTH_FAILED            0xaa04U
+#define IAP2_MSG_MFI_AUTH_SUCCEEDED         0xaa05U
+#define IAP2_MSG_CARPLAY_AVAILABILITY       0x4300U
+#define IAP2_MSG_CARPLAY_START_SESSION      0x4301U
+#define IAP2_MSG_POWER_SOURCE_UPDATE        0xae03U
+#define IAP2_MSG_TRANSPORT_NOTIFICATION     0x4e0eU
+#define IAP2_MSG_WIFI_CONFIG_REQUEST        0x5702U
+#define IAP2_MSG_WIFI_CONFIGURATION         0x5703U
 
-struct iap2_session {
+struct iap2_session
+{
     iap2_session_config_t config;
     iap2_core_t *core;
     iap2_mfi_auth_t auth;
@@ -78,7 +79,8 @@ static bool session_is_wired(const iap2_session_t *session)
 
 static void emit_event(iap2_session_t *session, iap2_session_event_t event)
 {
-    if (session->config.on_event != NULL) {
+    if (session->config.on_event != NULL)
+    {
         session->config.on_event(event, session->config.context);
     }
 }
@@ -99,13 +101,14 @@ static bool send_csm(iap2_session_t *session,
                      void *acked_context,
                      uint64_t now_ms)
 {
-    if (session->core == NULL) return false;
+    if (session->core == NULL)
+        return false;
     bool queued = iap2_core_send_csm_with_ack_callback(session->core, message_id, body,
-                                                body_len, acked_callback,
-                                                acked_context, now_ms);
+                                                       body_len, acked_callback,
+                                                       acked_context, now_ms);
     if (queued && session->config.observe_message != NULL)
         session->config.observe_message(true, message_id, body, body_len,
-                                         session->config.context);
+                                        session->config.context);
     return queued;
 }
 
@@ -145,8 +148,10 @@ static void reset_connection_state(iap2_session_t *session)
 
 static bool message_is_omitted(const iap2_session_t *session, uint16_t message_id)
 {
-    for (size_t i = 0; i < session->omitted_message_count; ++i) {
-        if (session->omitted_message_ids[i] == message_id) return true;
+    for (size_t i = 0; i < session->omitted_message_count; ++i)
+    {
+        if (session->omitted_message_ids[i] == message_id)
+            return true;
     }
     return false;
 }
@@ -157,19 +162,25 @@ static bool send_identification_information(iap2_session_t *session, uint64_t no
 
     uint8_t body[IAP2_SESSION_IDENTIFICATION_CAPACITY];
     size_t body_len = 0U;
-    if (session_is_wired(session)) {
+    if (session_is_wired(session))
+    {
         if (!iap2_identity_build_wired_omitting(
                 identity, session->config.car_play_interface_number,
                 session->omitted_message_ids, session->omitted_message_count,
-                body, sizeof(body), &body_len)) {
+                body, sizeof(body), &body_len))
+        {
             return false;
         }
-    } else {
-        if (identity->wifi_ssid == NULL || identity->wifi_ssid[0] == '\0') return false;
+    }
+    else
+    {
+        if (identity->wifi_ssid == NULL || identity->wifi_ssid[0] == '\0')
+            return false;
         if (!iap2_identity_build_wireless_omitting(identity,
                                                    session->omitted_message_ids,
                                                    session->omitted_message_count,
-                                                   body, sizeof(body), &body_len)) {
+                                                   body, sizeof(body), &body_len))
+        {
             return false;
         }
     }
@@ -186,16 +197,20 @@ static void handle_identification_rejected(iap2_session_t *session,
     size_t rejected_count = 0U;
     if (!iap2_identity_parse_unsupported_messages(body, body_len, rejected,
                                                   IAP2_IDENTITY_MAX_OMITTED_MESSAGES,
-                                                  &rejected_count)) {
+                                                  &rejected_count))
+    {
         emit_event(session, IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED);
         return;
     }
 
     size_t added = 0U;
-    for (size_t i = 0; i < rejected_count; ++i) {
+    for (size_t i = 0; i < rejected_count; ++i)
+    {
         uint16_t id = rejected[i];
-        if (message_is_omitted(session, id)) continue;
-        if (session->omitted_message_count >= IAP2_IDENTITY_MAX_OMITTED_MESSAGES) {
+        if (message_is_omitted(session, id))
+            continue;
+        if (session->omitted_message_count >= IAP2_IDENTITY_MAX_OMITTED_MESSAGES)
+        {
             emit_event(session, IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED);
             return;
         }
@@ -203,7 +218,8 @@ static void handle_identification_rejected(iap2_session_t *session,
         ++added;
     }
     if (added == 0U ||
-        session->identification_retries >= IAP2_SESSION_IDENTIFICATION_MAX_RETRIES) {
+        session->identification_retries >= IAP2_SESSION_IDENTIFICATION_MAX_RETRIES)
+    {
         emit_event(session, IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED);
         return;
     }
@@ -216,7 +232,8 @@ static bool read_certificate(iap2_session_t *session,
                              size_t *certificate_len)
 {
     const struct rtcp_mfi *mfi = session->config.mfi;
-    if (mfi == NULL || mfi->read_cert == NULL) return false;
+    if (mfi == NULL || mfi->read_cert == NULL)
+        return false;
     *certificate_len = IAP2_SESSION_CERT_CAPACITY;
     return mfi->read_cert(certificate, IAP2_SESSION_CERT_CAPACITY, certificate_len) ==
                RTCP_OK &&
@@ -228,7 +245,8 @@ static void handle_authentication_certificate(iap2_session_t *session,
 {
     uint8_t certificate[IAP2_SESSION_CERT_CAPACITY];
     size_t certificate_len = 0U;
-    if (!read_certificate(session, certificate, &certificate_len)) {
+    if (!read_certificate(session, certificate, &certificate_len))
+    {
         iap2_mfi_auth_mark_failed(&session->auth);
         emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_CERT_FAILED);
         return;
@@ -237,15 +255,19 @@ static void handle_authentication_certificate(iap2_session_t *session,
     uint8_t body[IAP2_SESSION_CERT_CAPACITY + 4U];
     size_t body_len = iap2_param_encode(body, sizeof(body), 0,
                                         certificate, certificate_len);
-    if (body_len == 0U) {
+    if (body_len == 0U)
+    {
         iap2_mfi_auth_mark_failed(&session->auth);
         emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_CERT_FAILED);
         return;
     }
     if (send_csm(session, IAP2_MSG_MFI_CERTIFICATE, body, body_len,
-                 NULL, NULL, now_ms)) {
+                 NULL, NULL, now_ms))
+    {
         emit_event(session, IAP2_SESSION_EVENT_MFI_CERTIFICATE_SENT);
-    } else {
+    }
+    else
+    {
         iap2_mfi_auth_mark_failed(&session->auth);
         emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_CERT_FAILED);
     }
@@ -254,10 +276,12 @@ static void handle_authentication_certificate(iap2_session_t *session,
 static void challenge_response_acked(uint16_t message_id, void *context)
 {
     iap2_session_t *session = context;
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     session->mfi_response_pending = false;
     if (message_id != IAP2_MSG_MFI_CHALLENGE_RESPONSE ||
-        !iap2_mfi_auth_mark_challenge_response_acked(&session->auth)) {
+        !iap2_mfi_auth_mark_challenge_response_acked(&session->auth))
+    {
         iap2_mfi_auth_mark_failed(&session->auth);
         emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_ACK_FAILED);
     }
@@ -273,7 +297,8 @@ static bool handle_authentication_challenge(iap2_session_t *session,
     size_t challenge_len = 0U;
     if (mfi == NULL || mfi->sign == NULL ||
         !iap2_param_find_single(body, body_len, 0, &challenge, &challenge_len) ||
-        challenge_len == 0U || challenge_len > IAP2_SESSION_MAX_CHALLENGE_BYTES) {
+        challenge_len == 0U || challenge_len > IAP2_SESSION_MAX_CHALLENGE_BYTES)
+    {
         emit_event(session, IAP2_SESSION_EVENT_MFI_CHALLENGE_INVALID);
         return false;
     }
@@ -282,7 +307,8 @@ static bool handle_authentication_challenge(iap2_session_t *session,
     size_t signature_len = sizeof(signature);
     if (mfi->sign(challenge, challenge_len, signature, sizeof(signature),
                   &signature_len) != RTCP_OK ||
-        signature_len == 0U || signature_len > sizeof(signature)) {
+        signature_len == 0U || signature_len > sizeof(signature))
+    {
         emit_event(session, IAP2_SESSION_EVENT_MFI_SIGN_FAILED);
         return false;
     }
@@ -292,7 +318,8 @@ static bool handle_authentication_challenge(iap2_session_t *session,
                                             signature, signature_len);
     if (response_len != 0U &&
         send_csm(session, IAP2_MSG_MFI_CHALLENGE_RESPONSE, response,
-                 response_len, challenge_response_acked, session, now_ms)) {
+                 response_len, challenge_response_acked, session, now_ms))
+    {
         return true;
     }
     emit_event(session, IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED);
@@ -304,46 +331,53 @@ static void send_iap2_subscriptions(iap2_session_t *session, uint64_t now_ms)
     uint8_t body[64];
     size_t body_len = 0U;
 
-    static const uint16_t now_playing_fields[] = {1, 4, 6, 12, 26};
-    static const uint16_t playback_fields[] = {0, 1, 7};
+    static const uint16_t now_playing_fields[] = { 1, 4, 6, 12, 26 };
+    static const uint16_t playback_fields[] = { 0, 1, 7 };
     uint8_t group0[32];
     uint8_t group1[16];
     size_t group0_len = 0U;
     size_t group1_len = 0U;
-    for (size_t i = 0; i < sizeof(now_playing_fields) / sizeof(now_playing_fields[0]); ++i) {
+    for (size_t i = 0; i < sizeof(now_playing_fields) / sizeof(now_playing_fields[0]); ++i)
+    {
         (void)iap2_param_append_void(group0, sizeof(group0), &group0_len,
                                      now_playing_fields[i]);
     }
-    for (size_t i = 0; i < sizeof(playback_fields) / sizeof(playback_fields[0]); ++i) {
+    for (size_t i = 0; i < sizeof(playback_fields) / sizeof(playback_fields[0]); ++i)
+    {
         (void)iap2_param_append_void(group1, sizeof(group1), &group1_len,
                                      playback_fields[i]);
     }
     (void)iap2_param_append(body, sizeof(body), &body_len, 0, group0, group0_len);
     (void)iap2_param_append(body, sizeof(body), &body_len, 1, group1, group1_len);
-    if (!message_is_omitted(session, 0x5000U)) {
+    if (!message_is_omitted(session, 0x5000U))
+    {
         (void)send_csm(session, 0x5000U, body, body_len, NULL, NULL, now_ms);
     }
 
     body_len = 0U;
-    static const uint8_t route_id[2] = {0, 42};
+    static const uint8_t route_id[2] = { 0, 42 };
     (void)iap2_param_append(body, sizeof(body), &body_len, 0, route_id, sizeof(route_id));
     (void)iap2_param_append_void(body, sizeof(body), &body_len, 1);
     (void)iap2_param_append_void(body, sizeof(body), &body_len, 2);
-    if (!message_is_omitted(session, 0x5200U)) {
+    if (!message_is_omitted(session, 0x5200U))
+    {
         (void)send_csm(session, 0x5200U, body, body_len, NULL, NULL, now_ms);
     }
 
-    static const uint16_t message_ids[] = {0xae00U, 0x4157U, 0x4154U};
+    static const uint16_t message_ids[] = { 0xae00U, 0x4157U, 0x4154U };
     static const uint8_t parameter_ids[][6] = {
-        {4, 5, 6, 0, 0, 0},
-        {0, 4, 5, 0, 0, 0},
-        {0, 1, 2, 3, 4, 11},
+        { 4, 5, 6, 0, 0, 0 },
+        { 0, 4, 5, 0, 0, 0 },
+        { 0, 1, 2, 3, 4, 11 },
     };
-    static const uint8_t parameter_counts[] = {3, 3, 6};
-    for (size_t i = 0; i < sizeof(message_ids) / sizeof(message_ids[0]); ++i) {
-        if (message_is_omitted(session, message_ids[i])) continue;
+    static const uint8_t parameter_counts[] = { 3, 3, 6 };
+    for (size_t i = 0; i < sizeof(message_ids) / sizeof(message_ids[0]); ++i)
+    {
+        if (message_is_omitted(session, message_ids[i]))
+            continue;
         body_len = 0U;
-        for (size_t j = 0; j < parameter_counts[i]; ++j) {
+        for (size_t j = 0; j < parameter_counts[i]; ++j)
+        {
             (void)iap2_param_append_void(body, sizeof(body), &body_len,
                                          parameter_ids[i][j]);
         }
@@ -359,7 +393,8 @@ static void send_iap2_subscriptions(iap2_session_t *session, uint64_t now_ms)
  */
 static void send_wired_power_source(iap2_session_t *session, uint64_t now_ms)
 {
-    if (session->wired_power_sent) return;
+    if (session->wired_power_sent)
+        return;
 
     uint8_t body[16];
     size_t body_len = 0U;
@@ -371,11 +406,13 @@ static void send_wired_power_source(iap2_session_t *session, uint64_t now_ms)
     if (!iap2_param_append(body, sizeof(body), &body_len, 0, current,
                            sizeof(current)) ||
         !iap2_param_append(body, sizeof(body), &body_len, 1, &charge,
-                           sizeof(charge))) {
+                           sizeof(charge)))
+    {
         return;
     }
     if (send_csm(session, IAP2_MSG_POWER_SOURCE_UPDATE, body, body_len, NULL,
-                 NULL, now_ms)) {
+                 NULL, now_ms))
+    {
         session->wired_power_sent = true;
     }
 }
@@ -383,10 +420,12 @@ static void send_wired_power_source(iap2_session_t *session, uint64_t now_ms)
 static void maybe_send_subscriptions(iap2_session_t *session, uint64_t now_ms)
 {
     if (session->subscriptions_sent || !session->identification_accepted ||
-        !iap2_mfi_auth_is_authenticated(&session->auth)) {
+        !iap2_mfi_auth_is_authenticated(&session->auth))
+    {
         return;
     }
-    if (session_is_wired(session)) {
+    if (session_is_wired(session))
+    {
         send_wired_power_source(session, now_ms);
     }
     send_iap2_subscriptions(session, now_ms);
@@ -398,7 +437,8 @@ static bool get_wifi(iap2_session_t *session, iap2_session_wifi_t *wifi)
 {
     memset(wifi, 0, sizeof(*wifi));
     if (session->config.get_wifi == NULL ||
-        !session->config.get_wifi(wifi, session->config.context)) {
+        !session->config.get_wifi(wifi, session->config.context))
+    {
         return false;
     }
     return wifi->ssid != NULL && wifi->ssid[0] != '\0' &&
@@ -410,17 +450,21 @@ static bool send_wifi_configuration(iap2_session_t *session,
                                     uint64_t now_ms)
 {
     /* Wired CarPlay has no accessory SoftAP: the network runs over NCM. */
-    if (session_is_wired(session)) return false;
-    if (!iap2_mfi_auth_is_authenticated(&session->auth)) return false;
+    if (session_is_wired(session))
+        return false;
+    if (!iap2_mfi_auth_is_authenticated(&session->auth))
+        return false;
 
     uint8_t *count = post_transport ? &session->post_transport_wifi_configs
                                     : &session->pre_transport_wifi_configs;
     uint8_t limit = post_transport ? IAP2_SESSION_POST_TRANSPORT_WIFI_CONFIG_LIMIT
                                    : IAP2_SESSION_PRE_TRANSPORT_WIFI_CONFIG_LIMIT;
-    if (*count >= limit) return false;
+    if (*count >= limit)
+        return false;
 
     iap2_session_wifi_t wifi;
-    if (!get_wifi(session, &wifi)) return false;
+    if (!get_wifi(session, &wifi))
+        return false;
 
     iap2_carplay_wifi_config_t config = {
         .ssid = wifi.ssid,
@@ -432,11 +476,13 @@ static bool send_wifi_configuration(iap2_session_t *session,
     uint8_t body[IAP2_SESSION_WIFI_BODY_CAPACITY];
     size_t body_len = 0U;
     if (!iap2_carplay_build_wifi_configuration(&config, body, sizeof(body),
-                                               &body_len)) {
+                                               &body_len))
+    {
         return false;
     }
     if (!send_csm(session, IAP2_MSG_WIFI_CONFIGURATION, body, body_len,
-                  NULL, NULL, now_ms)) {
+                  NULL, NULL, now_ms))
+    {
         return false;
     }
     ++*count;
@@ -453,8 +499,10 @@ static void carplay_invite_acked(uint16_t message_id, void *context)
 static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
                                        bool reinvite)
 {
-    if (!iap2_mfi_auth_is_authenticated(&session->auth)) return false;
-    if (session->start_session_sent) return false;
+    if (!iap2_mfi_auth_is_authenticated(&session->auth))
+        return false;
+    if (session->start_session_sent)
+        return false;
 
     const bool wired = session_is_wired(session);
 
@@ -464,12 +512,15 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
         !session->config.get_airplay(&airplay, session->config.context) ||
         (!wired && !airplay.mdns_ready) || airplay.airplay_port == 0U ||
         airplay.ip_address == NULL || airplay.device_identifier == NULL ||
-        airplay.public_key == NULL) {
+        airplay.public_key == NULL)
+    {
         return false;
     }
 
-    if (wired) session->wired_transport_connected = airplay.transport_connected || airplay.event_connected;
-    if (wired && session->wired_transport_connected) {
+    if (wired)
+        session->wired_transport_connected = airplay.transport_connected || airplay.event_connected;
+    if (wired && session->wired_transport_connected)
+    {
         session->carplay_invite_active = false;
         session->wired_invite_pending = false;
         return false;
@@ -477,9 +528,10 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
 
     iap2_session_wifi_t wifi;
     memset(&wifi, 0, sizeof(wifi));
-    if (!wired && !get_wifi(session, &wifi)) return false;
+    if (!wired && !get_wifi(session, &wifi))
+        return false;
 
-    const char *ip_addresses[] = {airplay.ip_address};
+    const char *ip_addresses[] = { airplay.ip_address };
     iap2_carplay_start_session_config_t config = {
         .ssid = wifi.ssid,
         .passphrase = wifi.passphrase,
@@ -495,13 +547,15 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
     uint8_t body[IAP2_SESSION_START_BODY_CAPACITY];
     size_t body_len = 0U;
     bool built = wired
-        ? iap2_carplay_build_start_session_wired(&config, body, sizeof(body), &body_len)
-        : iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len);
-    if (!built) {
+                     ? iap2_carplay_build_start_session_wired(&config, body, sizeof(body), &body_len)
+                     : iap2_carplay_build_start_session(&config, body, sizeof(body), &body_len);
+    if (!built)
+    {
         return false;
     }
     if (!send_csm(session, IAP2_MSG_CARPLAY_START_SESSION, body, body_len,
-                  carplay_invite_acked, session, now_ms)) {
+                  carplay_invite_acked, session, now_ms))
+    {
         return false;
     }
     session->start_session_sent = true;
@@ -514,12 +568,14 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
 
 static void maybe_reinvite_carplay(iap2_session_t *session, uint64_t now_ms)
 {
-    if (session_is_wired(session)) {
+    if (session_is_wired(session))
+    {
         uint32_t delay = session->config.wired_reinvite_delay_ms;
         if (!delay || session->wired_reinvite_done ||
             !session->carplay_invite_active || !session->link_up ||
             session->airplay_event_connected ||
-            now_ms - session->carplay_invite_at_ms < delay) return;
+            now_ms - session->carplay_invite_at_ms < delay)
+            return;
         /* One application-enabled compatibility retry, never a periodic
          * wired invite loop. get_airplay also checks for accepted TCP. */
         session->start_session_sent = false;
@@ -531,12 +587,15 @@ static void maybe_reinvite_carplay(iap2_session_t *session, uint64_t now_ms)
     if (!session->carplay_invite_active || !session->link_up ||
         session->airplay_event_connected ||
         !iap2_mfi_auth_is_authenticated(&session->auth) ||
-        !session->identification_accepted) {
+        !session->identification_accepted)
+    {
         return;
     }
-    if (session->carplay_reinvite_count >= IAP2_SESSION_CARPLAY_REINVITE_MAX) return;
+    if (session->carplay_reinvite_count >= IAP2_SESSION_CARPLAY_REINVITE_MAX)
+        return;
     if (now_ms - session->carplay_invite_at_ms <
-        IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS) {
+        IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS)
+    {
         return;
     }
     ++session->carplay_reinvite_count;
@@ -550,9 +609,11 @@ static void handle_transport_notification(iap2_session_t *session,
                                           size_t body_len,
                                           uint64_t now_ms)
 {
-    if (!iap2_param_validate(body, body_len)) return;
+    if (!iap2_param_validate(body, body_len))
+        return;
     session->transport_notification_seen = true;
-    if (!session_is_wired(session)) {
+    if (!session_is_wired(session))
+    {
         (void)send_wifi_configuration(session, true, now_ms);
     }
 }
@@ -579,9 +640,12 @@ static void core_state(iap2_core_state_t state, const char *reason, void *contex
 {
     (void)reason;
     iap2_session_t *session = context;
-    if (state == IAP2_CORE_READY) {
+    if (state == IAP2_CORE_READY)
+    {
         emit_event(session, IAP2_SESSION_EVENT_LINK_READY);
-    } else if (state == IAP2_CORE_DEAD) {
+    }
+    else if (state == IAP2_CORE_DEAD)
+    {
         session->link_up = false;
         reset_connection_state(session);
         emit_event(session, IAP2_SESSION_EVENT_LINK_DEAD);
@@ -590,29 +654,35 @@ static void core_state(iap2_core_state_t state, const char *reason, void *contex
 
 iap2_session_t *iap2_session_create(const iap2_session_config_t *config)
 {
-    if (config == NULL || config->tx == NULL) return NULL;
+    if (config == NULL || config->tx == NULL)
+        return NULL;
     iap2_session_t *session = calloc(1, sizeof(*session));
-    if (session == NULL) return NULL;
+    if (session == NULL)
+        return NULL;
     session->config = *config;
     session->core = iap2_core_create(core_tx, core_message, core_state, session);
-    if (session->core == NULL) {
+    if (session->core == NULL)
+    {
         free(session);
         return NULL;
     }
-    if (config->airplay_tunnel) iap2_core_set_tcp_transport(session->core);
+    if (config->airplay_tunnel)
+        iap2_core_set_tcp_transport(session->core);
     return session;
 }
 
 void iap2_session_destroy(iap2_session_t *session)
 {
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     iap2_core_destroy(session->core);
     free(session);
 }
 
 void iap2_session_link_up(iap2_session_t *session, uint64_t now_ms)
 {
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     session->now_ms = now_ms;
     reset_connection_state(session);
     session->link_up = true;
@@ -622,7 +692,8 @@ void iap2_session_link_up(iap2_session_t *session, uint64_t now_ms)
 
 void iap2_session_link_down(iap2_session_t *session)
 {
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     session->link_up = false;
     reset_connection_state(session);
 }
@@ -630,14 +701,16 @@ void iap2_session_link_down(iap2_session_t *session)
 void iap2_session_feed(iap2_session_t *session, const uint8_t *bytes, size_t len,
                        uint64_t now_ms)
 {
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     session->now_ms = now_ms;
     iap2_core_feed(session->core, bytes, len, now_ms);
 }
 
 void iap2_session_advance(iap2_session_t *session, uint64_t now_ms)
 {
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     session->now_ms = now_ms;
     iap2_core_advance_time(session->core, now_ms);
     /* An availability message can precede the host's valid IPv6 address or
@@ -645,7 +718,8 @@ void iap2_session_advance(iap2_session_t *session, uint64_t now_ms)
      * ready; never turn it into periodic wired re-invites. */
     if (session_is_wired(session) && session->link_up &&
         session->wired_invite_pending && !session->airplay_event_connected &&
-        send_carplay_start_session(session, now_ms, false)) {
+        send_carplay_start_session(session, now_ms, false))
+    {
         session->wired_invite_pending = false;
     }
     maybe_reinvite_carplay(session, now_ms);
@@ -654,19 +728,23 @@ void iap2_session_advance(iap2_session_t *session, uint64_t now_ms)
 void iap2_session_notify_airplay_event(iap2_session_t *session, bool connected,
                                        uint64_t now_ms)
 {
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     session->now_ms = now_ms;
     session->airplay_event_connected = connected;
-    if (session_is_wired(session)) {
+    if (session_is_wired(session))
+    {
         /* Wired availability is driven by 0x4300, not by invite pacing. */
         return;
     }
-    if (connected) {
+    if (connected)
+    {
         session->carplay_invite_active = false;
         session->carplay_reinvite_count = 0U;
         return;
     }
-    if (session->link_up) {
+    if (session->link_up)
+    {
         session->carplay_invite_active = true;
         session->carplay_invite_at_ms = now_ms;
     }
@@ -678,12 +756,14 @@ void iap2_session_handle_message(iap2_session_t *session,
                                  size_t body_len,
                                  uint64_t now_ms)
 {
-    if (session == NULL) return;
+    if (session == NULL)
+        return;
     session->now_ms = now_ms;
     if (session->config.observe_message != NULL)
         session->config.observe_message(false, message_id, body, body_len,
-                                         session->config.context);
-    switch (message_id) {
+                                        session->config.context);
+    switch (message_id)
+    {
     case IAP2_MSG_START_IDENTIFICATION:
         (void)send_identification_information(session, now_ms);
         break;
@@ -703,12 +783,14 @@ void iap2_session_handle_message(iap2_session_t *session,
     case IAP2_MSG_MFI_CHALLENGE:
         if (session->mfi_response_pending ||
             !iap2_mfi_auth_can_respond_to_challenge(&session->auth) ||
-            !iap2_mfi_auth_mark_challenge_response_queued(&session->auth)) {
+            !iap2_mfi_auth_mark_challenge_response_queued(&session->auth))
+        {
             emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_STATE_INVALID);
             break;
         }
         session->mfi_response_pending = true;
-        if (!handle_authentication_challenge(session, body, body_len, now_ms)) {
+        if (!handle_authentication_challenge(session, body, body_len, now_ms))
+        {
             session->mfi_response_pending = false;
             iap2_mfi_auth_mark_failed(&session->auth);
             emit_event(session, IAP2_SESSION_EVENT_MFI_FAILED);
@@ -720,7 +802,8 @@ void iap2_session_handle_message(iap2_session_t *session,
         emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_PHONE_REJECTED);
         break;
     case IAP2_MSG_MFI_AUTH_SUCCEEDED:
-        if (!iap2_mfi_auth_mark_authenticated(&session->auth)) {
+        if (!iap2_mfi_auth_mark_authenticated(&session->auth))
+        {
             emit_mfi_failure(session, IAP2_SESSION_EVENT_MFI_STATE_INVALID);
             break;
         }
@@ -733,14 +816,16 @@ void iap2_session_handle_message(iap2_session_t *session,
         break;
     case IAP2_MSG_CARPLAY_AVAILABILITY:
         emit_event(session, IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED);
-        if (!session->airplay_event_connected) {
+        if (!session->airplay_event_connected)
+        {
             /* Each new wired availability deserves a fresh answer. The
              * sent flag suppresses timer duplicates, not peer requests. */
-            if (session_is_wired(session)) session->start_session_sent = false;
+            if (session_is_wired(session))
+                session->start_session_sent = false;
             bool sent = send_carplay_start_session(session, now_ms, false);
             if (session_is_wired(session))
                 session->wired_invite_pending = !sent && !session->start_session_sent &&
-                    !session->wired_transport_connected;
+                                                !session->wired_transport_connected;
         }
         break;
     case 0x4e0dU:

@@ -9,11 +9,12 @@
 #include "rtcp/rtcp.h"
 #include "rtcp_linux.h"
 
-#define WAIT_MS 500
+#define WAIT_MS     500
 #define FRAME_BYTES (AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES + \
                      AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES)
 
-typedef struct {
+typedef struct
+{
     bool connected;
     unsigned transitions;
 } state_capture_t;
@@ -27,7 +28,7 @@ static void on_state(bool connected, void *context)
 
 static rtcp_addr_t loopback(uint16_t port)
 {
-    rtcp_addr_t address = {0};
+    rtcp_addr_t address = { 0 };
     address.family = RTCP_AF_INET;
     address.addr[0] = 127U;
     address.addr[3] = 1U;
@@ -37,7 +38,7 @@ static rtcp_addr_t loopback(uint16_t port)
 
 static bool wait_event(int fd)
 {
-    struct rtcp_pollfd pfd = {.fd = fd, .events = RTCP_POLLIN};
+    struct rtcp_pollfd pfd = { .fd = fd, .events = RTCP_POLLIN };
     int ready = rtcp_net_linux.poll(&pfd, 1, WAIT_MS);
     return ready > 0 && pfd.revents != 0;
 }
@@ -45,9 +46,11 @@ static bool wait_event(int fd)
 static bool send_all(int fd, const uint8_t *bytes, size_t len)
 {
     size_t offset = 0U;
-    while (offset < len) {
+    while (offset < len)
+    {
         int sent = rtcp_net_linux.send(fd, bytes + offset, len - offset);
-        if (sent <= 0) return false;
+        if (sent <= 0)
+            return false;
         offset += (size_t)sent;
     }
     return true;
@@ -55,7 +58,8 @@ static bool send_all(int fd, const uint8_t *bytes, size_t len)
 
 static void make_keys(uint8_t read_key[32], uint8_t write_key[32])
 {
-    for (size_t i = 0U; i < 32U; ++i) {
+    for (size_t i = 0U; i < 32U; ++i)
+    {
         read_key[i] = (uint8_t)(0x30U + i);
         write_key[i] = (uint8_t)(0xa0U + i);
     }
@@ -67,8 +71,8 @@ int main(void)
     uint8_t write_key[32];
     make_keys(read_key, write_key);
 
-    state_capture_t states = {0};
-    airplay_event_port_config_t config = {0};
+    state_capture_t states = { 0 };
+    airplay_event_port_config_t config = { 0 };
     memcpy(config.keys.read_key, read_key, sizeof(read_key));
     memcpy(config.keys.write_key, write_key, sizeof(write_key));
     config.stream_id = 42U;
@@ -112,16 +116,20 @@ int main(void)
 
     /* The event port drains with one recv per readable event. */
     bool acknowledged = false;
-    for (unsigned i = 0U; i < 16U && !acknowledged; ++i) {
+    for (unsigned i = 0U; i < 16U && !acknowledged; ++i)
+    {
         struct rtcp_pollfd pfds[2] = {
-            {.fd = client, .events = RTCP_POLLIN},
-            {.fd = airplay_event_port_get_fd(port), .events = RTCP_POLLIN},
+            { .fd = client, .events = RTCP_POLLIN },
+            { .fd = airplay_event_port_get_fd(port), .events = RTCP_POLLIN },
         };
         int ready = rtcp_net_linux.poll(pfds, 2, WAIT_MS);
         assert(ready > 0);
-        if (pfds[0].revents & RTCP_POLLIN) {
+        if (pfds[0].revents & RTCP_POLLIN)
+        {
             acknowledged = true;
-        } else if (pfds[1].revents != 0) {
+        }
+        else if (pfds[1].revents != 0)
+        {
             airplay_event_port_poll(port);
         }
     }

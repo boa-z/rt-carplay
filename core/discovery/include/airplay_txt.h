@@ -5,15 +5,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIRPLAY_TXT_MAX_RECORDS 16U
+#define AIRPLAY_TXT_MAX_RECORDS      16U
 #define AIRPLAY_TXT_MAX_RECORD_BYTES 255U
 
-typedef struct {
+typedef struct
+{
     const char *key;
     const char *value;
 } airplay_txt_record_t;
 
-typedef struct {
+typedef struct
+{
     const char *device_id;        /* "AA:BB:CC:DD:EE:FF" */
     const char *model;            /* e.g. "AudioAccessory5,1" */
     const char *source_version;   /* e.g. "950.7.1" */
@@ -25,7 +27,7 @@ typedef struct {
 } airplay_txt_config_t;
 
 #define AIRPLAY_TXT_DEFAULT_FEATURES "0x5203a4e2,0x61"
-#define AIRPLAY_TXT_DEFAULT_FLAGS "0x4"
+#define AIRPLAY_TXT_DEFAULT_FLAGS    "0x4"
 
 /*
  * Fills the Bonjour TXT record set advertised by the _airplay._tcp service.

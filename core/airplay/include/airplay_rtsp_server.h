@@ -16,9 +16,9 @@
 #include "rtcp/os.h"
 #include "rtcp/receiver.h"
 
-#define AIRPLAY_RTSP_DEFAULT_PORT 7000U
+#define AIRPLAY_RTSP_DEFAULT_PORT                 7000U
 #define AIRPLAY_RTSP_SERVER_SCREEN_MAX_BODY_BYTES (512U * 1024U)
-#define AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS AIRPLAY_AUDIO_MAX_STREAMS
+#define AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS     AIRPLAY_AUDIO_MAX_STREAMS
 
 /*
  * Single-controller AirPlay RTSP server.  It owns the listening socket, the
@@ -34,7 +34,8 @@ typedef struct airplay_rtsp_server airplay_rtsp_server_t;
 
 typedef void (*airplay_rtsp_event_state_cb_t)(bool connected, void *context);
 
-typedef struct airplay_rtsp_server_config {
+typedef struct airplay_rtsp_server_config
+{
     const struct rtcp_os *os;
     const struct rtcp_net *net;
     airplay_rtsp_pairing_config_t pairing;
@@ -107,7 +108,7 @@ bool airplay_rtsp_server_is_connected(const airplay_rtsp_server_t *server);
 bool airplay_rtsp_server_is_encrypted(const airplay_rtsp_server_t *server);
 /* Poll-owner observation only; preserves running/generation/last_error. */
 void airplay_rtsp_server_get_receiver_state(const airplay_rtsp_server_t *,
-                                           rtcp_receiver_state_t *);
+                                            rtcp_receiver_state_t *);
 
 /* Address of the currently attached RTSP client, when it is IPv4 or IPv6.
  * The CarPlay Control browser uses an IPv4 peer to address a unicast mDNS
@@ -122,7 +123,7 @@ void airplay_rtsp_server_get_alt_video_status(const airplay_rtsp_server_t *, rtc
 int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms);
 /* Snapshot on the server thread, like the other server APIs. */
 void airplay_rtsp_server_get_screen_stats(const airplay_rtsp_server_t *server,
-                                         airplay_screen_server_stats_t *stats);
+                                          airplay_screen_server_stats_t *stats);
 
 /* Sends one encrypted HID report over the event channel.  Returns false when
  * the controller has not attached or the channel has failed.  Like the rest
@@ -148,7 +149,7 @@ bool airplay_rtsp_server_send_iap(airplay_rtsp_server_t *, const uint8_t *, size
 int airplay_rtsp_server_send_data_stream(airplay_rtsp_server_t *, rtcp_data_stream_kind_t,
                                          const uint8_t *, size_t);
 int airplay_rtsp_server_get_data_stream_status(const airplay_rtsp_server_t *,
-    rtcp_data_stream_kind_t, rtcp_data_stream_status_t *);
+                                               rtcp_data_stream_kind_t, rtcp_data_stream_status_t *);
 
 /* RTSP owner only; sends documented requestSiri down/up actions on event. */
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *);

@@ -7,7 +7,8 @@
 
 #define AIRPLAY_BPLIST_MAX_OBJECTS 4096U
 
-typedef struct {
+typedef struct
+{
     const uint8_t *bytes;
     size_t length;
     size_t trailer_offset;
@@ -19,11 +20,13 @@ typedef struct {
     bool valid;
 } airplay_bplist_doc_t;
 
-typedef struct {
+typedef struct
+{
     uint64_t id;
 } airplay_bplist_object_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_BPLIST_OK = 0,
     AIRPLAY_BPLIST_INVALID_ARGUMENT,
     AIRPLAY_BPLIST_INVALID_DOCUMENT,
@@ -34,7 +37,8 @@ typedef enum {
     AIRPLAY_BPLIST_OUTPUT_TOO_SMALL,
 } airplay_bplist_result_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_BPLIST_NULL = 0,
     AIRPLAY_BPLIST_BOOL,
     AIRPLAY_BPLIST_INTEGER,
@@ -118,11 +122,12 @@ airplay_bplist_result_t airplay_bplist_build_empty_stream_setup_response(
  * {type, dataPort}; audio streams add controlPort and streamConnectionID. */
 #define AIRPLAY_BPLIST_MAX_SETUP_STREAMS 8U
 
-typedef struct {
+typedef struct
+{
     uint64_t stream_type;
     uint16_t data_port;
     uint16_t control_port; /* 0 omits controlPort (screen stream). */
-    uint32_t stream_id; /* nonzero adds streamID (iAP tunnel = 1) */
+    uint32_t stream_id;    /* nonzero adds streamID (iAP tunnel = 1) */
     bool has_connection_id;
     uint64_t stream_connection_id;
 } airplay_bplist_stream_entry_t;
@@ -140,7 +145,12 @@ airplay_bplist_result_t airplay_bplist_build_iap_command(
 /* Integer or finite IEEE754 float/double; rejects NaN/Inf and wrong types. */
 airplay_bplist_result_t airplay_bplist_get_number(const airplay_bplist_doc_t *, airplay_bplist_object_t, double *);
 
-typedef struct { uint16_t type; uint32_t sample_rate; uint64_t connection_id; } airplay_audio_feedback_t;
+typedef struct
+{
+    uint16_t type;
+    uint32_t sample_rate;
+    uint64_t connection_id;
+} airplay_audio_feedback_t;
 /* Metadata-only feedback until the sink supplies a real presentation clock.
  * Does not invent sampleTime/timestamp from wall time or received packets. */
 airplay_bplist_result_t airplay_bplist_build_audio_feedback(const airplay_audio_feedback_t *, size_t,
@@ -150,10 +160,10 @@ airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action, uint8
 /* Exact UTF-8 comparison with ASCII/UTF-16 plist text, including surrogate
  * pairs. Explicit length; malformed input never matches. */
 bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *,
-    airplay_bplist_object_t, const uint8_t *, size_t);
+                                       airplay_bplist_object_t, const uint8_t *, size_t);
 
 airplay_bplist_result_t airplay_bplist_dict_get_utf8_unique(const airplay_bplist_doc_t *,
-    airplay_bplist_object_t, const uint8_t *, size_t, airplay_bplist_object_t *);
+                                                            airplay_bplist_object_t, const uint8_t *, size_t, airplay_bplist_object_t *);
 
 /* Internal independent opt-ins; false/false retains Classic response bytes. */
 airplay_bplist_result_t airplay_bplist_build_initial_setup_response_features(

@@ -11,116 +11,855 @@
 static bool dump_video;
 
 static const uint8_t k_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
-    0xd1, 0x01, 0x02,
-    0x57, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73,
-    0xa1, 0x03,
-    0xd2, 0x04, 0x05, 0x06, 0x07,
-    0x5f, 0x10, 0x12, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
-    0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44,
-    0x54, 0x74, 0x79, 0x70, 0x65,
-    0x11, 0x30, 0x39,
-    0x10, 0x6e,
-    0x08, 0x0b, 0x13, 0x15, 0x1a, 0x2f, 0x34, 0x37,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x39,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x11,
+    0x30,
+    0x39,
+    0x10,
+    0x6e,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1a,
+    0x2f,
+    0x34,
+    0x37,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x39,
 };
 
 static const uint8_t k_initial_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
-    0xd1, 0x01, 0x02, 0x5a, 0x74, 0x69, 0x6d, 0x69,
-    0x6e, 0x67, 0x50, 0x6f, 0x72, 0x74, 0x11, 0x04,
-    0xd2, 0x08, 0x0b, 0x16, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x19,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x5a,
+    0x74,
+    0x69,
+    0x6d,
+    0x69,
+    0x6e,
+    0x67,
+    0x50,
+    0x6f,
+    0x72,
+    0x74,
+    0x11,
+    0x04,
+    0xd2,
+    0x08,
+    0x0b,
+    0x16,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x03,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x19,
 };
 
 static const uint8_t k_mixed_stream_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02,
-    0x57, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa2, 0x03, 0x08,
-    0xd2, 0x04, 0x05, 0x06, 0x07, 0x5f, 0x10, 0x12, 0x73, 0x74, 0x72,
-    0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69,
-    0x6f, 0x6e, 0x49, 0x44, 0x54, 0x74, 0x79, 0x70, 0x65, 0x11, 0x30,
-    0x39, 0x10, 0x67, 0xd2, 0x04, 0x05, 0x06, 0x09, 0x10, 0x6e, 0x08,
-    0x0b, 0x13, 0x16, 0x1b, 0x30, 0x35, 0x38, 0x3a, 0x3f, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa2,
+    0x03,
+    0x08,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x11,
+    0x30,
+    0x39,
+    0x10,
+    0x67,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x09,
+    0x10,
+    0x6e,
+    0x08,
+    0x0b,
+    0x13,
+    0x16,
+    0x1b,
+    0x30,
+    0x35,
+    0x38,
+    0x3a,
+    0x3f,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x41,
 };
 
 static const uint8_t k_unsupported_stream_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02,
-    0x57, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd2,
-    0x04, 0x05, 0x06, 0x07, 0x5f, 0x10, 0x12, 0x73, 0x74, 0x72, 0x65,
-    0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f,
-    0x6e, 0x49, 0x44, 0x54, 0x74, 0x79, 0x70, 0x65, 0x11, 0x30, 0x39,
-    0x10, 0x67, 0x08, 0x0b, 0x13, 0x15, 0x1a, 0x2f, 0x34, 0x37, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x39,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x11,
+    0x30,
+    0x39,
+    0x10,
+    0x67,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1a,
+    0x2f,
+    0x34,
+    0x37,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x39,
 };
 
 /* {"streams":[{"type":100,"streamConnectionID":777,"audioFormat":2048}]} */
 static const uint8_t k_audio_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
-    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd3, 0x04, 0x05,
-    0x06, 0x07, 0x08, 0x09, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12,
-    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63,
-    0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x5b, 0x61, 0x75, 0x64, 0x69, 0x6f,
-    0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x10, 0x64, 0x11, 0x03, 0x09, 0x11,
-    0x08, 0x00, 0x08, 0x0b, 0x13, 0x15, 0x1c, 0x21, 0x36, 0x42, 0x44, 0x47,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4a,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd3,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x09,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x5b,
+    0x61,
+    0x75,
+    0x64,
+    0x69,
+    0x6f,
+    0x46,
+    0x6f,
+    0x72,
+    0x6d,
+    0x61,
+    0x74,
+    0x10,
+    0x64,
+    0x11,
+    0x03,
+    0x09,
+    0x11,
+    0x08,
+    0x00,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1c,
+    0x21,
+    0x36,
+    0x42,
+    0x44,
+    0x47,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x4a,
 };
 
 /* {"streams":[{"type":101,"streamConnectionID":778,"audioFormat":1024}]} */
 static const uint8_t k_audio_alt_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
-    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd3, 0x04, 0x05,
-    0x06, 0x07, 0x08, 0x09, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12,
-    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63,
-    0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x5b, 0x61, 0x75, 0x64, 0x69, 0x6f,
-    0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x10, 0x65, 0x11, 0x03, 0x0a, 0x11,
-    0x04, 0x00, 0x08, 0x0b, 0x13, 0x15, 0x1c, 0x21, 0x36, 0x42, 0x44, 0x47,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4a,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd3,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x09,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x5b,
+    0x61,
+    0x75,
+    0x64,
+    0x69,
+    0x6f,
+    0x46,
+    0x6f,
+    0x72,
+    0x6d,
+    0x61,
+    0x74,
+    0x10,
+    0x65,
+    0x11,
+    0x03,
+    0x0a,
+    0x11,
+    0x04,
+    0x00,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1c,
+    0x21,
+    0x36,
+    0x42,
+    0x44,
+    0x47,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x4a,
 };
 
 /* Screen (12345) plus main audio (779, 44.1 kHz stereo) in one SETUP. */
 static const uint8_t k_screen_and_audio_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
-    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa2, 0x03, 0x08, 0xd2, 0x04,
-    0x05, 0x06, 0x07, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12, 0x73,
-    0x74, 0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74,
-    0x69, 0x6f, 0x6e, 0x49, 0x44, 0x10, 0x6e, 0x11, 0x30, 0x39, 0xd3, 0x04,
-    0x05, 0x09, 0x0a, 0x0b, 0x0c, 0x5b, 0x61, 0x75, 0x64, 0x69, 0x6f, 0x46,
-    0x6f, 0x72, 0x6d, 0x61, 0x74, 0x10, 0x64, 0x11, 0x03, 0x0b, 0x11, 0x08,
-    0x00, 0x08, 0x0b, 0x13, 0x16, 0x1b, 0x20, 0x35, 0x37, 0x3a, 0x41, 0x4d,
-    0x4f, 0x52, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa2,
+    0x03,
+    0x08,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x10,
+    0x6e,
+    0x11,
+    0x30,
+    0x39,
+    0xd3,
+    0x04,
+    0x05,
+    0x09,
+    0x0a,
+    0x0b,
+    0x0c,
+    0x5b,
+    0x61,
+    0x75,
+    0x64,
+    0x69,
+    0x6f,
+    0x46,
+    0x6f,
+    0x72,
+    0x6d,
+    0x61,
+    0x74,
+    0x10,
+    0x64,
+    0x11,
+    0x03,
+    0x0b,
+    0x11,
+    0x08,
+    0x00,
+    0x08,
+    0x0b,
+    0x13,
+    0x16,
+    0x1b,
+    0x20,
+    0x35,
+    0x37,
+    0x3a,
+    0x41,
+    0x4d,
+    0x4f,
+    0x52,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0d,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x55,
 };
 
 /* {"streams":[{"type":100,"streamConnectionID":777}]}: audioFormat is absent. */
 static const uint8_t k_audio_missing_format_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x57,
-    0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73, 0xa1, 0x03, 0xd2, 0x04, 0x05,
-    0x06, 0x07, 0x54, 0x74, 0x79, 0x70, 0x65, 0x5f, 0x10, 0x12, 0x73, 0x74,
-    0x72, 0x65, 0x61, 0x6d, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69,
-    0x6f, 0x6e, 0x49, 0x44, 0x10, 0x64, 0x11, 0x03, 0x09, 0x08, 0x0b, 0x13,
-    0x15, 0x1a, 0x1f, 0x34, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x10,
+    0x64,
+    0x11,
+    0x03,
+    0x09,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1a,
+    0x1f,
+    0x34,
+    0x36,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     0x39,
 };
 
-typedef struct {
+typedef struct
+{
     unsigned event_starts;
     unsigned timing_starts;
     unsigned event_stops;
@@ -280,9 +1019,12 @@ static bool contains_bytes(const uint8_t *bytes, size_t length,
                            const char *needle)
 {
     size_t needle_len = strlen(needle);
-    if (needle_len > length) return false;
-    for (size_t i = 0U; i <= length - needle_len; ++i) {
-        if (memcmp(bytes + i, needle, needle_len) == 0) return true;
+    if (needle_len > length)
+        return false;
+    for (size_t i = 0U; i <= length - needle_len; ++i)
+    {
+        if (memcmp(bytes + i, needle, needle_len) == 0)
+            return true;
     }
     return false;
 }
@@ -291,9 +1033,12 @@ static const uint8_t *find_bytes(const uint8_t *bytes, size_t length,
                                  const char *needle)
 {
     size_t needle_len = strlen(needle);
-    if (needle_len > length) return NULL;
-    for (size_t i = 0U; i <= length - needle_len; ++i) {
-        if (memcmp(bytes + i, needle, needle_len) == 0) return bytes + i;
+    if (needle_len > length)
+        return NULL;
+    for (size_t i = 0U; i <= length - needle_len; ++i)
+    {
+        if (memcmp(bytes + i, needle, needle_len) == 0)
+            return bytes + i;
     }
     return NULL;
 }
@@ -301,9 +1046,11 @@ static const uint8_t *find_bytes(const uint8_t *bytes, size_t length,
 static bool replace_setup_connection_id(uint8_t *plist, size_t plist_len,
                                         uint16_t connection_id)
 {
-    for (size_t index = 0U; index + 4U < plist_len; ++index) {
+    for (size_t index = 0U; index + 4U < plist_len; ++index)
+    {
         if (plist[index] == 0x11U && plist[index + 3U] == 0x10U &&
-            plist[index + 4U] == 0x6eU) {
+            plist[index + 4U] == 0x6eU)
+        {
             plist[index + 1U] = (uint8_t)(connection_id >> 8U);
             plist[index + 2U] = (uint8_t)connection_id;
             return true;
@@ -315,7 +1062,7 @@ static bool replace_setup_connection_id(uint8_t *plist, size_t plist_len,
 static void test_info_and_setup_gates(void)
 {
     static const uint8_t identifier[] = "test-accessory";
-    static const uint8_t public_key[32] = {0};
+    static const uint8_t public_key[32] = { 0 };
     airplay_rtsp_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.pairing.pair_setup.pairing_code = "external-test-code";
@@ -388,8 +1135,8 @@ static void test_info_and_setup_gates(void)
 static void test_initial_setup_timing_and_event_ports(void)
 {
     static const uint8_t identifier[] = "test-accessory";
-    static const uint8_t public_key[32] = {0};
-    test_ports_t ports = {0};
+    static const uint8_t public_key[32] = { 0 };
+    test_ports_t ports = { 0 };
     airplay_rtsp_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.pairing.pair_setup.pairing_code = "external-test-code";
@@ -463,7 +1210,8 @@ static void test_initial_setup_timing_and_event_ports(void)
                                        &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
     assert(contains_bytes(response, response_len, "200 OK"));
     request = parse_request("RECORD /stream RTSP/1.0\r\nCSeq: 6\r\n\r\n");
-    for (unsigned attempt = 0U; attempt < 2U; ++attempt) {
+    for (unsigned attempt = 0U; attempt < 2U; ++attempt)
+    {
         assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response),
                                            &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
         assert(contains_bytes(response, response_len, "200 OK"));
@@ -486,8 +1234,8 @@ static void test_initial_setup_timing_and_event_ports(void)
 static void test_screen_key_lifecycle(void)
 {
     static const uint8_t identifier[] = "test-accessory";
-    static const uint8_t public_key[32] = {0};
-    test_ports_t ports = {0};
+    static const uint8_t public_key[32] = { 0 };
+    test_ports_t ports = { 0 };
     airplay_rtsp_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.pairing.pair_setup.pairing_code = "external-test-code";
@@ -626,7 +1374,7 @@ static void test_screen_key_lifecycle(void)
     uint8_t different_key_id_plist[sizeof(k_setup_plist)];
     memcpy(different_key_id_plist, k_setup_plist, sizeof(different_key_id_plist));
     assert(replace_setup_connection_id(different_key_id_plist,
-                                      sizeof(different_key_id_plist), 12346U));
+                                       sizeof(different_key_id_plist), 12346U));
     request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 17\r\n\r\n");
     request.body = different_key_id_plist;
     request.body_len = sizeof(different_key_id_plist);
@@ -664,7 +1412,8 @@ static void expect_stream_entry(const airplay_bplist_doc_t *doc,
            AIRPLAY_BPLIST_OK);
     assert(airplay_bplist_get_uint(doc, value, &number) == AIRPLAY_BPLIST_OK);
     assert(number == data_port);
-    if (control_port == 0U) {
+    if (control_port == 0U)
+    {
         assert(airplay_bplist_dict_get(doc, entry, "controlPort", &value) ==
                AIRPLAY_BPLIST_NOT_FOUND);
         return;
@@ -682,8 +1431,8 @@ static void expect_stream_entry(const airplay_bplist_doc_t *doc,
 static void test_audio_stream_lifecycle(void)
 {
     static const uint8_t identifier[] = "test-accessory";
-    static const uint8_t public_key[32] = {0};
-    test_ports_t ports = {0};
+    static const uint8_t public_key[32] = { 0 };
+    test_ports_t ports = { 0 };
     airplay_rtsp_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.pairing.pair_setup.pairing_code = "external-test-code";
@@ -857,7 +1606,8 @@ static void test_audio_stream_lifecycle(void)
     assert(ports.audio_stops == 3U); /* the alt stream */
 }
 
-typedef struct {
+typedef struct
+{
     unsigned calls;
     float last_db;
 } volume_capture_t;
@@ -872,8 +1622,8 @@ static void test_volume(float volume_db, void *context)
 static void test_set_parameter_volume(void)
 {
     static const uint8_t identifier[] = "test-accessory";
-    static const uint8_t public_key[32] = {0};
-    volume_capture_t capture = {0};
+    static const uint8_t public_key[32] = { 0 };
+    volume_capture_t capture = { 0 };
     airplay_rtsp_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.pairing.pair_setup.pairing_code = "external-test-code";
@@ -983,424 +1733,1488 @@ static void test_set_parameter_volume(void)
     airplay_rtsp_session_destroy(session);
 }
 
-
 static const uint8_t k_iap_setup[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd1,0x01,0x02,0x57,0x73,0x74,0x72,0x65,
-    0x61,0x6d,0x73,0xa1,0x03,0xd4,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x54,0x74,
-    0x79,0x70,0x65,0x5e,0x63,0x6c,0x69,0x65,0x6e,0x74,0x54,0x79,0x70,0x65,0x55,0x55,
-    0x49,0x44,0x54,0x73,0x65,0x65,0x64,0x5f,0x10,0x12,0x73,0x74,0x72,0x65,0x61,0x6d,
-    0x43,0x6f,0x6e,0x6e,0x65,0x63,0x74,0x69,0x6f,0x6e,0x49,0x44,0x10,0x82,0x5f,0x10,
-    0x24,0x45,0x39,0x34,0x35,0x39,0x46,0x44,0x30,0x2d,0x42,0x43,0x41,0x44,0x2d,0x34,
-    0x43,0x34,0x35,0x2d,0x38,0x32,0x30,0x46,0x2d,0x31,0x45,0x37,0x32,0x34,0x34,0x37,
-    0x45,0x46,0x32,0x46,0x32,0x13,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x10,0x7b,
-    0x08,0x0b,0x13,0x15,0x1e,0x23,0x32,0x37,0x4c,0x4e,0x75,0x7e,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x0c,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd4,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x09,
+    0x0a,
+    0x0b,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x5e,
+    0x63,
+    0x6c,
+    0x69,
+    0x65,
+    0x6e,
+    0x74,
+    0x54,
+    0x79,
+    0x70,
+    0x65,
+    0x55,
+    0x55,
+    0x49,
+    0x44,
+    0x54,
+    0x73,
+    0x65,
+    0x65,
+    0x64,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x10,
+    0x82,
+    0x5f,
+    0x10,
+    0x24,
+    0x45,
+    0x39,
+    0x34,
+    0x35,
+    0x39,
+    0x46,
+    0x44,
+    0x30,
+    0x2d,
+    0x42,
+    0x43,
+    0x41,
+    0x44,
+    0x2d,
+    0x34,
+    0x43,
+    0x34,
+    0x35,
+    0x2d,
+    0x38,
+    0x32,
+    0x30,
+    0x46,
+    0x2d,
+    0x31,
+    0x45,
+    0x37,
+    0x32,
+    0x34,
+    0x34,
+    0x37,
+    0x45,
+    0x46,
+    0x32,
+    0x46,
+    0x32,
+    0x13,
+    0xff,
+    0xff,
+    0xff,
+    0xff,
+    0xff,
+    0xff,
+    0xff,
+    0xff,
+    0x10,
+    0x7b,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1e,
+    0x23,
+    0x32,
+    0x37,
+    0x4c,
+    0x4e,
+    0x75,
+    0x7e,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0c,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x80,
 };
 static const uint8_t k_iap_new_seed[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd1,0x01,0x02,0x57,0x73,0x74,0x72,0x65,
-    0x61,0x6d,0x73,0xa1,0x03,0xd3,0x04,0x05,0x06,0x07,0x08,0x09,0x54,0x74,0x79,0x70,
-    0x65,0x5e,0x63,0x6c,0x69,0x65,0x6e,0x74,0x54,0x79,0x70,0x65,0x55,0x55,0x49,0x44,
-    0x54,0x73,0x65,0x65,0x64,0x10,0x82,0x5f,0x10,0x24,0x45,0x39,0x34,0x35,0x39,0x46,
-    0x44,0x30,0x2d,0x42,0x43,0x41,0x44,0x2d,0x34,0x43,0x34,0x35,0x2d,0x38,0x32,0x30,
-    0x46,0x2d,0x31,0x45,0x37,0x32,0x34,0x34,0x37,0x45,0x46,0x32,0x46,0x32,0x10,0x02,
-    0x08,0x0b,0x13,0x15,0x1c,0x21,0x30,0x35,0x37,0x5e,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x0a,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x60,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd3,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x09,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x5e,
+    0x63,
+    0x6c,
+    0x69,
+    0x65,
+    0x6e,
+    0x74,
+    0x54,
+    0x79,
+    0x70,
+    0x65,
+    0x55,
+    0x55,
+    0x49,
+    0x44,
+    0x54,
+    0x73,
+    0x65,
+    0x65,
+    0x64,
+    0x10,
+    0x82,
+    0x5f,
+    0x10,
+    0x24,
+    0x45,
+    0x39,
+    0x34,
+    0x35,
+    0x39,
+    0x46,
+    0x44,
+    0x30,
+    0x2d,
+    0x42,
+    0x43,
+    0x41,
+    0x44,
+    0x2d,
+    0x34,
+    0x43,
+    0x34,
+    0x35,
+    0x2d,
+    0x38,
+    0x32,
+    0x30,
+    0x46,
+    0x2d,
+    0x31,
+    0x45,
+    0x37,
+    0x32,
+    0x34,
+    0x34,
+    0x37,
+    0x45,
+    0x46,
+    0x32,
+    0x46,
+    0x32,
+    0x10,
+    0x02,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1c,
+    0x21,
+    0x30,
+    0x35,
+    0x37,
+    0x5e,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x60,
 };
 static const uint8_t k_iap_bad_uuid[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd1,0x01,0x02,0x57,0x73,0x74,0x72,0x65,
-    0x61,0x6d,0x73,0xa1,0x03,0xd3,0x04,0x05,0x06,0x07,0x08,0x09,0x54,0x74,0x79,0x70,
-    0x65,0x5e,0x63,0x6c,0x69,0x65,0x6e,0x74,0x54,0x79,0x70,0x65,0x55,0x55,0x49,0x44,
-    0x54,0x73,0x65,0x65,0x64,0x10,0x82,0x5b,0x75,0x6e,0x73,0x75,0x70,0x70,0x6f,0x72,
-    0x74,0x65,0x64,0x10,0x01,0x08,0x0b,0x13,0x15,0x1c,0x21,0x30,0x35,0x37,0x43,0x00,
-    0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x0a,0x00,
-    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x45,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd3,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x09,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x5e,
+    0x63,
+    0x6c,
+    0x69,
+    0x65,
+    0x6e,
+    0x74,
+    0x54,
+    0x79,
+    0x70,
+    0x65,
+    0x55,
+    0x55,
+    0x49,
+    0x44,
+    0x54,
+    0x73,
+    0x65,
+    0x65,
+    0x64,
+    0x10,
+    0x82,
+    0x5b,
+    0x75,
+    0x6e,
+    0x73,
+    0x75,
+    0x70,
+    0x70,
+    0x6f,
+    0x72,
+    0x74,
+    0x65,
+    0x64,
+    0x10,
+    0x01,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1c,
+    0x21,
+    0x30,
+    0x35,
+    0x37,
+    0x43,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x45,
 };
 static const uint8_t k_iap_stop[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd1,0x01,0x02,0x57,0x73,0x74,0x72,0x65,
-    0x61,0x6d,0x73,0xa1,0x03,0xd2,0x04,0x05,0x06,0x07,0x54,0x74,0x79,0x70,0x65,0x58,
-    0x73,0x74,0x72,0x65,0x61,0x6d,0x49,0x44,0x10,0x82,0x10,0x01,0x08,0x0b,0x13,0x15,
-    0x1a,0x1f,0x28,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x2c,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x58,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x49,
+    0x44,
+    0x10,
+    0x82,
+    0x10,
+    0x01,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1a,
+    0x1f,
+    0x28,
+    0x2a,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x2c,
 };
 static const uint8_t k_iap_other_stop[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd1,0x01,0x02,0x57,0x73,0x74,0x72,0x65,
-    0x61,0x6d,0x73,0xa1,0x03,0xd2,0x04,0x05,0x06,0x07,0x54,0x74,0x79,0x70,0x65,0x58,
-    0x73,0x74,0x72,0x65,0x61,0x6d,0x49,0x44,0x10,0x82,0x10,0x02,0x08,0x0b,0x13,0x15,
-    0x1a,0x1f,0x28,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x2c,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x58,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x49,
+    0x44,
+    0x10,
+    0x82,
+    0x10,
+    0x02,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1a,
+    0x1f,
+    0x28,
+    0x2a,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x2c,
 };
 static const uint8_t k_modes[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd2,0x01,0x02,0x03,0x04,0x54,0x74,0x79,
-    0x70,0x65,0x56,0x70,0x61,0x72,0x61,0x6d,0x73,0x5c,0x6d,0x6f,0x64,0x65,0x73,0x43,
-    0x68,0x61,0x6e,0x67,0x65,0x64,0xd2,0x05,0x06,0x07,0x08,0x59,0x61,0x70,0x70,0x53,
-    0x74,0x61,0x74,0x65,0x73,0x59,0x72,0x65,0x73,0x6f,0x75,0x72,0x63,0x65,0x73,0xa0,
-    0xa0,0x08,0x0d,0x12,0x19,0x26,0x2b,0x35,0x3f,0x40,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x41,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd2,
+    0x01,
+    0x02,
+    0x03,
+    0x04,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x56,
+    0x70,
+    0x61,
+    0x72,
+    0x61,
+    0x6d,
+    0x73,
+    0x5c,
+    0x6d,
+    0x6f,
+    0x64,
+    0x65,
+    0x73,
+    0x43,
+    0x68,
+    0x61,
+    0x6e,
+    0x67,
+    0x65,
+    0x64,
+    0xd2,
+    0x05,
+    0x06,
+    0x07,
+    0x08,
+    0x59,
+    0x61,
+    0x70,
+    0x70,
+    0x53,
+    0x74,
+    0x61,
+    0x74,
+    0x65,
+    0x73,
+    0x59,
+    0x72,
+    0x65,
+    0x73,
+    0x6f,
+    0x75,
+    0x72,
+    0x63,
+    0x65,
+    0x73,
+    0xa0,
+    0xa0,
+    0x08,
+    0x0d,
+    0x12,
+    0x19,
+    0x26,
+    0x2b,
+    0x35,
+    0x3f,
+    0x40,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x09,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x41,
 };
 static const uint8_t k_disable[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd2,0x01,0x02,0x03,0x04,0x54,0x74,0x79,
-    0x70,0x65,0x56,0x70,0x61,0x72,0x61,0x6d,0x73,0x5f,0x10,0x10,0x64,0x69,0x73,0x61,
-    0x62,0x6c,0x65,0x42,0x6c,0x75,0x65,0x74,0x6f,0x6f,0x74,0x68,0xd1,0x05,0x06,0x58,
-    0x64,0x65,0x76,0x69,0x63,0x65,0x49,0x44,0x5f,0x10,0x11,0x41,0x41,0x3a,0x42,0x42,
-    0x3a,0x43,0x43,0x3a,0x44,0x44,0x3a,0x45,0x45,0x3a,0x46,0x46,0x08,0x0d,0x12,0x19,
-    0x2c,0x2f,0x38,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x07,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x4c,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd2,
+    0x01,
+    0x02,
+    0x03,
+    0x04,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x56,
+    0x70,
+    0x61,
+    0x72,
+    0x61,
+    0x6d,
+    0x73,
+    0x5f,
+    0x10,
+    0x10,
+    0x64,
+    0x69,
+    0x73,
+    0x61,
+    0x62,
+    0x6c,
+    0x65,
+    0x42,
+    0x6c,
+    0x75,
+    0x65,
+    0x74,
+    0x6f,
+    0x6f,
+    0x74,
+    0x68,
+    0xd1,
+    0x05,
+    0x06,
+    0x58,
+    0x64,
+    0x65,
+    0x76,
+    0x69,
+    0x63,
+    0x65,
+    0x49,
+    0x44,
+    0x5f,
+    0x10,
+    0x11,
+    0x41,
+    0x41,
+    0x3a,
+    0x42,
+    0x42,
+    0x3a,
+    0x43,
+    0x43,
+    0x3a,
+    0x44,
+    0x44,
+    0x3a,
+    0x45,
+    0x45,
+    0x3a,
+    0x46,
+    0x46,
+    0x08,
+    0x0d,
+    0x12,
+    0x19,
+    0x2c,
+    0x2f,
+    0x38,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x07,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x4c,
 };
 static const uint8_t k_bad_disable[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd2,0x01,0x02,0x03,0x04,0x54,0x74,0x79,
-    0x70,0x65,0x56,0x70,0x61,0x72,0x61,0x6d,0x73,0x5f,0x10,0x10,0x64,0x69,0x73,0x61,
-    0x62,0x6c,0x65,0x42,0x6c,0x75,0x65,0x74,0x6f,0x6f,0x74,0x68,0xd1,0x05,0x06,0x58,
-    0x64,0x65,0x76,0x69,0x63,0x65,0x49,0x44,0x10,0x7b,0x08,0x0d,0x12,0x19,0x2c,0x2f,
-    0x38,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-    0x07,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd2,
+    0x01,
+    0x02,
+    0x03,
+    0x04,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x56,
+    0x70,
+    0x61,
+    0x72,
+    0x61,
+    0x6d,
+    0x73,
+    0x5f,
+    0x10,
+    0x10,
+    0x64,
+    0x69,
+    0x73,
+    0x61,
+    0x62,
+    0x6c,
+    0x65,
+    0x42,
+    0x6c,
+    0x75,
+    0x65,
+    0x74,
+    0x6f,
+    0x6f,
+    0x74,
+    0x68,
+    0xd1,
+    0x05,
+    0x06,
+    0x58,
+    0x64,
+    0x65,
+    0x76,
+    0x69,
+    0x63,
+    0x65,
+    0x49,
+    0x44,
+    0x10,
+    0x7b,
+    0x08,
+    0x0d,
+    0x12,
+    0x19,
+    0x2c,
+    0x2f,
+    0x38,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x07,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     0x3a,
 };
 static const uint8_t k_unknown[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd2,0x01,0x02,0x03,0x04,0x54,0x74,0x79,
-    0x70,0x65,0x56,0x70,0x61,0x72,0x61,0x6d,0x73,0x5d,0x75,0x6e,0x69,0x6d,0x70,0x6c,
-    0x65,0x6d,0x65,0x6e,0x74,0x65,0x64,0xd0,0x08,0x0d,0x12,0x19,0x27,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x05,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x28,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd2,
+    0x01,
+    0x02,
+    0x03,
+    0x04,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x56,
+    0x70,
+    0x61,
+    0x72,
+    0x61,
+    0x6d,
+    0x73,
+    0x5d,
+    0x75,
+    0x6e,
+    0x69,
+    0x6d,
+    0x70,
+    0x6c,
+    0x65,
+    0x6d,
+    0x65,
+    0x6e,
+    0x74,
+    0x65,
+    0x64,
+    0xd0,
+    0x08,
+    0x0d,
+    0x12,
+    0x19,
+    0x27,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x28,
 };
 static const uint8_t k_bad_command[] = {
-    0x62,0x70,0x6c,0x69,0x73,0x74,0x30,0x30,0xd2,0x01,0x02,0x03,0x04,0x54,0x74,0x79,
-    0x70,0x65,0x56,0x70,0x61,0x72,0x61,0x6d,0x73,0x5c,0x6d,0x6f,0x64,0x65,0x73,0x43,
-    0x68,0x61,0x6e,0x67,0x65,0x64,0xa0,0x08,0x0d,0x12,0x19,0x26,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x05,0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x27,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd2,
+    0x01,
+    0x02,
+    0x03,
+    0x04,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x56,
+    0x70,
+    0x61,
+    0x72,
+    0x61,
+    0x6d,
+    0x73,
+    0x5c,
+    0x6d,
+    0x6f,
+    0x64,
+    0x65,
+    0x73,
+    0x43,
+    0x68,
+    0x61,
+    0x6e,
+    0x67,
+    0x65,
+    0x64,
+    0xa0,
+    0x08,
+    0x0d,
+    0x12,
+    0x19,
+    0x26,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x27,
 };
 
 static unsigned iap_starts, iap_stops, handoff_requests;
 static bool start_iap_test(const airplay_rtsp_pairing_t *pairing, uint64_t seed, uint16_t *port, void *context)
 {
-    (void)pairing; (void)context;
+    (void)pairing;
+    (void)context;
     assert(seed == UINT64_MAX);
-    ++iap_starts; *port = 52000; return true;
+    ++iap_starts;
+    *port = 52000;
+    return true;
 }
-static void stop_iap_test(void *context) { (void)context; ++iap_stops; }
+static void stop_iap_test(void *context)
+{
+    (void)context;
+    ++iap_stops;
+}
 static bool disable_bt_test(const char *device, void *context)
 {
     (void)context;
-    assert(!strcmp(device,"AA:BB:CC:DD:EE:FF")); ++handoff_requests; return true;
+    assert(!strcmp(device, "AA:BB:CC:DD:EE:FF"));
+    ++handoff_requests;
+    return true;
 }
 static void expect_body_status(airplay_rtsp_session_t *session, const char *method,
-    const char *path, const uint8_t *body, size_t len, const char *status)
+                               const char *path, const uint8_t *body, size_t len, const char *status)
 {
     airplay_rtsp_request_t r = parse_request("POST /stream RTSP/1.0\r\nCSeq: 77\r\n\r\n");
-    strcpy(r.method,method); strcpy(r.path,path); r.body=body; r.body_len=len;
-    uint8_t out[8192]; size_t written=0; bool cipher=false;
-    assert(airplay_rtsp_session_handle(session,&r,out,sizeof(out),&written,&cipher)==AIRPLAY_RTSP_SESSION_OK);
-    assert(contains_bytes(out,written,status));
-    if (!strcmp(method,"SETUP") && body==k_iap_setup && !strcmp(status,"200 OK")) {
+    strcpy(r.method, method);
+    strcpy(r.path, path);
+    r.body = body;
+    r.body_len = len;
+    uint8_t out[8192];
+    size_t written = 0;
+    bool cipher = false;
+    assert(airplay_rtsp_session_handle(session, &r, out, sizeof(out), &written, &cipher) == AIRPLAY_RTSP_SESSION_OK);
+    assert(contains_bytes(out, written, status));
+    if (!strcmp(method, "SETUP") && body == k_iap_setup && !strcmp(status, "200 OK"))
+    {
         /* Parse the actual response: this stream requires streamID and echoing
          * streamConnectionID, not the screen-only SETUP shape. */
-        size_t offset=0;
-        for (;offset+4<written;++offset) if (!memcmp(out+offset,"\r\n\r\n",4)) break;
-        airplay_bplist_doc_t doc; airplay_bplist_object_t root,o; uint64_t value=0;
-        assert(airplay_bplist_open(out+offset+4,written-offset-4,&doc)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_root(&doc,&root)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_dict_get(&doc,root,"streams",&o)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_array_get(&doc,o,0,&o)==AIRPLAY_BPLIST_OK);
-        root=o;
-        assert(airplay_bplist_dict_get(&doc,root,"streamID",&o)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_get_uint(&doc,o,&value)==AIRPLAY_BPLIST_OK && value==1);
-        assert(airplay_bplist_dict_get(&doc,root,"streamConnectionID",&o)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_get_uint(&doc,o,&value)==AIRPLAY_BPLIST_OK && value==123);
+        size_t offset = 0;
+        for (; offset + 4 < written; ++offset)
+            if (!memcmp(out + offset, "\r\n\r\n", 4))
+                break;
+        airplay_bplist_doc_t doc;
+        airplay_bplist_object_t root, o;
+        uint64_t value = 0;
+        assert(airplay_bplist_open(out + offset + 4, written - offset - 4, &doc) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc, root, "streams", &o) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_array_get(&doc, o, 0, &o) == AIRPLAY_BPLIST_OK);
+        root = o;
+        assert(airplay_bplist_dict_get(&doc, root, "streamID", &o) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_uint(&doc, o, &value) == AIRPLAY_BPLIST_OK && value == 1);
+        assert(airplay_bplist_dict_get(&doc, root, "streamConnectionID", &o) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_uint(&doc, o, &value) == AIRPLAY_BPLIST_OK && value == 123);
     }
 }
-#define EXPECT_IAP(method,path,name,status) expect_body_status(session,method,path,k_##name,sizeof(k_##name),status)
-static unsigned modes_seen,ducks_seen,configured_seen;
+#define EXPECT_IAP(method, path, name, status) expect_body_status(session, method, path, k_##name, sizeof(k_##name), status)
+static unsigned modes_seen, ducks_seen, configured_seen;
 static bool checking_resources;
 static airplay_audio_modes_t last_resource_modes;
-static void audio_modes_test(const airplay_audio_modes_t *m,void *context)
+static void audio_modes_test(const airplay_audio_modes_t *m, void *context)
 {
-    if (checking_resources) { last_resource_modes = *m; return; }
-    (void)context;if(!m->has_call && !m->has_speech && !m->has_main_audio)return;
+    if (checking_resources)
+    {
+        last_resource_modes = *m;
+        return;
+    }
+    (void)context;
+    if (!m->has_call && !m->has_speech && !m->has_main_audio)
+        return;
     ++modes_seen;
-    assert(m->has_call && m->call_active && m->has_speech && m->speech_mode==2);
-    assert(m->has_main_audio && m->main_audio_entity==1);
+    assert(m->has_call && m->call_active && m->has_speech && m->speech_mode == 2);
+    assert(m->has_main_audio && m->main_audio_entity == 1);
 }
-static bool audio_duck_test(bool ducked,float db,uint32_t duration,void *context)
+static bool audio_duck_test(bool ducked, float db, uint32_t duration, void *context)
 {
-    (void)context;++ducks_seen;
-    assert(ducked ? db== -18 && duration==250 : db==0 && duration==100);return true;
+    (void)context;
+    ++ducks_seen;
+    assert(ducked ? db == -18 && duration == 250 : db == 0 && duration == 100);
+    return true;
 }
-static bool configure_audio_test(const airplay_rtsp_pairing_t *p,uint16_t type,const airplay_audio_options_t *o,void *context)
+static bool configure_audio_test(const airplay_rtsp_pairing_t *p, uint16_t type, const airplay_audio_options_t *o, void *context)
 {
-    (void)p;(void)context;++configured_seen;
-    assert(type==100);
-    if (o->connection_id==9001) { assert(!o->input && !strcmp(o->audio_type,"media")); return true; }
-    assert(o->input && o->input_port==50000 && o->frames_per_packet==960);
-    assert(o->connection_id==9000 && !strcmp(o->audio_type,"speechRecognition"));return true;
+    (void)p;
+    (void)context;
+    ++configured_seen;
+    assert(type == 100);
+    if (o->connection_id == 9001)
+    {
+        assert(!o->input && !strcmp(o->audio_type, "media"));
+        return true;
+    }
+    assert(o->input && o->input_port == 50000 && o->frames_per_packet == 960);
+    assert(o->connection_id == 9000 && !strcmp(o->audio_type, "speechRecognition"));
+    return true;
 }
-static bool start_audio_extended_test(const airplay_rtsp_pairing_t *p,uint16_t type,
-    const airplay_audio_options_t *o,uint16_t *data,uint16_t *ctrl,void *context)
+static bool start_audio_extended_test(const airplay_rtsp_pairing_t *p, uint16_t type,
+                                      const airplay_audio_options_t *o, uint16_t *data, uint16_t *ctrl, void *context)
 {
-    return test_start_audio(p,type,o->connection_id,o->format_bits,data,ctrl,context);
+    return test_start_audio(p, type, o->connection_id, o->format_bits, data, ctrl, context);
 }
-static void stop_audio_extended_test(uint16_t type,const airplay_audio_options_t *o,void *context)
+static void stop_audio_extended_test(uint16_t type, const airplay_audio_options_t *o, void *context)
 {
-    (void)o;test_stop_audio(type,context);
+    (void)o;
+    test_stop_audio(type, context);
 }
 static void test_iap_runtime_and_commands(void)
 {
-    static const uint8_t identifier[]="accessory", public_key[32]={0};
-    test_ports_t ports={0};
-    airplay_rtsp_session_config_t config={0};
-    config.pairing.pair_setup.pairing_code="3939";
-    config.pairing.pair_setup.accessory_identifier=identifier;
-    config.pairing.pair_setup.accessory_identifier_len=sizeof(identifier)-1;
-    config.pairing.pair_setup.accessory_public_key=public_key;
-    config.pairing.pair_setup.random=test_random;
-    config.pairing.pair_setup.sign_accessory=test_sign;
-    config.pairing.pair_setup.verify_controller=test_verify;
-    config.pairing.pair_setup.save_pairing=test_save;
-    config.pairing.pair_verify.accessory_identifier=identifier;
-    config.pairing.pair_verify.accessory_identifier_len=sizeof(identifier)-1;
-    config.pairing.pair_verify.random=test_random;
-    config.pairing.pair_verify.sign_accessory=test_sign;
-    config.pairing.pair_verify.verify_controller=test_verify;
-    config.pairing.pair_verify.lookup_controller=test_lookup;
-    config.info_plist=k_setup_plist; config.info_plist_len=sizeof(k_setup_plist);
-    config.start_event=test_start_event; config.start_timing=test_start_timing;
-    config.stop_event=test_stop_event; config.stop_timing=test_stop_timing;
-    config.media_context=&ports;
-    config.start_iap=start_iap_test; config.stop_iap=stop_iap_test;
-    config.disable_bluetooth=disable_bt_test;
-    config.on_audio_modes=audio_modes_test;config.on_audio_duck=audio_duck_test;
-    config.start_audio=test_start_audio;config.stop_audio=test_stop_audio;
-    config.configure_audio=configure_audio_test;
-    config.start_audio_ex=start_audio_extended_test;config.stop_audio_ex=stop_audio_extended_test;
-    airplay_rtsp_session_t *session=NULL;
-    assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_OK);
-    EXPECT_IAP("POST","/command",disable,"503 Service Unavailable");
-    EXPECT_IAP("SETUP","/stream",iap_setup,"503 Service Unavailable");
-    expect_body_status(session,"SETUP","/stream",k_initial_setup_plist,sizeof(k_initial_setup_plist),"200 OK");
-    EXPECT_IAP("POST","/command",modes,"200 OK");
-    EXPECT_IAP("POST","/command",voice_modes,"200 OK");assert(modes_seen==1);
-    EXPECT_IAP("POST","/command",voice_bad_modes,"400 Bad Request");assert(modes_seen==1);
-    checking_resources=true;
-    EXPECT_IAP("POST","/command",resource_modes,"200 OK");
-    assert(last_resource_modes.has_main_audio && last_resource_modes.main_audio_entity==1);
-    assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity==1);
-    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity==1);
-    assert(last_resource_modes.has_screen_permanent && last_resource_modes.screen_permanent_entity==2);
-    EXPECT_IAP("POST","/command",permanent_delta,"200 OK");
+    static const uint8_t identifier[] = "accessory", public_key[32] = { 0 };
+    test_ports_t ports = { 0 };
+    airplay_rtsp_session_config_t config = { 0 };
+    config.pairing.pair_setup.pairing_code = "3939";
+    config.pairing.pair_setup.accessory_identifier = identifier;
+    config.pairing.pair_setup.accessory_identifier_len = sizeof(identifier) - 1;
+    config.pairing.pair_setup.accessory_public_key = public_key;
+    config.pairing.pair_setup.random = test_random;
+    config.pairing.pair_setup.sign_accessory = test_sign;
+    config.pairing.pair_setup.verify_controller = test_verify;
+    config.pairing.pair_setup.save_pairing = test_save;
+    config.pairing.pair_verify.accessory_identifier = identifier;
+    config.pairing.pair_verify.accessory_identifier_len = sizeof(identifier) - 1;
+    config.pairing.pair_verify.random = test_random;
+    config.pairing.pair_verify.sign_accessory = test_sign;
+    config.pairing.pair_verify.verify_controller = test_verify;
+    config.pairing.pair_verify.lookup_controller = test_lookup;
+    config.info_plist = k_setup_plist;
+    config.info_plist_len = sizeof(k_setup_plist);
+    config.start_event = test_start_event;
+    config.start_timing = test_start_timing;
+    config.stop_event = test_stop_event;
+    config.stop_timing = test_stop_timing;
+    config.media_context = &ports;
+    config.start_iap = start_iap_test;
+    config.stop_iap = stop_iap_test;
+    config.disable_bluetooth = disable_bt_test;
+    config.on_audio_modes = audio_modes_test;
+    config.on_audio_duck = audio_duck_test;
+    config.start_audio = test_start_audio;
+    config.stop_audio = test_stop_audio;
+    config.configure_audio = configure_audio_test;
+    config.start_audio_ex = start_audio_extended_test;
+    config.stop_audio_ex = stop_audio_extended_test;
+    airplay_rtsp_session_t *session = NULL;
+    assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_OK);
+    EXPECT_IAP("POST", "/command", disable, "503 Service Unavailable");
+    EXPECT_IAP("SETUP", "/stream", iap_setup, "503 Service Unavailable");
+    expect_body_status(session, "SETUP", "/stream", k_initial_setup_plist, sizeof(k_initial_setup_plist), "200 OK");
+    EXPECT_IAP("POST", "/command", modes, "200 OK");
+    EXPECT_IAP("POST", "/command", voice_modes, "200 OK");
+    assert(modes_seen == 1);
+    EXPECT_IAP("POST", "/command", voice_bad_modes, "400 Bad Request");
+    assert(modes_seen == 1);
+    checking_resources = true;
+    EXPECT_IAP("POST", "/command", resource_modes, "200 OK");
+    assert(last_resource_modes.has_main_audio && last_resource_modes.main_audio_entity == 1);
+    assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity == 1);
+    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity == 1);
+    assert(last_resource_modes.has_screen_permanent && last_resource_modes.screen_permanent_entity == 2);
+    EXPECT_IAP("POST", "/command", permanent_delta, "200 OK");
     assert(!last_resource_modes.has_main_audio && !last_resource_modes.has_screen);
-    assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity==2);
-    EXPECT_IAP("POST","/command",screen_delta,"200 OK");
-    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity==2);
+    assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity == 2);
+    EXPECT_IAP("POST", "/command", screen_delta, "200 OK");
+    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity == 2);
     assert(!last_resource_modes.has_main_audio && !last_resource_modes.has_main_audio_permanent);
-    EXPECT_IAP("POST","/command",bad_permanent,"400 Bad Request");
-    EXPECT_IAP("POST","/command",bad_entity,"400 Bad Request");
+    EXPECT_IAP("POST", "/command", bad_permanent, "400 Bad Request");
+    EXPECT_IAP("POST", "/command", bad_entity, "400 Bad Request");
     /* Rejected deltas never reach the callback or replace the last valid report. */
-    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity==2);
-    checking_resources=false;
-    EXPECT_IAP("POST","/command",voice_duck,"200 OK");
-    EXPECT_IAP("POST","/command",voice_unduck,"200 OK");assert(ducks_seen==2);
-    EXPECT_IAP("POST","/command",voice_bad_duck,"400 Bad Request");
-    EXPECT_IAP("POST","/command",voice_bad_duration,"400 Bad Request");assert(ducks_seen==2);
-    EXPECT_IAP("SETUP","/stream",voice_bad_port,"400 Bad Request");
-    EXPECT_IAP("SETUP","/stream",duplicate_audio_keys,"400 Bad Request");assert(configured_seen==0);
-    EXPECT_IAP("SETUP","/stream",voice_setup,"200 OK");assert(configured_seen==1);
-    EXPECT_IAP("SETUP","/stream",voice_setup,"200 OK");assert(configured_seen==1);
-    EXPECT_IAP("SETUP","/stream",voice_changed_format,"400 Bad Request");
-    EXPECT_IAP("SETUP","/stream",media_setup,"200 OK");assert(configured_seen==2);
-    assert(ports.audio_starts==2);
-    EXPECT_IAP("TEARDOWN","/stream",voice_stale_stop,"200 OK");assert(ports.audio_stops==0);
-    EXPECT_IAP("TEARDOWN","/stream",voice_stop,"200 OK");assert(ports.audio_stops==1);
+    assert(last_resource_modes.has_screen && last_resource_modes.screen_entity == 2);
+    checking_resources = false;
+    EXPECT_IAP("POST", "/command", voice_duck, "200 OK");
+    EXPECT_IAP("POST", "/command", voice_unduck, "200 OK");
+    assert(ducks_seen == 2);
+    EXPECT_IAP("POST", "/command", voice_bad_duck, "400 Bad Request");
+    EXPECT_IAP("POST", "/command", voice_bad_duration, "400 Bad Request");
+    assert(ducks_seen == 2);
+    EXPECT_IAP("SETUP", "/stream", voice_bad_port, "400 Bad Request");
+    EXPECT_IAP("SETUP", "/stream", duplicate_audio_keys, "400 Bad Request");
+    assert(configured_seen == 0);
+    EXPECT_IAP("SETUP", "/stream", voice_setup, "200 OK");
+    assert(configured_seen == 1);
+    EXPECT_IAP("SETUP", "/stream", voice_setup, "200 OK");
+    assert(configured_seen == 1);
+    EXPECT_IAP("SETUP", "/stream", voice_changed_format, "400 Bad Request");
+    EXPECT_IAP("SETUP", "/stream", media_setup, "200 OK");
+    assert(configured_seen == 2);
+    assert(ports.audio_starts == 2);
+    EXPECT_IAP("TEARDOWN", "/stream", voice_stale_stop, "200 OK");
+    assert(ports.audio_stops == 0);
+    EXPECT_IAP("TEARDOWN", "/stream", voice_stop, "200 OK");
+    assert(ports.audio_stops == 1);
     /* The sibling media stream survives and duplicate setup does not restart it. */
-    EXPECT_IAP("SETUP","/stream",media_setup,"200 OK");assert(configured_seen==2);
-    expect_body_status(session,"POST","/feedback",NULL,0,"200 OK");
+    EXPECT_IAP("SETUP", "/stream", media_setup, "200 OK");
+    assert(configured_seen == 2);
+    expect_body_status(session, "POST", "/feedback", NULL, 0, "200 OK");
 
-    EXPECT_IAP("POST","/command",disable,"200 OK");
-    assert(handoff_requests==1);
-    EXPECT_IAP("POST","/command",bad_disable,"400 Bad Request");
-    EXPECT_IAP("POST","/command",bad_command,"400 Bad Request");
-    EXPECT_IAP("POST","/command",unknown,"405 Method Not Allowed");
-    assert(handoff_requests==1);
-    EXPECT_IAP("SETUP","/stream",iap_bad_uuid,"400 Bad Request");
-    EXPECT_IAP("SETUP","/stream",iap_setup,"200 OK");
-    EXPECT_IAP("SETUP","/stream",iap_setup,"200 OK");
-    assert(iap_starts==1);
-    EXPECT_IAP("SETUP","/stream",iap_new_seed,"503 Service Unavailable");
-    EXPECT_IAP("TEARDOWN","/stream",iap_other_stop,"200 OK");
-    assert(iap_stops==0);
-    EXPECT_IAP("TEARDOWN","/stream",iap_stop,"200 OK");
-    assert(iap_stops==1);
-    EXPECT_IAP("SETUP","/stream",iap_setup,"503 Service Unavailable");
+    EXPECT_IAP("POST", "/command", disable, "200 OK");
+    assert(handoff_requests == 1);
+    EXPECT_IAP("POST", "/command", bad_disable, "400 Bad Request");
+    EXPECT_IAP("POST", "/command", bad_command, "400 Bad Request");
+    EXPECT_IAP("POST", "/command", unknown, "405 Method Not Allowed");
+    assert(handoff_requests == 1);
+    EXPECT_IAP("SETUP", "/stream", iap_bad_uuid, "400 Bad Request");
+    EXPECT_IAP("SETUP", "/stream", iap_setup, "200 OK");
+    EXPECT_IAP("SETUP", "/stream", iap_setup, "200 OK");
+    assert(iap_starts == 1);
+    EXPECT_IAP("SETUP", "/stream", iap_new_seed, "503 Service Unavailable");
+    EXPECT_IAP("TEARDOWN", "/stream", iap_other_stop, "200 OK");
+    assert(iap_stops == 0);
+    EXPECT_IAP("TEARDOWN", "/stream", iap_stop, "200 OK");
+    assert(iap_stops == 1);
+    EXPECT_IAP("SETUP", "/stream", iap_setup, "503 Service Unavailable");
     airplay_rtsp_session_destroy(session);
-    assert(iap_stops==1);
+    assert(iap_stops == 1);
 }
 static bool test_start_video(const airplay_rtsp_pairing_t *pairing, uint16_t type,
-    uint64_t connection, uint16_t requested, uint16_t *port, void *context)
+                             uint64_t connection, uint16_t requested, uint16_t *port, void *context)
 {
     (void)pairing;
-    assert(type==110 || type==111);
-    unsigned slot=type-110U;
-    test_ports_t *p=context;
-    assert(requested==(slot ? 43111 : 43110));
-    ++p->video_starts[slot]; p->video_key[slot]=connection;
-    *port=p->zero_video==type ? 0 : (uint16_t)(42000+type);
-    return p->fail_video!=type;
+    assert(type == 110 || type == 111);
+    unsigned slot = type - 110U;
+    test_ports_t *p = context;
+    assert(requested == (slot ? 43111 : 43110));
+    ++p->video_starts[slot];
+    p->video_key[slot] = connection;
+    *port = p->zero_video == type ? 0 : (uint16_t)(42000 + type);
+    return p->fail_video != type;
 }
 static void test_stop_video(uint16_t type, void *context)
 {
-    assert(type==110 || type==111);
-    ++((test_ports_t *)context)->video_stops[type-110U];
+    assert(type == 110 || type == 111);
+    ++((test_ports_t *)context)->video_stops[type - 110U];
 }
 static airplay_rtsp_session_t *new_video_session(test_ports_t *ports, bool extended)
 {
-    static const uint8_t identifier[]="test-video-accessory", public_key[32]={0};
-    airplay_rtsp_session_config_t config={0};
-    config.pairing.pair_setup.pairing_code="external-test-code";
-    config.pairing.pair_setup.accessory_identifier=identifier;
-    config.pairing.pair_setup.accessory_identifier_len=sizeof(identifier)-1;
-    config.pairing.pair_setup.accessory_public_key=public_key;
-    config.pairing.pair_setup.random=test_random;
-    config.pairing.pair_setup.sign_accessory=test_sign;
-    config.pairing.pair_setup.verify_controller=test_verify;
-    config.pairing.pair_setup.save_pairing=test_save;
-    config.pairing.pair_verify.accessory_identifier=identifier;
-    config.pairing.pair_verify.accessory_identifier_len=sizeof(identifier)-1;
-    config.pairing.pair_verify.random=test_random;
-    config.pairing.pair_verify.sign_accessory=test_sign;
-    config.pairing.pair_verify.verify_controller=test_verify;
-    config.pairing.pair_verify.lookup_controller=test_lookup;
-    config.info_plist=k_setup_plist; config.info_plist_len=sizeof(k_setup_plist);
-    config.start_event=test_start_event; config.start_timing=test_start_timing;
-    config.stop_event=test_stop_event; config.stop_timing=test_stop_timing;
-    config.start_screen=test_start_screen; config.stop_screen=test_stop_screen;
-    config.start_audio=test_start_audio; config.stop_audio=test_stop_audio;
-    config.screen_requested_port=43110; config.alt_screen_requested_port=43111;
-    config.media_context=ports;
-    airplay_rtsp_session_t *session=NULL;
-    if (extended) {
-        config.start_video=test_start_video;
-        assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT && !session);
-        config.start_video=NULL; config.stop_video=test_stop_video;
-        assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT && !session);
-        config.start_video=test_start_video;
+    static const uint8_t identifier[] = "test-video-accessory", public_key[32] = { 0 };
+    airplay_rtsp_session_config_t config = { 0 };
+    config.pairing.pair_setup.pairing_code = "external-test-code";
+    config.pairing.pair_setup.accessory_identifier = identifier;
+    config.pairing.pair_setup.accessory_identifier_len = sizeof(identifier) - 1;
+    config.pairing.pair_setup.accessory_public_key = public_key;
+    config.pairing.pair_setup.random = test_random;
+    config.pairing.pair_setup.sign_accessory = test_sign;
+    config.pairing.pair_setup.verify_controller = test_verify;
+    config.pairing.pair_setup.save_pairing = test_save;
+    config.pairing.pair_verify.accessory_identifier = identifier;
+    config.pairing.pair_verify.accessory_identifier_len = sizeof(identifier) - 1;
+    config.pairing.pair_verify.random = test_random;
+    config.pairing.pair_verify.sign_accessory = test_sign;
+    config.pairing.pair_verify.verify_controller = test_verify;
+    config.pairing.pair_verify.lookup_controller = test_lookup;
+    config.info_plist = k_setup_plist;
+    config.info_plist_len = sizeof(k_setup_plist);
+    config.start_event = test_start_event;
+    config.start_timing = test_start_timing;
+    config.stop_event = test_stop_event;
+    config.stop_timing = test_stop_timing;
+    config.start_screen = test_start_screen;
+    config.stop_screen = test_stop_screen;
+    config.start_audio = test_start_audio;
+    config.stop_audio = test_stop_audio;
+    config.screen_requested_port = 43110;
+    config.alt_screen_requested_port = 43111;
+    config.media_context = ports;
+    airplay_rtsp_session_t *session = NULL;
+    if (extended)
+    {
+        config.start_video = test_start_video;
+        assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT && !session);
+        config.start_video = NULL;
+        config.stop_video = test_stop_video;
+        assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT && !session);
+        config.start_video = test_start_video;
     }
-    assert(airplay_rtsp_session_create(&config,&session)==AIRPLAY_RTSP_SESSION_OK);
+    assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_OK);
     return session;
 }
 static void video_request(airplay_rtsp_session_t *session, const char *method,
-    const uint8_t *body, size_t length, const char *status, const char *tag)
+                          const uint8_t *body, size_t length, const char *status, const char *tag)
 {
-    uint8_t response[AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES]; size_t bytes; bool cipher=false;
-    airplay_rtsp_request_t request=parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 1\r\n\r\n");
-    snprintf(request.method,sizeof(request.method),"%s",method);
-    request.body=body; request.body_len=length;
-    assert(airplay_rtsp_session_handle(session,&request,response,sizeof(response),&bytes,&cipher)==AIRPLAY_RTSP_SESSION_OK);
-    if (!contains_bytes(response,bytes,status))
-        fprintf(stderr,"two-video %s: expected %s, response %.36s\n",method,status,(char *)response);
-    assert(contains_bytes(response,bytes,status));
-    if (dump_video && tag) {
-        const uint8_t *plist=find_bytes(response,bytes,"bplist00"); assert(plist);
-        printf("VIDEOSETUP %s ",tag);
-        for (size_t i=(size_t)(plist-response);i<bytes;++i) printf("%02x",response[i]);
+    uint8_t response[AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES];
+    size_t bytes;
+    bool cipher = false;
+    airplay_rtsp_request_t request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+    snprintf(request.method, sizeof(request.method), "%s", method);
+    request.body = body;
+    request.body_len = length;
+    assert(airplay_rtsp_session_handle(session, &request, response, sizeof(response), &bytes, &cipher) == AIRPLAY_RTSP_SESSION_OK);
+    if (!contains_bytes(response, bytes, status))
+        fprintf(stderr, "two-video %s: expected %s, response %.36s\n", method, status, (char *)response);
+    assert(contains_bytes(response, bytes, status));
+    if (dump_video && tag)
+    {
+        const uint8_t *plist = find_bytes(response, bytes, "bplist00");
+        assert(plist);
+        printf("VIDEOSETUP %s ", tag);
+        for (size_t i = (size_t)(plist - response); i < bytes; ++i) printf("%02x", response[i]);
         puts("");
     }
 }
-#define VIDEO_REQUEST(s,method,fixture,status,tag) \
-    video_request(s,method,k_video_##fixture,sizeof(k_video_##fixture),status,tag)
+#define VIDEO_REQUEST(s, method, fixture, status, tag) \
+    video_request(s, method, k_video_##fixture, sizeof(k_video_##fixture), status, tag)
 static void test_two_video_sessions(void)
 {
-    test_ports_t ports={0};
-    airplay_rtsp_session_t *session=new_video_session(&ports,true);
-    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
+    test_ports_t ports = { 0 };
+    airplay_rtsp_session_t *session = new_video_session(&ports, true);
+    VIDEO_REQUEST(session, "SETUP", pair, "503 Service Unavailable", NULL);
     assert(!ports.video_starts[0] && !ports.video_starts[1]);
-    VIDEO_REQUEST(session,"SETUP",initial,"200 OK","initial");
-    VIDEO_REQUEST(session,"SETUP",duplicate,"400 Bad Request",NULL);
-    VIDEO_REQUEST(session,"SETUP",collision,"400 Bad Request",NULL);
-    VIDEO_REQUEST(session,"SETUP",video_audio_collision,"400 Bad Request",NULL);
+    VIDEO_REQUEST(session, "SETUP", initial, "200 OK", "initial");
+    VIDEO_REQUEST(session, "SETUP", duplicate, "400 Bad Request", NULL);
+    VIDEO_REQUEST(session, "SETUP", collision, "400 Bad Request", NULL);
+    VIDEO_REQUEST(session, "SETUP", video_audio_collision, "400 Bad Request", NULL);
     assert(!ports.video_starts[0] && !ports.video_starts[1]);
-    VIDEO_REQUEST(session,"SETUP",pair,"200 OK","pair");
-    assert(ports.video_starts[0]==1 && ports.video_starts[1]==1);
-    assert(ports.video_key[0]==200 && ports.video_key[1]==201);
-    VIDEO_REQUEST(session,"SETUP",pair,"200 OK",NULL);
-    assert(ports.video_starts[0]==1 && ports.video_starts[1]==1);
-    VIDEO_REQUEST(session,"SETUP",live_collision,"503 Service Unavailable",NULL);
-    VIDEO_REQUEST(session,"TEARDOWN",stale_alt_teardown,"200 OK",NULL);
+    VIDEO_REQUEST(session, "SETUP", pair, "200 OK", "pair");
+    assert(ports.video_starts[0] == 1 && ports.video_starts[1] == 1);
+    assert(ports.video_key[0] == 200 && ports.video_key[1] == 201);
+    VIDEO_REQUEST(session, "SETUP", pair, "200 OK", NULL);
+    assert(ports.video_starts[0] == 1 && ports.video_starts[1] == 1);
+    VIDEO_REQUEST(session, "SETUP", live_collision, "503 Service Unavailable", NULL);
+    VIDEO_REQUEST(session, "TEARDOWN", stale_alt_teardown, "200 OK", NULL);
     assert(!ports.video_stops[0] && !ports.video_stops[1]);
-    VIDEO_REQUEST(session,"SETUP",replaced_alt,"200 OK",NULL);
-    assert(ports.video_stops[1]==1 && ports.video_starts[1]==2 && !ports.video_stops[0]);
-    VIDEO_REQUEST(session,"TEARDOWN",alt,"200 OK",NULL); /* Old ID cannot retire replacement. */
-    assert(ports.video_stops[1]==1);
-    VIDEO_REQUEST(session,"TEARDOWN",alt_type_teardown,"200 OK",NULL);
-    assert(ports.video_stops[1]==2 && !ports.video_stops[0]);
-    VIDEO_REQUEST(session,"SETUP",alt,"503 Service Unavailable",NULL);
-    VIDEO_REQUEST(session,"SETUP",replaced_alt,"503 Service Unavailable",NULL);
-    VIDEO_REQUEST(session,"SETUP",fresh_pair,"200 OK",NULL);
-    assert(ports.video_starts[0]==2 && ports.video_starts[1]==3);
-    assert(ports.video_stops[0]==1 && ports.video_stops[1]==2);
-    uint8_t tiny[32]; size_t bytes; bool cipher=false;
-    airplay_rtsp_request_t request=parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 2\r\n\r\n");
-    request.body=k_video_other_pair; request.body_len=sizeof(k_video_other_pair);
-    assert(airplay_rtsp_session_handle(session,&request,tiny,sizeof(tiny),&bytes,&cipher)!=AIRPLAY_RTSP_SESSION_OK);
-    assert(ports.video_starts[0]==3 && ports.video_starts[1]==4);
-    assert(ports.video_stops[0]==3 && ports.video_stops[1]==4);
-    VIDEO_REQUEST(session,"SETUP",other_pair,"503 Service Unavailable",NULL);
-    video_request(session,"TEARDOWN",NULL,0,"200 OK",NULL);
+    VIDEO_REQUEST(session, "SETUP", replaced_alt, "200 OK", NULL);
+    assert(ports.video_stops[1] == 1 && ports.video_starts[1] == 2 && !ports.video_stops[0]);
+    VIDEO_REQUEST(session, "TEARDOWN", alt, "200 OK", NULL); /* Old ID cannot retire replacement. */
+    assert(ports.video_stops[1] == 1);
+    VIDEO_REQUEST(session, "TEARDOWN", alt_type_teardown, "200 OK", NULL);
+    assert(ports.video_stops[1] == 2 && !ports.video_stops[0]);
+    VIDEO_REQUEST(session, "SETUP", alt, "503 Service Unavailable", NULL);
+    VIDEO_REQUEST(session, "SETUP", replaced_alt, "503 Service Unavailable", NULL);
+    VIDEO_REQUEST(session, "SETUP", fresh_pair, "200 OK", NULL);
+    assert(ports.video_starts[0] == 2 && ports.video_starts[1] == 3);
+    assert(ports.video_stops[0] == 1 && ports.video_stops[1] == 2);
+    uint8_t tiny[32];
+    size_t bytes;
+    bool cipher = false;
+    airplay_rtsp_request_t request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 2\r\n\r\n");
+    request.body = k_video_other_pair;
+    request.body_len = sizeof(k_video_other_pair);
+    assert(airplay_rtsp_session_handle(session, &request, tiny, sizeof(tiny), &bytes, &cipher) != AIRPLAY_RTSP_SESSION_OK);
+    assert(ports.video_starts[0] == 3 && ports.video_starts[1] == 4);
+    assert(ports.video_stops[0] == 3 && ports.video_stops[1] == 4);
+    VIDEO_REQUEST(session, "SETUP", other_pair, "503 Service Unavailable", NULL);
+    video_request(session, "TEARDOWN", NULL, 0, "200 OK", NULL);
     airplay_rtsp_session_destroy(session);
-    assert(ports.video_stops[0]==3 && ports.video_stops[1]==4);
+    assert(ports.video_stops[0] == 3 && ports.video_stops[1] == 4);
     assert(!ports.screen_starts && !ports.screen_stops); /* No legacy alias. */
 
-    ports=(test_ports_t){.fail_video=111}; session=new_video_session(&ports,true);
-    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
-    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
-    assert(ports.video_starts[0]==1 && ports.video_stops[0]==1 && ports.video_starts[1]==1 && !ports.video_stops[1]);
-    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
-    assert(ports.video_starts[0]==1 && ports.video_starts[1]==1);
-    ports.fail_video=0;
-    VIDEO_REQUEST(session,"SETUP",fresh_pair,"200 OK",NULL);
+    ports = (test_ports_t){ .fail_video = 111 };
+    session = new_video_session(&ports, true);
+    VIDEO_REQUEST(session, "SETUP", initial, "200 OK", NULL);
+    VIDEO_REQUEST(session, "SETUP", pair, "503 Service Unavailable", NULL);
+    assert(ports.video_starts[0] == 1 && ports.video_stops[0] == 1 && ports.video_starts[1] == 1 && !ports.video_stops[1]);
+    VIDEO_REQUEST(session, "SETUP", pair, "503 Service Unavailable", NULL);
+    assert(ports.video_starts[0] == 1 && ports.video_starts[1] == 1);
+    ports.fail_video = 0;
+    VIDEO_REQUEST(session, "SETUP", fresh_pair, "200 OK", NULL);
     airplay_rtsp_session_destroy(session);
-    assert(ports.video_stops[0]==2 && ports.video_stops[1]==1);
+    assert(ports.video_stops[0] == 2 && ports.video_stops[1] == 1);
 
-    ports=(test_ports_t){.zero_video=111}; session=new_video_session(&ports,true);
-    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
-    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
-    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+    ports = (test_ports_t){ .zero_video = 111 };
+    session = new_video_session(&ports, true);
+    VIDEO_REQUEST(session, "SETUP", initial, "200 OK", NULL);
+    VIDEO_REQUEST(session, "SETUP", pair, "503 Service Unavailable", NULL);
+    assert(ports.video_stops[0] == 1 && ports.video_stops[1] == 1);
     airplay_rtsp_session_destroy(session);
-    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+    assert(ports.video_stops[0] == 1 && ports.video_stops[1] == 1);
 
-    ports=(test_ports_t){.fail_video=111}; session=new_video_session(&ports,true);
-    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
-    VIDEO_REQUEST(session,"SETUP",main,"200 OK",NULL);
-    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
-    assert(ports.video_starts[0]==1 && !ports.video_stops[0]); /* Idempotent Main survives. */
+    ports = (test_ports_t){ .fail_video = 111 };
+    session = new_video_session(&ports, true);
+    VIDEO_REQUEST(session, "SETUP", initial, "200 OK", NULL);
+    VIDEO_REQUEST(session, "SETUP", main, "200 OK", NULL);
+    VIDEO_REQUEST(session, "SETUP", pair, "503 Service Unavailable", NULL);
+    assert(ports.video_starts[0] == 1 && !ports.video_stops[0]); /* Idempotent Main survives. */
     airplay_rtsp_session_destroy(session);
-    assert(ports.video_stops[0]==1 && !ports.video_stops[1]);
+    assert(ports.video_stops[0] == 1 && !ports.video_stops[1]);
 
-    ports=(test_ports_t){.fail_video=110}; session=new_video_session(&ports,true);
-    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
-    VIDEO_REQUEST(session,"SETUP",pair,"503 Service Unavailable",NULL);
-    assert(ports.video_starts[0]==1 && !ports.video_starts[1]);
-    ports.fail_video=0;
-    VIDEO_REQUEST(session,"SETUP",alt,"503 Service Unavailable",NULL); /* Reserved unused sibling key stays retired. */
-    VIDEO_REQUEST(session,"SETUP",fresh_pair,"200 OK",NULL);
+    ports = (test_ports_t){ .fail_video = 110 };
+    session = new_video_session(&ports, true);
+    VIDEO_REQUEST(session, "SETUP", initial, "200 OK", NULL);
+    VIDEO_REQUEST(session, "SETUP", pair, "503 Service Unavailable", NULL);
+    assert(ports.video_starts[0] == 1 && !ports.video_starts[1]);
+    ports.fail_video = 0;
+    VIDEO_REQUEST(session, "SETUP", alt, "503 Service Unavailable", NULL); /* Reserved unused sibling key stays retired. */
+    VIDEO_REQUEST(session, "SETUP", fresh_pair, "200 OK", NULL);
     airplay_rtsp_session_destroy(session);
-    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+    assert(ports.video_stops[0] == 1 && ports.video_stops[1] == 1);
 
-    ports=(test_ports_t){.fail_audio=true}; session=new_video_session(&ports,true);
-    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
-    VIDEO_REQUEST(session,"SETUP",pair_audio,"503 Service Unavailable",NULL);
-    assert(ports.audio_starts==1 && ports.video_stops[0]==1 && ports.video_stops[1]==1);
-    VIDEO_REQUEST(session,"SETUP",pair_audio,"503 Service Unavailable",NULL);
-    assert(ports.audio_starts==1 && ports.video_starts[0]==1 && ports.video_starts[1]==1);
+    ports = (test_ports_t){ .fail_audio = true };
+    session = new_video_session(&ports, true);
+    VIDEO_REQUEST(session, "SETUP", initial, "200 OK", NULL);
+    VIDEO_REQUEST(session, "SETUP", pair_audio, "503 Service Unavailable", NULL);
+    assert(ports.audio_starts == 1 && ports.video_stops[0] == 1 && ports.video_stops[1] == 1);
+    VIDEO_REQUEST(session, "SETUP", pair_audio, "503 Service Unavailable", NULL);
+    assert(ports.audio_starts == 1 && ports.video_starts[0] == 1 && ports.video_starts[1] == 1);
     airplay_rtsp_session_destroy(session);
-    assert(ports.video_stops[0]==1 && ports.video_stops[1]==1);
+    assert(ports.video_stops[0] == 1 && ports.video_stops[1] == 1);
 
-    ports=(test_ports_t){0}; session=new_video_session(&ports,false);
-    VIDEO_REQUEST(session,"SETUP",initial,"200 OK",NULL);
-    VIDEO_REQUEST(session,"SETUP",alt,"200 OK","legacy");
+    ports = (test_ports_t){ 0 };
+    session = new_video_session(&ports, false);
+    VIDEO_REQUEST(session, "SETUP", initial, "200 OK", NULL);
+    VIDEO_REQUEST(session, "SETUP", alt, "200 OK", "legacy");
     airplay_rtsp_session_destroy(session);
     assert(!ports.screen_starts && !ports.screen_stops && !ports.video_starts[1]);
 }
@@ -1408,7 +3222,7 @@ static void test_two_video_sessions(void)
 
 int main(int argc, char **argv)
 {
-    dump_video=argc==2 && !strcmp(argv[1],"--dump");
+    dump_video = argc == 2 && !strcmp(argv[1], "--dump");
     test_two_video_sessions();
     test_iap_runtime_and_commands();
     test_info_and_setup_gates();

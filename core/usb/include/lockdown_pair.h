@@ -22,12 +22,13 @@
 
 #include "rtcp/rtcp.h"
 
-#define RTCP_PAIR_UUID_CHARS 37U
-#define RTCP_PAIR_DEVICE_KEY_MAX 2048U
+#define RTCP_PAIR_UUID_CHARS      37U
+#define RTCP_PAIR_DEVICE_KEY_MAX  2048U
 #define RTCP_PAIR_CERTIFICATE_MAX 2048U
 #define RTCP_PAIR_PRIVATE_KEY_MAX 4096U
 
-typedef struct {
+typedef struct
+{
     char host_id[RTCP_PAIR_UUID_CHARS];
     char system_buid[RTCP_PAIR_UUID_CHARS];
     char wifi_address[24];

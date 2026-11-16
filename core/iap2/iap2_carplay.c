@@ -41,12 +41,14 @@ static bool append_parameter(uint8_t *out, size_t capacity, size_t *used,
 {
     if (out == NULL || used == NULL || (payload == NULL && payload_len != 0) ||
         payload_len > UINT16_MAX - 4U || *used > capacity ||
-        payload_len + 4U > capacity - *used) {
+        payload_len + 4U > capacity - *used)
+    {
         return false;
     }
     write_be16(out + *used, (uint16_t)(payload_len + 4U));
     write_be16(out + *used + 2U, id);
-    if (payload_len != 0) {
+    if (payload_len != 0)
+    {
         memcpy(out + *used + 4U, payload, payload_len);
     }
     *used += payload_len + 4U;
@@ -56,7 +58,8 @@ static bool append_parameter(uint8_t *out, size_t capacity, size_t *used,
 static bool append_string(uint8_t *out, size_t capacity, size_t *used,
                           uint16_t id, const char *value)
 {
-    if (value == NULL) {
+    if (value == NULL)
+    {
         return false;
     }
     size_t len = strlen(value);
@@ -76,20 +79,23 @@ bool iap2_carplay_build_wifi_configuration(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (output_len != NULL) {
+    if (output_len != NULL)
+    {
         *output_len = 0;
     }
     if (config == NULL || output == NULL || output_len == NULL ||
         config->ssid == NULL || config->passphrase == NULL ||
         config->ssid[0] == '\0' || !channel_is_valid(config->channel) ||
         config->security_type > 4 ||
-        (config->security_type != 0 && config->passphrase[0] == '\0')) {
+        (config->security_type != 0 && config->passphrase[0] == '\0'))
+    {
         return false;
     }
     size_t ssid_len = strlen(config->ssid);
     size_t passphrase_len = strlen(config->passphrase);
     if (ssid_len > 32U || passphrase_len > 63U ||
-        (config->security_type != 0 && passphrase_len < 8U)) {
+        (config->security_type != 0 && passphrase_len < 8U))
+    {
         return false;
     }
 
@@ -99,7 +105,8 @@ bool iap2_carplay_build_wifi_configuration(
         !append_string(output, output_capacity, &used, 1, config->ssid) ||
         !append_string(output, output_capacity, &used, 2, config->passphrase) ||
         !append_u8(output, output_capacity, &used, 3, config->security_type) ||
-        !append_u8(output, output_capacity, &used, 4, config->channel)) {
+        !append_u8(output, output_capacity, &used, 4, config->channel))
+    {
         return false;
     }
     *output_len = used;
@@ -112,7 +119,8 @@ bool iap2_carplay_build_start_session(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (output_len != NULL) {
+    if (output_len != NULL)
+    {
         *output_len = 0;
     }
     if (config == NULL || output == NULL || output_len == NULL ||
@@ -124,14 +132,16 @@ bool iap2_carplay_build_start_session(
         config->public_key[0] == '\0' || config->source_version[0] == '\0' ||
         config->device_identifier[0] == '\0' || !channel_is_valid(config->channel) ||
         config->security_type > 4 ||
-        (config->security_type != 0 && config->passphrase[0] == '\0')) {
+        (config->security_type != 0 && config->passphrase[0] == '\0'))
+    {
         return false;
     }
 
     size_t ssid_len = strlen(config->ssid);
     size_t passphrase_len = strlen(config->passphrase);
     if (ssid_len > 32U || passphrase_len > 63U ||
-        (config->security_type != 0 && passphrase_len < 8U)) {
+        (config->security_type != 0 && passphrase_len < 8U))
+    {
         return false;
     }
 
@@ -140,18 +150,22 @@ bool iap2_carplay_build_start_session(
     size_t wireless_len = 0;
     if (!append_string(wireless, sizeof(wireless), &wireless_len, 0, config->ssid) ||
         !append_string(wireless, sizeof(wireless), &wireless_len, 1, config->passphrase) ||
-        !append_u8(wireless, sizeof(wireless), &wireless_len, 2, config->channel)) {
+        !append_u8(wireless, sizeof(wireless), &wireless_len, 2, config->channel))
+    {
         return false;
     }
-    for (size_t i = 0; i < config->ip_address_count; ++i) {
+    for (size_t i = 0; i < config->ip_address_count; ++i)
+    {
         const char *address = config->ip_addresses[i];
         if (address == NULL || address[0] == '\0' || strlen(address) > 45U ||
-            !append_string(wireless, sizeof(wireless), &wireless_len, 3, address)) {
+            !append_string(wireless, sizeof(wireless), &wireless_len, 3, address))
+        {
             return false;
         }
     }
     if (!append_u8(wireless, sizeof(wireless), &wireless_len, 4, config->security_type) ||
-        !append_parameter(output, output_capacity, &used, 1, wireless, wireless_len)) {
+        !append_parameter(output, output_capacity, &used, 1, wireless, wireless_len))
+    {
         return false;
     }
 
@@ -160,7 +174,8 @@ bool iap2_carplay_build_start_session(
     if (!append_parameter(output, output_capacity, &used, 2, port, sizeof(port)) ||
         !append_string(output, output_capacity, &used, 3, config->device_identifier) ||
         !append_string(output, output_capacity, &used, 4, config->public_key) ||
-        !append_string(output, output_capacity, &used, 5, config->source_version)) {
+        !append_string(output, output_capacity, &used, 5, config->source_version))
+    {
         return false;
     }
 
@@ -174,7 +189,8 @@ bool iap2_carplay_build_start_session_wired(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (output_len != NULL) {
+    if (output_len != NULL)
+    {
         *output_len = 0;
     }
     if (config == NULL || output == NULL || output_len == NULL ||
@@ -183,7 +199,8 @@ bool iap2_carplay_build_start_session_wired(
         config->device_identifier == NULL || config->public_key == NULL ||
         config->source_version == NULL ||
         config->public_key[0] == '\0' || config->source_version[0] == '\0' ||
-        config->device_identifier[0] == '\0') {
+        config->device_identifier[0] == '\0')
+    {
         return false;
     }
 
@@ -194,14 +211,17 @@ bool iap2_carplay_build_start_session_wired(
     size_t used = 0;
     uint8_t wired[512];
     size_t wired_len = 0;
-    for (size_t i = 0; i < config->ip_address_count; ++i) {
+    for (size_t i = 0; i < config->ip_address_count; ++i)
+    {
         const char *address = config->ip_addresses[i];
         if (address == NULL || address[0] == '\0' || strlen(address) > 45U ||
-            !append_string(wired, sizeof(wired), &wired_len, 0, address)) {
+            !append_string(wired, sizeof(wired), &wired_len, 0, address))
+        {
             return false;
         }
     }
-    if (!append_parameter(output, output_capacity, &used, 0, wired, wired_len)) {
+    if (!append_parameter(output, output_capacity, &used, 0, wired, wired_len))
+    {
         return false;
     }
 
@@ -210,7 +230,8 @@ bool iap2_carplay_build_start_session_wired(
     if (!append_parameter(output, output_capacity, &used, 2, port, sizeof(port)) ||
         !append_string(output, output_capacity, &used, 3, config->device_identifier) ||
         !append_string(output, output_capacity, &used, 4, config->public_key) ||
-        !append_string(output, output_capacity, &used, 5, config->source_version)) {
+        !append_string(output, output_capacity, &used, 5, config->source_version))
+    {
         return false;
     }
 

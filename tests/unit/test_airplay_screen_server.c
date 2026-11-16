@@ -9,10 +9,11 @@
 #include "rtcp/rtcp.h"
 #include "rtcp_linux.h"
 
-#define WAIT_MS 500
+#define WAIT_MS        500
 #define MAX_BODY_BYTES (64U * 1024U)
 
-typedef struct {
+typedef struct
+{
     unsigned calls;
     airplay_screen_message_type_t type;
     uint8_t bytes[32];
@@ -23,12 +24,16 @@ typedef struct {
 static unsigned exit_count;
 static uint64_t fake_now_us = 10000U;
 static uint64_t sender_ntp = (UINT64_C(2) << 32) | UINT64_C(0x80000000);
-static uint64_t fake_clock_us(void) { return fake_now_us; }
+static uint64_t fake_clock_us(void)
+{
+    return fake_now_us;
+}
 static bool stepped_clock;
 static int measured_recv(int fd, void *buffer, size_t bytes)
 {
     int n = rtcp_net_linux.recv(fd, buffer, bytes);
-    if (n > 0 && stepped_clock) fake_now_us += 1000U;
+    if (n > 0 && stepped_clock)
+        fake_now_us += 1000U;
     return n;
 }
 
@@ -105,7 +110,7 @@ static size_t seal_frame(const uint8_t key[AIRPLAY_SCREEN_KEY_BYTES],
 
 static rtcp_addr_t loopback(uint16_t port)
 {
-    rtcp_addr_t address = {0};
+    rtcp_addr_t address = { 0 };
     address.family = RTCP_AF_INET;
     address.addr[0] = 127U;
     address.addr[3] = 1U;
@@ -115,7 +120,7 @@ static rtcp_addr_t loopback(uint16_t port)
 
 static bool wait_event(int fd)
 {
-    struct rtcp_pollfd pfd = {.fd = fd, .events = RTCP_POLLIN};
+    struct rtcp_pollfd pfd = { .fd = fd, .events = RTCP_POLLIN };
     int ready = rtcp_net_linux.poll(&pfd, 1, WAIT_MS);
     return ready > 0 && pfd.revents != 0;
 }
@@ -123,9 +128,11 @@ static bool wait_event(int fd)
 static bool send_all(int fd, const uint8_t *bytes, size_t len)
 {
     size_t offset = 0U;
-    while (offset < len) {
+    while (offset < len)
+    {
         int sent = rtcp_net_linux.send(fd, bytes + offset, len - offset);
-        if (sent <= 0) return false;
+        if (sent <= 0)
+            return false;
         offset += (size_t)sent;
     }
     return true;
@@ -141,16 +148,44 @@ static void send_frame(int fd, const uint8_t *header, const uint8_t *body,
 int main(void)
 {
     static const uint8_t key[AIRPLAY_SCREEN_KEY_BYTES] = {
-        0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-        0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
-        0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,
-        0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
+        0x40,
+        0x41,
+        0x42,
+        0x43,
+        0x44,
+        0x45,
+        0x46,
+        0x47,
+        0x48,
+        0x49,
+        0x4a,
+        0x4b,
+        0x4c,
+        0x4d,
+        0x4e,
+        0x4f,
+        0x50,
+        0x51,
+        0x52,
+        0x53,
+        0x54,
+        0x55,
+        0x56,
+        0x57,
+        0x58,
+        0x59,
+        0x5a,
+        0x5b,
+        0x5c,
+        0x5d,
+        0x5e,
+        0x5f,
     };
-    static const uint8_t plaintext[] = {0, 0, 0, 2, 0x65, 0xaa};
-    static const uint8_t expected_annex_b[] = {0, 0, 0, 1, 0x65, 0xaa};
+    static const uint8_t plaintext[] = { 0, 0, 0, 2, 0x65, 0xaa };
+    static const uint8_t expected_annex_b[] = { 0, 0, 0, 1, 0x65, 0xaa };
 
-    capture_t capture = {0};
-    airplay_screen_server_config_t config = {0};
+    capture_t capture = { 0 };
+    airplay_screen_server_config_t config = { 0 };
     config.requested_port = 0U;
     config.max_body_bytes = MAX_BODY_BYTES;
     config.on_message = capture_message;
@@ -181,7 +216,8 @@ int main(void)
                                  body);
     send_frame(client, header, body, body_len);
 
-    for (unsigned i = 0U; i < 16U && capture.calls == 0U; ++i) {
+    for (unsigned i = 0U; i < 16U && capture.calls == 0U; ++i)
+    {
         assert(wait_event(airplay_screen_server_get_fd(server)));
         airplay_screen_server_poll(server);
     }
@@ -194,8 +230,9 @@ int main(void)
 
     /* Arrival gaps and sender timestamps must be measured independently.
      * The last two-byte/body handoff also exercises assembly-time accounting. */
-    const uint64_t arrivals[] = {45000U, 125000U, 375000U};
-    for (unsigned sample = 0; sample < 3; ++sample) {
+    const uint64_t arrivals[] = { 45000U, 125000U, 375000U };
+    for (unsigned sample = 0; sample < 3; ++sample)
+    {
         sender_ntp += (UINT64_C(1) << 32) / 30U;
         body_len = seal_frame(key, sample + 1U, plaintext, sizeof(plaintext), header, body);
         fake_now_us = arrivals[sample] - 2000U;
@@ -205,7 +242,8 @@ int main(void)
         assert(capture.calls == sample + 1U);
         fake_now_us = arrivals[sample];
         assert(send_all(client, body, body_len));
-        for (unsigned retry = 0; retry < 16U && capture.calls < sample + 2U; ++retry) {
+        for (unsigned retry = 0; retry < 16U && capture.calls < sample + 2U; ++retry)
+        {
             assert(wait_event(airplay_screen_server_get_fd(server)));
             airplay_screen_server_poll(server);
         }
@@ -226,10 +264,13 @@ int main(void)
     unsigned baseline_reads = stats.recv_calls;
     uint8_t burst[20 * (AIRPLAY_SCREEN_HEADER_BYTES + sizeof(plaintext) + AIRPLAY_SCREEN_TAG_BYTES)];
     size_t used = 0;
-    for (unsigned i = 0; i < 20; ++i) {
+    for (unsigned i = 0; i < 20; ++i)
+    {
         body_len = seal_frame(key, 4U + i, plaintext, sizeof(plaintext), header, body);
-        memcpy(burst + used, header, sizeof(header)); used += sizeof(header);
-        memcpy(burst + used, body, body_len); used += body_len;
+        memcpy(burst + used, header, sizeof(header));
+        used += sizeof(header);
+        memcpy(burst + used, body, body_len);
+        used += body_len;
     }
     assert(send_all(client, burst, used));
     assert(wait_event(airplay_screen_server_get_fd(server)));
@@ -243,7 +284,8 @@ int main(void)
     airplay_screen_server_poll(server);
     assert(capture.calls - before <= 1U); /* 2 ms cooperative budget */
     stepped_clock = false;
-    while (capture.calls < 24U) {
+    while (capture.calls < 24U)
+    {
         assert(wait_event(airplay_screen_server_get_fd(server)));
         airplay_screen_server_poll(server);
     }
@@ -260,7 +302,8 @@ int main(void)
     assert(send_all(client, header, sizeof(header)));
     assert(wait_event(airplay_screen_server_get_fd(server)));
     airplay_screen_server_poll(server);
-    for (unsigned i = 0; i < 25; ++i) {
+    for (unsigned i = 0; i < 25; ++i)
+    {
         fake_now_us += 50000U;
         airplay_screen_server_owner_tick(server);
     }
@@ -280,10 +323,13 @@ int main(void)
     body[body_len - 1U] ^= 0x80U;
     send_frame(client, header, body, body_len);
 
-    for (unsigned i = 0U; i < 16U && exit_count == 0U; ++i) {
+    for (unsigned i = 0U; i < 16U && exit_count == 0U; ++i)
+    {
         int fd = airplay_screen_server_get_fd(server);
-        if (fd < 0) break;
-        if (!wait_event(fd)) break;
+        if (fd < 0)
+            break;
+        if (!wait_event(fd))
+            break;
         airplay_screen_server_poll(server);
     }
     assert(exit_count == 1U);

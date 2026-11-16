@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 #define AIRPLAY_TIMING_PACKET_BYTES 32U
-#define AIRPLAY_TIMING_PT_REQUEST 210U
-#define AIRPLAY_TIMING_PT_RESPONSE 211U
+#define AIRPLAY_TIMING_PT_REQUEST   210U
+#define AIRPLAY_TIMING_PT_RESPONSE  211U
 
 /* Pure helpers for the fixed-size AirPlay timing exchange packets. */
 bool airplay_timing_build_request(uint64_t transmit_timestamp,

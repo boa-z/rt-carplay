@@ -8,7 +8,8 @@
 
 #define CAPTURE_BYTES 4096
 
-typedef struct {
+typedef struct
+{
     uint8_t tx[CAPTURE_BYTES];
     size_t tx_len;
     uint16_t last_message_id;
@@ -23,7 +24,8 @@ typedef struct {
 static bool capture_tx(const uint8_t *bytes, size_t len, void *context)
 {
     harness_t *h = context;
-    if (len > sizeof(h->tx) - h->tx_len) {
+    if (len > sizeof(h->tx) - h->tx_len)
+    {
         return false;
     }
     memcpy(h->tx + h->tx_len, bytes, len);
@@ -38,7 +40,8 @@ static void capture_message(uint16_t id, const uint8_t *body, size_t len, void *
     h->last_message_id = id;
     h->last_body_len = len;
     ++h->messages;
-    if (id == 0xaa05U) {
+    if (id == 0xaa05U)
+    {
         h->acked_callbacks_when_success_message_received = h->acked_callbacks;
     }
 }
@@ -59,7 +62,8 @@ static void capture_csm_acked(uint16_t message_id, void *context)
 static uint8_t checksum(const uint8_t *bytes, size_t len)
 {
     uint8_t sum = 0;
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; ++i)
+    {
         sum = (uint8_t)(sum + bytes[i]);
     }
     return (uint8_t)(0U - sum);
@@ -80,7 +84,8 @@ static size_t make_peer_frame(uint8_t control, uint8_t seq, uint8_t ack, uint8_t
     out[6] = ack;
     out[7] = sid;
     out[8] = checksum(out, 8);
-    if (payload != NULL) {
+    if (payload != NULL)
+    {
         memcpy(out + 9, payload, payload_len);
         out[frame_len - 1] = checksum(payload, payload_len);
     }
@@ -94,46 +99,46 @@ static void clear_tx(harness_t *h)
 
 static void test_tcp_zero_ack(void)
 {
-    harness_t h={0};
-    iap2_core_t *core=iap2_core_create(capture_tx,capture_message,capture_state,&h);
+    harness_t h = { 0 };
+    iap2_core_t *core = iap2_core_create(capture_tx, capture_message, capture_state, &h);
     iap2_core_set_tcp_transport(core);
-    assert(iap2_core_start(core,0));
+    assert(iap2_core_start(core, 0));
     clear_tx(&h);
-    static const uint8_t marker[]={0xff,0x55,0x02,0,0xee,0x10};
-    iap2_core_feed(core,marker,sizeof(marker),1);
-    assert(h.tx_len == 29 && h.tx[9+12] == 2);
-    for (unsigned i=4;i<10;++i) assert(h.tx[9+i]==0);
+    static const uint8_t marker[] = { 0xff, 0x55, 0x02, 0, 0xee, 0x10 };
+    iap2_core_feed(core, marker, sizeof(marker), 1);
+    assert(h.tx_len == 29 && h.tx[9 + 12] == 2);
+    for (unsigned i = 4; i < 10; ++i) assert(h.tx[9 + i] == 0);
     clear_tx(&h);
-    uint8_t sync[19]={1,4,0x08,0,0,0,0,0,0,0,10,0,2,11,2,1,12,1,2};
+    uint8_t sync[19] = { 1, 4, 0x08, 0, 0, 0, 0, 0, 0, 0, 10, 0, 2, 11, 2, 1, 12, 1, 2 };
     uint8_t frame[128];
-    size_t n=make_peer_frame(0x80,30,0,0,sync,sizeof(sync),frame,sizeof(frame));
-    iap2_core_feed(core,frame,n,2);
-    n=make_peer_frame(0x40,30,99,0,NULL,0,frame,sizeof(frame));
-    iap2_core_feed(core,frame,n,3);
-    assert(iap2_core_state(core)==IAP2_CORE_READY);
+    size_t n = make_peer_frame(0x80, 30, 0, 0, sync, sizeof(sync), frame, sizeof(frame));
+    iap2_core_feed(core, frame, n, 2);
+    n = make_peer_frame(0x40, 30, 99, 0, NULL, 0, frame, sizeof(frame));
+    iap2_core_feed(core, frame, n, 3);
+    assert(iap2_core_state(core) == IAP2_CORE_READY);
     clear_tx(&h);
-    assert(iap2_core_send_csm_with_ack_callback(core,0xaa03,NULL,0,capture_csm_acked,&h,4));
-    assert(h.acked_callbacks==1);
-    assert(iap2_core_send_csm(core,0x5000,NULL,0,5));
-    size_t sent=h.tx_len;
-    iap2_core_advance_time(core,20000);
-    assert(h.tx_len==sent && iap2_core_state(core)==IAP2_CORE_READY);
-    uint8_t csm[]={0x40,0x40,0,6,0x1d,0};
-    n=make_peer_frame(0x40,31,99,10,csm,sizeof(csm),frame,sizeof(frame));
-    iap2_core_feed(core,frame,n,20001);
-    assert(h.messages==1 && h.tx_len==sent); /* no gratuitous data ACK */
+    assert(iap2_core_send_csm_with_ack_callback(core, 0xaa03, NULL, 0, capture_csm_acked, &h, 4));
+    assert(h.acked_callbacks == 1);
+    assert(iap2_core_send_csm(core, 0x5000, NULL, 0, 5));
+    size_t sent = h.tx_len;
+    iap2_core_advance_time(core, 20000);
+    assert(h.tx_len == sent && iap2_core_state(core) == IAP2_CORE_READY);
+    uint8_t csm[] = { 0x40, 0x40, 0, 6, 0x1d, 0 };
+    n = make_peer_frame(0x40, 31, 99, 10, csm, sizeof(csm), frame, sizeof(frame));
+    iap2_core_feed(core, frame, n, 20001);
+    assert(h.messages == 1 && h.tx_len == sent); /* no gratuitous data ACK */
     iap2_core_destroy(core);
 }
 
 int main(void)
 {
     test_tcp_zero_ack();
-    harness_t h = {0};
+    harness_t h = { 0 };
     iap2_core_t *core = iap2_core_create(capture_tx, capture_message, capture_state, &h);
     assert(core != NULL);
 
     assert(iap2_core_start(core, 0));
-    static const uint8_t marker[] = {0xff, 0x55, 0x02, 0x00, 0xee, 0x10};
+    static const uint8_t marker[] = { 0xff, 0x55, 0x02, 0x00, 0xee, 0x10 };
     assert(h.tx_len == sizeof(marker));
     assert(memcmp(h.tx, marker, sizeof(marker)) == 0);
     clear_tx(&h);
@@ -146,12 +151,30 @@ int main(void)
     clear_tx(&h);
 
     uint8_t sync[19] = {
-        1, 1, 0x08, 0x00, 0x0f, 0xa0, 0x01, 0xf4, 4, 1,
-        10, 0, 1, 11, 2, 1, 12, 1, 2,
+        1,
+        1,
+        0x08,
+        0x00,
+        0x0f,
+        0xa0,
+        0x01,
+        0xf4,
+        4,
+        1,
+        10,
+        0,
+        1,
+        11,
+        2,
+        1,
+        12,
+        1,
+        2,
     };
     uint8_t frame[128];
     size_t frame_len = make_peer_frame(0x80, 30, 0, 0, sync, sizeof(sync), frame, sizeof(frame));
-    for (size_t i = 0; i < frame_len; ++i) {
+    for (size_t i = 0; i < frame_len; ++i)
+    {
         iap2_core_feed(core, frame + i, 1, 3 + i);
     }
     assert(iap2_core_state(core) == IAP2_CORE_NEGOTIATING);
@@ -164,7 +187,7 @@ int main(void)
     assert(h.last_state == IAP2_CORE_READY);
     clear_tx(&h);
 
-    static const uint8_t start_identification[] = {0x40, 0x40, 0x00, 0x06, 0x1d, 0x00};
+    static const uint8_t start_identification[] = { 0x40, 0x40, 0x00, 0x06, 0x1d, 0x00 };
     frame_len = make_peer_frame(0x40, 31, 99, 10, start_identification,
                                 sizeof(start_identification), frame, sizeof(frame));
     iap2_core_feed(core, frame, 4, 101);
@@ -175,7 +198,7 @@ int main(void)
     assert(h.tx_len == 9); /* Data packet is acknowledged. */
     clear_tx(&h);
 
-    static const uint8_t body[] = {0xaa, 0x55};
+    static const uint8_t body[] = { 0xaa, 0x55 };
     assert(iap2_core_send_csm_with_ack_callback(core, 0x1d01, body, sizeof(body),
                                                 capture_csm_acked, &h, 103));
     assert(h.acked_callbacks == 0); /* Enqueue/transmit is not a peer link ACK. */
@@ -187,7 +210,7 @@ int main(void)
     size_t first_tx_len = h.tx_len;
     assert(iap2_core_send_csm_with_ack_callback(core, 0x1d02, body, sizeof(body),
                                                 capture_csm_acked, &h, 104));
-    assert(h.acked_callbacks == 0); /* The queued CSM has not reached the peer yet. */
+    assert(h.acked_callbacks == 0);   /* The queued CSM has not reached the peer yet. */
     assert(h.tx_len == first_tx_len); /* One in-flight packet; the next CSM is bounded/queued. */
     frame_len = make_peer_frame(0x40, 31, 100, 0, NULL, 0, frame, sizeof(frame));
     iap2_core_feed(core, frame, frame_len, 105);
@@ -204,7 +227,7 @@ int main(void)
        The response ACK callback must run before dispatching the payload. */
     assert(iap2_core_send_csm_with_ack_callback(core, 0x1d03, body, sizeof(body),
                                                 capture_csm_acked, &h, 107));
-    static const uint8_t auth_success[] = {0x40, 0x40, 0x00, 0x06, 0xaa, 0x05};
+    static const uint8_t auth_success[] = { 0x40, 0x40, 0x00, 0x06, 0xaa, 0x05 };
     frame_len = make_peer_frame(0x40, 32, 102, 10, auth_success,
                                 sizeof(auth_success), frame, sizeof(frame));
     iap2_core_feed(core, frame, frame_len, 108);
@@ -228,7 +251,7 @@ int main(void)
     assert(iap2_core_send_csm(core, 0x1d04, body, sizeof(body), 109));
     assert(h.acked_callbacks == 3);
 
-    static const uint8_t gap_csm[] = {0x40, 0x40, 0x00, 0x06, 0x12, 0x34};
+    static const uint8_t gap_csm[] = { 0x40, 0x40, 0x00, 0x06, 0x12, 0x34 };
     /* ACK plus extended-ACK control payload is not a CSM data packet. */
     clear_tx(&h);
     frame_len = make_peer_frame(0x60, 33, 102, 10, gap_csm,
@@ -247,7 +270,7 @@ int main(void)
     assert(h.tx[9] == 33 && h.tx[10] == 34);
 
     /* An extended ACK listing our outstanding packet causes immediate retransmission. */
-    const uint8_t missing_local_packet[] = {103};
+    const uint8_t missing_local_packet[] = { 103 };
     frame_len = make_peer_frame(0x20, 34, 102, 0, missing_local_packet,
                                 sizeof(missing_local_packet), frame, sizeof(frame));
     size_t extended_ack_len = h.tx_len;
@@ -261,7 +284,7 @@ int main(void)
     assert(h.tx_len == tx_after_extended_ack); /* The extended ACK rearmed the timer. */
 
     /* Once the missing sequence arrives, the peer's later packet is accepted on retry. */
-    static const uint8_t gap_csm_2[] = {0x40, 0x40, 0x00, 0x06, 0x12, 0x35};
+    static const uint8_t gap_csm_2[] = { 0x40, 0x40, 0x00, 0x06, 0x12, 0x35 };
     frame_len = make_peer_frame(0x40, 33, 103, 10, gap_csm_2,
                                 sizeof(gap_csm_2), frame, sizeof(frame));
     iap2_core_feed(core, frame, frame_len, 113);
@@ -273,8 +296,9 @@ int main(void)
 
     /* Receive sequence numbers wrap from 255 to 0 without creating a false gap. */
     clear_tx(&h);
-    static const uint8_t ea_payload[] = {0x01};
-    for (unsigned sequence = 35U; sequence <= UINT8_MAX; ++sequence) {
+    static const uint8_t ea_payload[] = { 0x01 };
+    for (unsigned sequence = 35U; sequence <= UINT8_MAX; ++sequence)
+    {
         frame_len = make_peer_frame(0x40, (uint8_t)sequence, 103, 11,
                                     ea_payload, sizeof(ea_payload), frame, sizeof(frame));
         iap2_core_feed(core, frame, frame_len, 200U + sequence);

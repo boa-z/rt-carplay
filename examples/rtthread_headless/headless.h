@@ -8,15 +8,16 @@
  * brings its network/filesystem up, supplies real secure entropy in os,
  * and keeps all configuration strings/tables/contexts alive until return.
  * No display, codec, touch device, board header or RTOS-private API is used. */
-typedef struct {
+typedef struct
+{
     const struct rtcp_os *os;
     const struct rtcp_net *net;
     const char *name;
-    const char *device_id; /* Stable MAC-format accessory identifier. */
-    const char *seed_path; /* Private 32-byte Ed25519 seed, created if absent. */
-    const char *store_path; /* SDK controller table, distinct from seed_path. */
+    const char *device_id;        /* Stable MAC-format accessory identifier. */
+    const char *seed_path;        /* Private 32-byte Ed25519 seed, created if absent. */
+    const char *store_path;       /* SDK controller table, distinct from seed_path. */
     uint16_t width, height, port; /* port 0 selects the SDK default. */
-    bool advertise; /* Requires an IPv4 address and host_name. */
+    bool advertise;               /* Requires an IPv4 address and host_name. */
     const char *host_name;
     uint8_t ipv4[4];
     rtcp_receiver_event_cb_t on_state;
@@ -25,7 +26,8 @@ typedef struct {
     void *context;
 } rtcp_headless_config_t;
 
-typedef struct {
+typedef struct
+{
     unsigned video_configs, video_frames;
     uint64_t video_bytes;
     rtcp_receiver_diagnostics_t diagnostics;

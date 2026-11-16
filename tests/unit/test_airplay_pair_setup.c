@@ -14,21 +14,50 @@
 #include "mbedtls/md.h"
 #include "mbedtls/platform_util.h"
 
-#define TEST_KEY_BYTES AIRPLAY_PAIR_SETUP_KEY_BYTES
-#define TEST_SIG_BYTES AIRPLAY_PAIR_SETUP_SIGNATURE_BYTES
-#define TEST_ID "controller-test"
-#define TEST_ACCESSORY_ID "accessory-test"
-#define TEST_CODE "test-only-code"
+#define TEST_KEY_BYTES     AIRPLAY_PAIR_SETUP_KEY_BYTES
+#define TEST_SIG_BYTES     AIRPLAY_PAIR_SETUP_SIGNATURE_BYTES
+#define TEST_ID            "controller-test"
+#define TEST_ACCESSORY_ID  "accessory-test"
+#define TEST_CODE          "test-only-code"
 #define TEST_PLAINTEXT_MAX 512U
 
 static const uint8_t ACCESSORY_TEST_PUBLIC_KEY[TEST_KEY_BYTES] = {
-    0x41,0x43,0x43,0x45,0x53,0x53,0x4f,0x52,
-    0x59,0x2d,0x54,0x45,0x53,0x54,0x2d,0x50,
-    0x55,0x42,0x4c,0x49,0x43,0x2d,0x4b,0x45,
-    0x59,0x2d,0x30,0x30,0x30,0x30,0x30,0x31,
+    0x41,
+    0x43,
+    0x43,
+    0x45,
+    0x53,
+    0x53,
+    0x4f,
+    0x52,
+    0x59,
+    0x2d,
+    0x54,
+    0x45,
+    0x53,
+    0x54,
+    0x2d,
+    0x50,
+    0x55,
+    0x42,
+    0x4c,
+    0x49,
+    0x43,
+    0x2d,
+    0x4b,
+    0x45,
+    0x59,
+    0x2d,
+    0x30,
+    0x30,
+    0x30,
+    0x30,
+    0x30,
+    0x31,
 };
 
-typedef struct {
+typedef struct
+{
     uint8_t random_counter;
     bool fail_random;
     bool fail_verify;
@@ -44,8 +73,10 @@ typedef struct {
 static bool test_random(uint8_t *output, size_t output_len, void *context)
 {
     provider_fixture_t *fixture = context;
-    if (fixture->fail_random) return false;
-    for (size_t i = 0; i < output_len; ++i) {
+    if (fixture->fail_random)
+        return false;
+    for (size_t i = 0; i < output_len; ++i)
+    {
         output[i] = fixture->random_counter++;
     }
     return true;
@@ -59,16 +90,21 @@ static bool fake_signature(const uint8_t key[TEST_KEY_BYTES],
 {
     const mbedtls_md_info_t *sha512 =
         mbedtls_md_info_from_type(MBEDTLS_MD_SHA512);
-    if (sha512 == NULL) return false;
+    if (sha512 == NULL)
+        return false;
     mbedtls_md_context_t ctx;
     mbedtls_md_init(&ctx);
     int rc = mbedtls_md_setup(&ctx, sha512, 0);
-    if (rc == 0) rc = mbedtls_md_starts(&ctx);
-    if (rc == 0) rc = mbedtls_md_update(&ctx, key, TEST_KEY_BYTES);
-    if (rc == 0 && message_len != 0U) {
+    if (rc == 0)
+        rc = mbedtls_md_starts(&ctx);
+    if (rc == 0)
+        rc = mbedtls_md_update(&ctx, key, TEST_KEY_BYTES);
+    if (rc == 0 && message_len != 0U)
+    {
         rc = mbedtls_md_update(&ctx, message, message_len);
     }
-    if (rc == 0) rc = mbedtls_md_finish(&ctx, signature);
+    if (rc == 0)
+        rc = mbedtls_md_finish(&ctx, signature);
     mbedtls_md_free(&ctx);
     return rc == 0;
 }
@@ -93,7 +129,8 @@ static bool verify_controller(const uint8_t public_key[TEST_KEY_BYTES],
     uint8_t expected[TEST_SIG_BYTES];
     if (fixture->fail_verify ||
         memcmp(public_key, fixture->controller_key, TEST_KEY_BYTES) != 0 ||
-        !fake_signature(public_key, message, message_len, expected)) {
+        !fake_signature(public_key, message, message_len, expected))
+    {
         return false;
     }
     uint8_t diff = 0U;
@@ -110,7 +147,8 @@ static bool save_pairing(const uint8_t *identifier,
     provider_fixture_t *fixture = context;
     ++fixture->save_calls;
     if (fixture->fail_save ||
-        identifier_len > sizeof(fixture->saved_identifier)) return false;
+        identifier_len > sizeof(fixture->saved_identifier))
+        return false;
     memcpy(fixture->saved_identifier, identifier, identifier_len);
     fixture->saved_identifier_len = identifier_len;
     memcpy(fixture->saved_public_key, public_key, TEST_KEY_BYTES);
@@ -223,8 +261,9 @@ static void run_exchange(bool corrupt_srp_proof,
                          bool fail_storage)
 {
     static const char username[] = "Pair-Setup";
-    provider_fixture_t fixture = {0};
-    for (size_t i = 0; i < sizeof(fixture.controller_key); ++i) {
+    provider_fixture_t fixture = { 0 };
+    for (size_t i = 0; i < sizeof(fixture.controller_key); ++i)
+    {
         fixture.controller_key[i] = (uint8_t)(0x31U + i);
         fixture.accessory_secret[i] = (uint8_t)(0xb0U + i);
     }
@@ -248,7 +287,9 @@ static void run_exchange(bool corrupt_srp_proof,
     size_t response_len = 0U;
     const uint8_t state1 = 1U;
     const airplay_tlv8_item_t m1 = {
-        .type = 0x06U, .value = &state1, .value_len = 1U,
+        .type = 0x06U,
+        .value = &state1,
+        .value_len = 1U,
     };
     request_len = encode_tlv(&m1, 1U, request, sizeof(request));
     assert(airplay_pair_setup_handle(session, request, request_len, response,
@@ -264,18 +305,20 @@ static void run_exchange(bool corrupt_srp_proof,
     airplay_srp6a_test_compute_client_proofs(
         salt, public_b, username, TEST_CODE, public_a, proof_m1, expected_m2,
         expected_key);
-    if (corrupt_srp_proof) proof_m1[0] ^= 0x80U;
+    if (corrupt_srp_proof)
+        proof_m1[0] ^= 0x80U;
     const uint8_t state3 = 3U;
     const airplay_tlv8_item_t m3_items[] = {
-        {.type = 0x06U, .value = &state3, .value_len = 1U},
-        {.type = 0x03U, .value = public_a, .value_len = sizeof(public_a)},
-        {.type = 0x04U, .value = proof_m1, .value_len = sizeof(proof_m1)},
+        { .type = 0x06U, .value = &state3, .value_len = 1U },
+        { .type = 0x03U, .value = public_a, .value_len = sizeof(public_a) },
+        { .type = 0x04U, .value = proof_m1, .value_len = sizeof(proof_m1) },
     };
     request_len = encode_tlv(m3_items, 3U, request, sizeof(request));
     airplay_pair_setup_result_t result = airplay_pair_setup_handle(
         session, request, request_len, response, sizeof(response),
         &response_len);
-    if (corrupt_srp_proof) {
+    if (corrupt_srp_proof)
+    {
         assert(result == AIRPLAY_PAIR_SETUP_AUTH_FAILED);
         assert(!airplay_pair_setup_is_complete(session));
         assert(fixture.save_calls == 0U);
@@ -311,14 +354,12 @@ static void run_exchange(bool corrupt_srp_proof,
     assert(fake_signature(fixture.controller_key, controller_signature_input,
                           sizeof(controller_signature_input),
                           controller_signature));
-    if (corrupt_controller_signature) controller_signature[0] ^= 1U;
+    if (corrupt_controller_signature)
+        controller_signature[0] ^= 1U;
     const airplay_tlv8_item_t controller_items[] = {
-        {.type = 0x01U, .value = (const uint8_t *)TEST_ID,
-         .value_len = sizeof(TEST_ID) - 1U},
-        {.type = 0x03U, .value = fixture.controller_key,
-         .value_len = sizeof(fixture.controller_key)},
-        {.type = 0x0aU, .value = controller_signature,
-         .value_len = sizeof(controller_signature)},
+        { .type = 0x01U, .value = (const uint8_t *)TEST_ID, .value_len = sizeof(TEST_ID) - 1U },
+        { .type = 0x03U, .value = fixture.controller_key, .value_len = sizeof(fixture.controller_key) },
+        { .type = 0x0aU, .value = controller_signature, .value_len = sizeof(controller_signature) },
     };
     uint8_t plaintext[TEST_PLAINTEXT_MAX];
     size_t plaintext_len = encode_tlv(controller_items, 3U, plaintext,
@@ -329,21 +370,26 @@ static void run_exchange(bool corrupt_srp_proof,
                     encrypted, &encrypted_len);
     const uint8_t state5 = 5U;
     const airplay_tlv8_item_t m5_items[] = {
-        {.type = 0x06U, .value = &state5, .value_len = 1U},
-        {.type = 0x05U, .value = encrypted, .value_len = encrypted_len},
+        { .type = 0x06U, .value = &state5, .value_len = 1U },
+        { .type = 0x05U, .value = encrypted, .value_len = encrypted_len },
     };
     request_len = encode_tlv(m5_items, 2U, request, sizeof(request));
     result = airplay_pair_setup_handle(session, request, request_len, response,
                                        sizeof(response), &response_len);
-    if (corrupt_controller_signature) {
+    if (corrupt_controller_signature)
+    {
         assert(result == AIRPLAY_PAIR_SETUP_AUTH_FAILED);
         assert(fixture.save_calls == 0U);
         assert(!airplay_pair_setup_is_complete(session));
-    } else if (fail_storage) {
+    }
+    else if (fail_storage)
+    {
         assert(result == AIRPLAY_PAIR_SETUP_STORAGE_FAILED);
         assert(fixture.save_calls == 1U);
         assert(!airplay_pair_setup_is_complete(session));
-    } else {
+    }
+    else
+    {
         assert(result == AIRPLAY_PAIR_SETUP_OK);
         assert(airplay_pair_setup_is_complete(session));
         assert(fixture.save_calls == 1U);
@@ -418,14 +464,16 @@ static void run_exchange(bool corrupt_srp_proof,
 
 static void test_random_failure(void)
 {
-    provider_fixture_t fixture = {.fail_random = true};
+    provider_fixture_t fixture = { .fail_random = true };
     airplay_pair_setup_config_t config;
     setup_config(&fixture, &config);
     airplay_pair_setup_t *session = NULL;
     assert(airplay_pair_setup_create(&config, &session) == AIRPLAY_PAIR_SETUP_OK);
     const uint8_t state = 1U;
     const airplay_tlv8_item_t item = {
-        .type = 0x06U, .value = &state, .value_len = 1U,
+        .type = 0x06U,
+        .value = &state,
+        .value_len = 1U,
     };
     uint8_t request[16];
     uint8_t response[16];

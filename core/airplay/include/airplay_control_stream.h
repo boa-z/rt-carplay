@@ -8,11 +8,12 @@
 #include "airplay_rtsp_codec.h"
 
 #define AIRPLAY_CONTROL_STREAM_MAX_MESSAGE_BYTES 4096U
-#define AIRPLAY_CONTROL_STREAM_MAX_BODY_BYTES 2048U
+#define AIRPLAY_CONTROL_STREAM_MAX_BODY_BYTES    2048U
 
 typedef struct airplay_control_stream airplay_control_stream_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_CONTROL_STREAM_OK = 0,
     AIRPLAY_CONTROL_STREAM_INCOMPLETE,
     AIRPLAY_CONTROL_STREAM_INVALID_ARGUMENT,

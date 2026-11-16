@@ -11,42 +11,52 @@
 
 #include "rtcp/rtcp.h"
 
-struct rtcp_thread {
+struct rtcp_thread
+{
     pthread_t tid;
 };
 
-struct rtcp_mutex {
+struct rtcp_mutex
+{
     pthread_mutex_t mutex;
 };
 
 static uint64_t now_ms(void)
 {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0U;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0U;
     return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
 }
 
 static uint64_t now_us(void)
 {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0U;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0U;
     return (uint64_t)ts.tv_sec * 1000000U + (uint64_t)ts.tv_nsec / 1000U;
 }
 
 static bool random_bytes(uint8_t *output, size_t len)
 {
-    if (output == NULL && len != 0U) return false;
+    if (output == NULL && len != 0U)
+        return false;
     int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return false;
+    if (fd < 0)
+        return false;
     size_t offset = 0U;
-    while (offset < len) {
+    while (offset < len)
+    {
         ssize_t got = read(fd, output + offset, len - offset);
-        if (got < 0) {
-            if (errno == EINTR) continue;
+        if (got < 0)
+        {
+            if (errno == EINTR)
+                continue;
             close(fd);
             return false;
         }
-        if (got == 0) break;
+        if (got == 0)
+            break;
         offset += (size_t)got;
     }
     close(fd);
@@ -59,11 +69,13 @@ static void sleep_ms(uint32_t ms)
         .tv_sec = (time_t)(ms / 1000U),
         .tv_nsec = (long)(ms % 1000U) * 1000000L,
     };
-    while (nanosleep(&req, &req) != 0 && errno == EINTR) {
+    while (nanosleep(&req, &req) != 0 && errno == EINTR)
+    {
     }
 }
 
-struct thread_block {
+struct thread_block
+{
     struct rtcp_thread handle;
     void (*fn)(void *);
     void *arg;
@@ -84,12 +96,14 @@ static rtcp_thread_t thread_create(const char *name,
     (void)name;
     (void)stack;
     (void)prio;
-    if (fn == NULL) return NULL;
+    if (fn == NULL)
+        return NULL;
 
     /* The detached thread owns the block and frees it on exit; the returned
      * handle is only an opaque identity and must not be dereferenced. */
     struct thread_block *block = malloc(sizeof(*block));
-    if (block == NULL) return NULL;
+    if (block == NULL)
+        return NULL;
     block->fn = fn;
     block->arg = arg;
 
@@ -98,7 +112,8 @@ static rtcp_thread_t thread_create(const char *name,
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     int rc = pthread_create(&block->handle.tid, &attr, thread_trampoline, block);
     pthread_attr_destroy(&attr);
-    if (rc != 0) {
+    if (rc != 0)
+    {
         free(block);
         return NULL;
     }
@@ -108,8 +123,10 @@ static rtcp_thread_t thread_create(const char *name,
 static rtcp_mutex_t mutex_create(void)
 {
     struct rtcp_mutex *mutex = malloc(sizeof(*mutex));
-    if (mutex == NULL) return NULL;
-    if (pthread_mutex_init(&mutex->mutex, NULL) != 0) {
+    if (mutex == NULL)
+        return NULL;
+    if (pthread_mutex_init(&mutex->mutex, NULL) != 0)
+    {
         free(mutex);
         return NULL;
     }
@@ -118,17 +135,20 @@ static rtcp_mutex_t mutex_create(void)
 
 static void mutex_lock(rtcp_mutex_t mutex)
 {
-    if (mutex != NULL) pthread_mutex_lock(&mutex->mutex);
+    if (mutex != NULL)
+        pthread_mutex_lock(&mutex->mutex);
 }
 
 static void mutex_unlock(rtcp_mutex_t mutex)
 {
-    if (mutex != NULL) pthread_mutex_unlock(&mutex->mutex);
+    if (mutex != NULL)
+        pthread_mutex_unlock(&mutex->mutex);
 }
 
 static void mutex_destroy(rtcp_mutex_t mutex)
 {
-    if (mutex == NULL) return;
+    if (mutex == NULL)
+        return;
     pthread_mutex_destroy(&mutex->mutex);
     free(mutex);
 }

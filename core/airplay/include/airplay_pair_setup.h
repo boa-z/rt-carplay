@@ -12,11 +12,11 @@
 #include <stdint.h>
 #include "rtcp/platform.h"
 
-#define AIRPLAY_PAIR_SETUP_KEY_BYTES 32U
-#define AIRPLAY_PAIR_SETUP_SIGNATURE_BYTES 64U
-#define AIRPLAY_PAIR_SETUP_MAX_IDENTIFIER_BYTES 64U
+#define AIRPLAY_PAIR_SETUP_KEY_BYTES              32U
+#define AIRPLAY_PAIR_SETUP_SIGNATURE_BYTES        64U
+#define AIRPLAY_PAIR_SETUP_MAX_IDENTIFIER_BYTES   64U
 #define AIRPLAY_PAIR_SETUP_MAX_PAIRING_CODE_BYTES 128U
-#define AIRPLAY_PAIR_SETUP_MAX_MESSAGE_BYTES 4096U
+#define AIRPLAY_PAIR_SETUP_MAX_MESSAGE_BYTES      4096U
 
 typedef struct airplay_pair_setup airplay_pair_setup_t;
 
@@ -41,7 +41,8 @@ typedef bool (*airplay_pair_setup_save_pairing_cb_t)(
 
 typedef rtcp_pair_setup_provider_t airplay_pair_setup_config_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_PAIR_SETUP_OK = 0,
     AIRPLAY_PAIR_SETUP_INVALID_ARGUMENT,
     AIRPLAY_PAIR_SETUP_NO_MEMORY,

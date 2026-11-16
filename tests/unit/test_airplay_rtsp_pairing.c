@@ -8,22 +8,52 @@
 #include <stdio.h>
 #include <string.h>
 
-typedef struct {
+typedef struct
+{
     uint8_t random_counter;
 } provider_fixture_t;
 
 static const uint8_t ACCESSORY_ID[] = "rtsp-accessory";
 static const uint8_t ACCESSORY_PUBLIC_KEY[32] = {
-    0x41,0x43,0x43,0x45,0x53,0x53,0x4f,0x52,
-    0x59,0x2d,0x54,0x45,0x53,0x54,0x2d,0x50,
-    0x55,0x42,0x4c,0x49,0x43,0x2d,0x4b,0x45,
-    0x59,0x2d,0x30,0x30,0x30,0x30,0x30,0x31,
+    0x41,
+    0x43,
+    0x43,
+    0x45,
+    0x53,
+    0x53,
+    0x4f,
+    0x52,
+    0x59,
+    0x2d,
+    0x54,
+    0x45,
+    0x53,
+    0x54,
+    0x2d,
+    0x50,
+    0x55,
+    0x42,
+    0x4c,
+    0x49,
+    0x43,
+    0x2d,
+    0x4b,
+    0x45,
+    0x59,
+    0x2d,
+    0x30,
+    0x30,
+    0x30,
+    0x30,
+    0x30,
+    0x31,
 };
 
 static bool random_bytes(uint8_t *output, size_t output_len, void *context)
 {
     provider_fixture_t *fixture = context;
-    for (size_t i = 0; i < output_len; ++i) {
+    for (size_t i = 0; i < output_len; ++i)
+    {
         output[i] = fixture->random_counter++;
     }
     return true;
@@ -97,8 +127,10 @@ static void parse_response_body(const uint8_t *response,
 {
     static const uint8_t separator[] = "\r\n\r\n";
     bool found = false;
-    for (size_t i = 0; i + sizeof(separator) - 1U <= response_len; ++i) {
-        if (memcmp(response + i, separator, sizeof(separator) - 1U) == 0) {
+    for (size_t i = 0; i + sizeof(separator) - 1U <= response_len; ++i)
+    {
+        if (memcmp(response + i, separator, sizeof(separator) - 1U) == 0)
+        {
             *body = response + i + sizeof(separator) - 1U;
             *body_len = response_len - i - (sizeof(separator) - 1U);
             found = true;
@@ -113,9 +145,12 @@ static bool contains_bytes(const uint8_t *haystack,
                            const char *needle)
 {
     size_t needle_len = strlen(needle);
-    if (needle_len > haystack_len) return false;
-    for (size_t i = 0; i <= haystack_len - needle_len; ++i) {
-        if (memcmp(haystack + i, needle, needle_len) == 0) return true;
+    if (needle_len > haystack_len)
+        return false;
+    for (size_t i = 0; i <= haystack_len - needle_len; ++i)
+    {
+        if (memcmp(haystack + i, needle, needle_len) == 0)
+            return true;
     }
     return false;
 }
@@ -132,8 +167,8 @@ static uint8_t get_state(const uint8_t *body, size_t body_len)
 
 int main(void)
 {
-    provider_fixture_t fixture = {0};
-    airplay_rtsp_pairing_config_t config = {0};
+    provider_fixture_t fixture = { 0 };
+    airplay_rtsp_pairing_config_t config = { 0 };
     config.pair_setup.pairing_code = "rtsp-test-code";
     config.pair_setup.accessory_identifier = ACCESSORY_ID;
     config.pair_setup.accessory_identifier_len = sizeof(ACCESSORY_ID) - 1U;
@@ -159,11 +194,13 @@ int main(void)
     size_t response_len = 0U;
     const uint8_t state1 = 1U;
     const airplay_tlv8_item_t state_item = {
-        .type = 0x06U, .value = &state1, .value_len = 1U,
+        .type = 0x06U,
+        .value = &state1,
+        .value_len = 1U,
     };
     size_t request_body_len = encode_tlv(&state_item, 1U, request_body,
                                          sizeof(request_body));
-    airplay_rtsp_request_t request = {0};
+    airplay_rtsp_request_t request = { 0 };
     memcpy(request.method, "POST", sizeof("POST"));
     memcpy(request.path, "/pair-setup", sizeof("/pair-setup"));
     memcpy(request.protocol, "RTSP/1.0", sizeof("RTSP/1.0"));
@@ -197,11 +234,10 @@ int main(void)
 
     memcpy(request.method, "POST", sizeof("POST"));
     memcpy(request.path, "/pair-verify", sizeof("/pair-verify"));
-    uint8_t controller_public[32] = {9U};
+    uint8_t controller_public[32] = { 9U };
     const airplay_tlv8_item_t verify_items[] = {
-        {.type = 0x06U, .value = &state1, .value_len = 1U},
-        {.type = 0x03U, .value = controller_public,
-         .value_len = sizeof(controller_public)},
+        { .type = 0x06U, .value = &state1, .value_len = 1U },
+        { .type = 0x03U, .value = controller_public, .value_len = sizeof(controller_public) },
     };
     request_body_len = encode_tlv(verify_items, 2U, request_body,
                                   sizeof(request_body));

@@ -3,13 +3,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define RTCP_AUDIO_LANES 9U
+#define RTCP_AUDIO_LANES      9U
 #define RTCP_AUDIO_LOCAL_LANE 8U
-#define RTCP_AUDIO_MIX_RATE 48000U
+#define RTCP_AUDIO_MIX_RATE   48000U
 /* Lanes 0..7 match AirPlay semantic slots; lane 8 is a protected local alert.
  * Single audio-worker ownership. Output is interleaved stereo S16. */
 typedef struct rtcp_audio_mixer rtcp_audio_mixer_t;
-typedef struct {
+typedef struct
+{
     uint64_t accepted_frames, dropped_frames, underrun_frames, clipped_samples;
     size_t queued_frames;
     int trim_ppm;
@@ -17,7 +18,7 @@ typedef struct {
 rtcp_audio_mixer_t *rtcp_audio_mixer_create(size_t frames_per_lane);
 void rtcp_audio_mixer_destroy(rtcp_audio_mixer_t *);
 int rtcp_audio_mixer_push(rtcp_audio_mixer_t *, unsigned lane, const int16_t *,
-                        size_t frames, uint32_t rate, uint8_t channels);
+                          size_t frames, uint32_t rate, uint8_t channels);
 /* Optional bounded occupancy servo: target queue depth in source frames.
  * Call after startup buffering. Zero disables; correction is capped at 300 ppm. */
 void rtcp_audio_mixer_clock(rtcp_audio_mixer_t *, unsigned lane, size_t target_frames);

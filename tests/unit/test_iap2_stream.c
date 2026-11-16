@@ -7,7 +7,8 @@
 
 #include "rtcp/rtcp.h"
 
-typedef struct {
+typedef struct
+{
     rtcp_stream_t stream;
     const uint8_t *data;
     size_t data_len;
@@ -24,7 +25,8 @@ static int fake_read(void *context, void *buffer, size_t length,
     (void)timeout_ms;
     fake_stream_t *fake = context;
     ++fake->reads;
-    if (fake->data_pos >= fake->data_len) {
+    if (fake->data_pos >= fake->data_len)
+    {
         return fake->empty_result;
     }
     size_t available = fake->data_len - fake->data_pos;
@@ -37,7 +39,8 @@ static int fake_read(void *context, void *buffer, size_t length,
 static int fake_write(void *context, const void *data, size_t length)
 {
     fake_stream_t *fake = context;
-    if (length > sizeof(fake->tx) - fake->tx_len) return RTCP_ENOMEM;
+    if (length > sizeof(fake->tx) - fake->tx_len)
+        return RTCP_ENOMEM;
     memcpy(fake->tx + fake->tx_len, data, length);
     fake->tx_len += length;
     return RTCP_OK;
@@ -72,7 +75,8 @@ static size_t make_peer_frame(uint8_t control, uint8_t seq, uint8_t ack,
     out[6] = ack;
     out[7] = sid;
     out[8] = checksum(out, 8);
-    if (payload != NULL) {
+    if (payload != NULL)
+    {
         memcpy(out + 9, payload, payload_len);
         out[frame_len - 1] = checksum(payload, payload_len);
     }
@@ -82,10 +86,12 @@ static size_t make_peer_frame(uint8_t control, uint8_t seq, uint8_t ack,
 static bool tx_has_message(const fake_stream_t *fake, uint16_t message_id)
 {
     /* CSM header: 0x40 0x40, length, message id. */
-    for (size_t i = 0; i + 6U <= fake->tx_len; ++i) {
+    for (size_t i = 0; i + 6U <= fake->tx_len; ++i)
+    {
         if (fake->tx[i] == 0x40U && fake->tx[i + 1U] == 0x40U &&
             fake->tx[i + 4U] == (uint8_t)(message_id >> 8) &&
-            fake->tx[i + 5U] == (uint8_t)message_id) {
+            fake->tx[i + 5U] == (uint8_t)message_id)
+        {
             return true;
         }
     }
@@ -96,7 +102,7 @@ int main(void)
 {
     fake_stream_t fake;
     memset(&fake, 0, sizeof(fake));
-    fake.stream.ops = &(rtcp_stream_ops_t){.read = fake_read, .write = fake_write};
+    fake.stream.ops = &(rtcp_stream_ops_t){ .read = fake_read, .write = fake_write };
     fake.stream.context = &fake;
     fake.empty_result = RTCP_ETIMEDOUT;
 
@@ -104,18 +110,35 @@ int main(void)
      * StartIdentification; the link only accepts CSM after this handshake. */
     uint8_t input[160];
     size_t input_len = 0U;
-    static const uint8_t peer_marker[6] = {0xff, 0x55, 0x02, 0x00, 0xee, 0x10};
+    static const uint8_t peer_marker[6] = { 0xff, 0x55, 0x02, 0x00, 0xee, 0x10 };
     memcpy(input, peer_marker, sizeof(peer_marker));
     input_len += sizeof(peer_marker);
     const uint8_t sync[19] = {
-        1, 1, 0x08, 0x00, 0x0f, 0xa0, 0x01, 0xf4, 4, 1,
-        10, 0, 1, 11, 2, 1, 12, 1, 2,
+        1,
+        1,
+        0x08,
+        0x00,
+        0x0f,
+        0xa0,
+        0x01,
+        0xf4,
+        4,
+        1,
+        10,
+        0,
+        1,
+        11,
+        2,
+        1,
+        12,
+        1,
+        2,
     };
     input_len += make_peer_frame(0x80, 30, 0, 0, sync, sizeof(sync),
                                  input + input_len, sizeof(input) - input_len);
     input_len += make_peer_frame(0x40, 30, 99, 0, NULL, 0,
                                  input + input_len, sizeof(input) - input_len);
-    const uint8_t csm[6] = {0x40, 0x40, 0x00, 0x06, 0x1d, 0x00};
+    const uint8_t csm[6] = { 0x40, 0x40, 0x00, 0x06, 0x1d, 0x00 };
     input_len += make_peer_frame(0x40, 31, 0, 10, csm, sizeof(csm),
                                  input + input_len, sizeof(input) - input_len);
     fake.data = input;

@@ -9,15 +9,17 @@
 #define RTCP_MFI_SIG_MAX       512
 #define RTCP_MFI_CERT_MAX      1000
 
-struct rtcp_mfi_info {
-    uint32_t id32;          /* 0x00000200 = 2.0C, 0x00000300 = Auth 3.0 */
-    uint8_t  version[4];
+struct rtcp_mfi_info
+{
+    uint32_t id32; /* 0x00000200 = 2.0C, 0x00000300 = Auth 3.0 */
+    uint8_t version[4];
     uint16_t cert_len;
-    uint8_t  error;
-    int      present;
+    uint8_t error;
+    int present;
 };
 
-struct rtcp_mfi {
+struct rtcp_mfi
+{
     int (*info)(struct rtcp_mfi_info *out);
     int (*sign)(const uint8_t *challenge, size_t len,
                 uint8_t *sig, size_t sig_cap, size_t *sig_len);

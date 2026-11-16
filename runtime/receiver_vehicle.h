@@ -3,7 +3,7 @@
 #define RTCP_RECEIVER_VEHICLE_INTERNAL_H
 #include "rtcp/vehicle.h"
 #define RTCP_RECEIVER_VEHICLE_MASK (RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE) | \
-    RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE_HIGH))
+                                    RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_VEHICLE_HIGH))
 typedef struct receiver_vehicle receiver_vehicle_t;
 typedef int (*receiver_vehicle_send_t)(void *, rtcp_data_stream_kind_t, const uint8_t *, size_t);
 receiver_vehicle_t *receiver_vehicle_create(rtcp_vehicle_t *, receiver_vehicle_send_t, void *);

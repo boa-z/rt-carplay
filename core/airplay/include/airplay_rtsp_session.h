@@ -11,7 +11,7 @@
 
 /* The audio advertisement (audioFormats/audioLatencies) grows /info to about
  * 4.2 KB; keep this in step with AIRPLAY_INFO_PLIST_MAX_BYTES. */
-#define AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES RTCP_CAPABILITIES_MAX_BYTES
+#define AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES     RTCP_CAPABILITIES_MAX_BYTES
 #define AIRPLAY_RTSP_SESSION_RESPONSE_MAX_BYTES 8192U
 
 typedef struct airplay_rtsp_session airplay_rtsp_session_t;
@@ -51,9 +51,10 @@ typedef void (*airplay_rtsp_stop_media_cb_t)(void *context);
 typedef void (*airplay_rtsp_volume_cb_t)(float volume_db, void *context);
 
 typedef bool (*airplay_rtsp_start_iap_cb_t)(const airplay_rtsp_pairing_t *, uint64_t seed,
-                                           uint16_t *port, void *context);
+                                            uint16_t *port, void *context);
 typedef bool (*airplay_rtsp_disable_bt_cb_t)(const char *device_id, void *context);
-typedef struct {
+typedef struct
+{
     airplay_rtsp_pairing_config_t pairing;
     const uint8_t *info_plist;
     size_t info_plist_len;
@@ -101,7 +102,8 @@ typedef struct {
     uint16_t alt_screen_requested_port;
 } airplay_rtsp_session_config_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_RTSP_SESSION_OK = 0,
     AIRPLAY_RTSP_SESSION_INVALID_ARGUMENT,
     AIRPLAY_RTSP_SESSION_NO_MEMORY,

@@ -30,14 +30,14 @@
 
 #define RTCP_USBMUX_PROTO_VERSION 0U
 #define RTCP_USBMUX_PROTO_CONTROL 1U
-#define RTCP_USBMUX_PROTO_SETUP 2U
-#define RTCP_USBMUX_PROTO_TCP 6U
+#define RTCP_USBMUX_PROTO_SETUP   2U
+#define RTCP_USBMUX_PROTO_TCP     6U
 
-#define RTCP_USBMUX_MAGIC 0xfeedfaceU
-#define RTCP_USBMUX_VERSION 2U
-#define RTCP_USBMUX_HEADER_SIZE 16U
+#define RTCP_USBMUX_MAGIC               0xfeedfaceU
+#define RTCP_USBMUX_VERSION             2U
+#define RTCP_USBMUX_HEADER_SIZE         16U
 #define RTCP_USBMUX_VERSION_PACKET_SIZE 20U
-#define RTCP_USBMUX_TCP_HEADER_SIZE 20U
+#define RTCP_USBMUX_TCP_HEADER_SIZE     20U
 /* Largest TCP payload in one mux frame.  A TLS record can be 16 KiB of
  * plaintext plus up to 2 KiB of expansion; 32 KiB also leaves room for a
  * second frame from the same bulk transfer.  The old 16 KiB limit rejected
@@ -56,7 +56,8 @@
 /* Apple's receivers advertise this window (LIVI uses 131072 >> 8). */
 #define RTCP_USBMUX_TCP_WINDOW 0x0200U
 
-typedef struct {
+typedef struct
+{
     uint16_t source_port;
     uint16_t destination_port;
     uint32_t sequence;

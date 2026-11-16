@@ -11,28 +11,34 @@
 #include <stdio.h>
 #include <string.h>
 
-struct fake {
+struct fake
+{
     uint8_t status;
     uint8_t challenge[22];
     uint8_t sig[128];
     uint8_t cert[908];
-    int     fail_sign;
-    int     zero_status;
+    int fail_sign;
+    int zero_status;
 };
 
 static int fake_write(void *ctx, uint8_t reg, const uint8_t *data, size_t len)
 {
     struct fake *f = ctx;
 
-    if (reg == 0x20 && len == 22) {
+    if (reg == 0x20 && len == 22)
+    {
         memcpy(f->challenge, data, 22);
         return RTCP_OK;
     }
 
-    if (reg == 0x10 && len == 1 && data[0] == 0x01) {
-        if (f->fail_sign) {
+    if (reg == 0x10 && len == 1 && data[0] == 0x01)
+    {
+        if (f->fail_sign)
+        {
             f->status = 0x80;
-        } else {
+        }
+        else
+        {
             f->status = f->zero_status ? 0x00 : 0x10;
             f->sig[0] = 0xA5;
             f->sig[127] = 0x5A;
@@ -52,8 +58,12 @@ static int fake_read(void *ctx, uint8_t reg, uint8_t *data, size_t len,
     (void)retries;
     (void)delay_ms;
 
-    switch (reg) {
-    case 0x00: case 0x01: case 0x02: case 0x03:
+    switch (reg)
+    {
+    case 0x00:
+    case 0x01:
+    case 0x02:
+    case 0x03:
         if (len != 1)
             return RTCP_EIO;
         data[0] = 0x05;
@@ -61,7 +71,10 @@ static int fake_read(void *ctx, uint8_t reg, uint8_t *data, size_t len,
     case 0x04:
         if (len != 4)
             return RTCP_EIO;
-        data[0] = 0x00; data[1] = 0x00; data[2] = 0x02; data[3] = 0x00;
+        data[0] = 0x00;
+        data[1] = 0x00;
+        data[2] = 0x02;
+        data[3] = 0x00;
         return RTCP_OK;
     case 0x05:
         if (len != 1)
@@ -76,7 +89,8 @@ static int fake_read(void *ctx, uint8_t reg, uint8_t *data, size_t len,
     case 0x11:
         if (len != 2)
             return RTCP_EIO;
-        data[0] = 0x00; data[1] = 0x80;
+        data[0] = 0x00;
+        data[1] = 0x80;
         return RTCP_OK;
     case 0x12:
         if (len != sizeof(f->sig))
@@ -86,7 +100,8 @@ static int fake_read(void *ctx, uint8_t reg, uint8_t *data, size_t len,
     case 0x30:
         if (len != 2)
             return RTCP_EIO;
-        data[0] = 0x03; data[1] = 0x8C;      /* 908 */
+        data[0] = 0x03;
+        data[1] = 0x8C; /* 908 */
         return RTCP_OK;
     case 0x31:
         if (len != sizeof(f->cert))

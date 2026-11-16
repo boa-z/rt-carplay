@@ -3,7 +3,8 @@
 #define RTCP_RECEIVER_COMPAT_H
 #include "rtcp/receiver.h"
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 struct airplay_rtsp_server_config;
 /* Migration from the pre-V2.1 low-level configuration. Copies descriptors,

@@ -13,7 +13,7 @@
 
 static rtcp_addr_t loopback(uint16_t port)
 {
-    rtcp_addr_t address = {0};
+    rtcp_addr_t address = { 0 };
     address.family = RTCP_AF_INET;
     address.addr[0] = 127U;
     address.addr[3] = 1U;
@@ -24,7 +24,7 @@ static rtcp_addr_t loopback(uint16_t port)
 /* The net seam's recv is blocking; only read after poll reports data. */
 static int wait_readable(const struct rtcp_net *net, int fd)
 {
-    struct rtcp_pollfd pfd = {.fd = fd, .events = RTCP_POLLIN};
+    struct rtcp_pollfd pfd = { .fd = fd, .events = RTCP_POLLIN };
     int ready = net->poll(&pfd, 1, WAIT_MS);
     return ready > 0 && (pfd.revents & RTCP_POLLIN);
 }
@@ -39,7 +39,7 @@ static int udp_send_all(const struct rtcp_net *net, int fd,
 static void test_responds_to_request(void)
 {
     airplay_timing_port_t *port = NULL;
-    airplay_timing_port_config_t config = {0};
+    airplay_timing_port_config_t config = { 0 };
     config.peer = loopback(0U); /* no periodic requests */
     assert(airplay_timing_port_start(&rtcp_os_linux, &rtcp_net_linux, &config,
                                      &port) == RTCP_OK);
@@ -65,7 +65,7 @@ static void test_responds_to_request(void)
 
     assert(wait_readable(&rtcp_net_linux, client));
     uint8_t response[AIRPLAY_TIMING_PACKET_BYTES + 1U];
-    rtcp_addr_t from = {0};
+    rtcp_addr_t from = { 0 };
     int received = rtcp_net_linux.udp_recvfrom(client, response,
                                                sizeof(response), &from);
     assert(received == (int)AIRPLAY_TIMING_PACKET_BYTES);
@@ -89,7 +89,7 @@ static void test_periodic_requests(void)
     assert(client_port != 0U);
 
     airplay_timing_port_t *port = NULL;
-    airplay_timing_port_config_t config = {0};
+    airplay_timing_port_config_t config = { 0 };
     config.peer = loopback(client_port);
     assert(airplay_timing_port_start(&rtcp_os_linux, &rtcp_net_linux, &config,
                                      &port) == RTCP_OK);
@@ -98,7 +98,7 @@ static void test_periodic_requests(void)
     airplay_timing_port_poll(port, false);
     assert(wait_readable(&rtcp_net_linux, client));
     uint8_t request[AIRPLAY_TIMING_PACKET_BYTES + 1U];
-    rtcp_addr_t from = {0};
+    rtcp_addr_t from = { 0 };
     int received = rtcp_net_linux.udp_recvfrom(client, request,
                                                sizeof(request), &from);
     assert(received == (int)AIRPLAY_TIMING_PACKET_BYTES);
@@ -119,7 +119,7 @@ static void test_periodic_requests(void)
 
     /* The next request is a full interval away: not due yet. */
     airplay_timing_port_poll(port, false);
-    struct rtcp_pollfd pfd = {.fd = client, .events = RTCP_POLLIN};
+    struct rtcp_pollfd pfd = { .fd = client, .events = RTCP_POLLIN };
     assert(rtcp_net_linux.poll(&pfd, 1, 50) == 0);
 
     rtcp_net_linux.close(client);
@@ -128,7 +128,7 @@ static void test_periodic_requests(void)
 
 static void test_argument_checks(void)
 {
-    airplay_timing_port_config_t config = {0};
+    airplay_timing_port_config_t config = { 0 };
     config.peer = loopback(1U);
     airplay_timing_port_t *port = NULL;
     assert(airplay_timing_port_start(NULL, &rtcp_net_linux, &config, &port) ==
@@ -142,14 +142,17 @@ static void test_argument_checks(void)
     assert(airplay_timing_port_get_fd(NULL) == -1);
     airplay_timing_port_poll(NULL, true);
     airplay_timing_port_stop(NULL, &rtcp_net_linux);
-    airplay_timing_stats_t stats = {.active = true, .requests_sent = 123};
+    airplay_timing_stats_t stats = { .active = true, .requests_sent = 123 };
     airplay_timing_port_get_stats(NULL, &stats);
     assert(!stats.active && stats.requests_sent == 0);
     airplay_timing_port_get_stats(NULL, NULL);
 }
 
 static uint64_t fake_now_us;
-static uint64_t fake_clock(void) { return fake_now_us; }
+static uint64_t fake_clock(void)
+{
+    return fake_now_us;
+}
 
 static void test_response_at_next_request_deadline(void)
 {
@@ -158,21 +161,21 @@ static void test_response_at_next_request_deadline(void)
     fake_now_us = 10000000;
     int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(client >= 0);
-    airplay_timing_port_config_t config = {0};
+    airplay_timing_port_config_t config = { 0 };
     config.peer = loopback(rtcp_net_linux.local_port(client));
     airplay_timing_port_t *port = NULL;
     assert(airplay_timing_port_start(&os, &rtcp_net_linux, &config, &port) == RTCP_OK);
     airplay_timing_port_poll(port, false);
     assert(wait_readable(&rtcp_net_linux, client));
     uint8_t request[AIRPLAY_TIMING_PACKET_BYTES];
-    rtcp_addr_t source = {0};
+    rtcp_addr_t source = { 0 };
     assert(rtcp_net_linux.udp_recvfrom(client, request, sizeof(request), &source) == (int)sizeof(request));
     uint64_t t1 = 0;
     for (unsigned i = 24; i < 32; ++i) t1 = (t1 << 8) | request[i];
     uint8_t response[AIRPLAY_TIMING_PACKET_BYTES];
     size_t length = 0;
     assert(airplay_timing_build_response(request, sizeof(request), t1, t1,
-                                          response, sizeof(response), &length));
+                                         response, sizeof(response), &length));
     rtcp_addr_t server = loopback(airplay_timing_port_get_port(port));
     assert(udp_send_all(&rtcp_net_linux, client, &server, response, length));
     assert(wait_readable(&rtcp_net_linux, airplay_timing_port_get_fd(port)));

@@ -20,11 +20,12 @@
 
 #include "rtcp/net.h"
 
-#define MDNS_PORT 5353U
+#define MDNS_PORT       5353U
 #define MDNS_MAX_PACKET 1500U
-#define MDNS_MAX_NAME 256U
+#define MDNS_MAX_NAME   256U
 
-typedef struct {
+typedef struct
+{
     const char *host_name;     /* Required, e.g. "rt-carplay" (no ".local"). */
     const char *instance_name; /* Optional; defaults to host_name. */
     uint8_t ipv4[4];           /* Address announced for the host record. */

@@ -16,11 +16,12 @@
 #include "airplay_control_memory.h"
 
 #define CIPHER_HEADER_BYTES 2U
-#define CIPHER_TAG_BYTES 16U
+#define CIPHER_TAG_BYTES    16U
 #define CIPHER_RX_CAPACITY \
     (CIPHER_HEADER_BYTES + AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES + CIPHER_TAG_BYTES)
 
-struct airplay_control_cipher {
+struct airplay_control_cipher
+{
     mbedtls_chachapoly_context read_ctx;
     mbedtls_chachapoly_context write_ctx;
     uint64_t read_counter;
@@ -34,7 +35,8 @@ struct airplay_control_cipher {
 static void make_nonce(uint64_t counter, uint8_t nonce[12])
 {
     memset(nonce, 0, 4U);
-    for (size_t i = 0; i < 8U; ++i) {
+    for (size_t i = 0; i < 8U; ++i)
+    {
         nonce[4U + i] = (uint8_t)(counter >> (i * 8U));
     }
 }
@@ -43,7 +45,8 @@ static airplay_control_cipher_result_t poison(
     airplay_control_cipher_t *cipher,
     airplay_control_cipher_result_t reason)
 {
-    if (cipher != NULL) {
+    if (cipher != NULL)
+    {
         cipher->failed = true;
         mbedtls_platform_zeroize(cipher->pending, sizeof(cipher->pending));
         cipher->pending_len = 0U;
@@ -57,19 +60,24 @@ airplay_control_cipher_result_t airplay_control_cipher_create(
     const uint8_t write_key[AIRPLAY_CONTROL_CIPHER_KEY_BYTES],
     airplay_control_cipher_t **out_cipher)
 {
-    if (out_cipher == NULL) return AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT;
+    if (out_cipher == NULL)
+        return AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT;
     *out_cipher = NULL;
-    if (read_key == NULL || write_key == NULL) {
+    if (read_key == NULL || write_key == NULL)
+    {
         return AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT;
     }
 
     airplay_control_cipher_t *cipher = calloc(1U, sizeof(*cipher));
-    if (cipher == NULL) return AIRPLAY_CONTROL_CIPHER_CRYPTO_FAILED;
+    if (cipher == NULL)
+        return AIRPLAY_CONTROL_CIPHER_CRYPTO_FAILED;
     mbedtls_chachapoly_init(&cipher->read_ctx);
     mbedtls_chachapoly_init(&cipher->write_ctx);
     int rc = mbedtls_chachapoly_setkey(&cipher->read_ctx, read_key);
-    if (rc == 0) rc = mbedtls_chachapoly_setkey(&cipher->write_ctx, write_key);
-    if (rc != 0) {
+    if (rc == 0)
+        rc = mbedtls_chachapoly_setkey(&cipher->write_ctx, write_key);
+    if (rc != 0)
+    {
         airplay_control_cipher_destroy(cipher);
         return AIRPLAY_CONTROL_CIPHER_CRYPTO_FAILED;
     }
@@ -85,16 +93,21 @@ static airplay_control_cipher_result_t encrypt_frame(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (output_len != NULL) *output_len = 0U;
+    if (output_len != NULL)
+        *output_len = 0U;
     if (cipher == NULL || output_len == NULL || output == NULL ||
-        (plaintext == NULL && plaintext_len != 0U)) {
+        (plaintext == NULL && plaintext_len != 0U))
+    {
         return AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT;
     }
-    if (cipher->failed) return AIRPLAY_CONTROL_CIPHER_FAILED_STATE;
-    if (plaintext_len > AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES) {
+    if (cipher->failed)
+        return AIRPLAY_CONTROL_CIPHER_FAILED_STATE;
+    if (plaintext_len > AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES)
+    {
         return AIRPLAY_CONTROL_CIPHER_FRAME_TOO_LARGE;
     }
-    if (output_capacity < plaintext_len + AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES) {
+    if (output_capacity < plaintext_len + AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES)
+    {
         return AIRPLAY_CONTROL_CIPHER_OUTPUT_TOO_SMALL;
     }
 
@@ -109,7 +122,8 @@ static airplay_control_cipher_result_t encrypt_frame(
         output + CIPHER_HEADER_BYTES,
         output + CIPHER_HEADER_BYTES + plaintext_len);
     mbedtls_platform_zeroize(nonce, sizeof(nonce));
-    if (rc != 0) {
+    if (rc != 0)
+    {
         return poison(cipher, AIRPLAY_CONTROL_CIPHER_CRYPTO_FAILED);
     }
     ++cipher->write_counter;
@@ -137,17 +151,21 @@ airplay_control_cipher_result_t airplay_control_cipher_encrypt_message(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (output_len != NULL) *output_len = 0U;
+    if (output_len != NULL)
+        *output_len = 0U;
     if (cipher == NULL || output_len == NULL || output == NULL ||
-        (plaintext == NULL && plaintext_len != 0U)) {
+        (plaintext == NULL && plaintext_len != 0U))
+    {
         return AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT;
     }
-    if (cipher->failed) return AIRPLAY_CONTROL_CIPHER_FAILED_STATE;
+    if (cipher->failed)
+        return AIRPLAY_CONTROL_CIPHER_FAILED_STATE;
 
     size_t written = 0U;
     size_t remaining = plaintext_len;
     const uint8_t *cursor = plaintext;
-    do {
+    do
+    {
         size_t chunk = remaining > AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES
                            ? AIRPLAY_CONTROL_CIPHER_MESSAGE_CHUNK_BYTES
                            : remaining;
@@ -155,9 +173,11 @@ airplay_control_cipher_result_t airplay_control_cipher_encrypt_message(
         airplay_control_cipher_result_t result =
             encrypt_frame(cipher, cursor, chunk, output + written,
                           output_capacity - written, &frame_len);
-        if (result != AIRPLAY_CONTROL_CIPHER_OK) return result;
+        if (result != AIRPLAY_CONTROL_CIPHER_OK)
+            return result;
         written += frame_len;
-        if (cursor != NULL) cursor += chunk;
+        if (cursor != NULL)
+            cursor += chunk;
         remaining -= chunk;
     } while (remaining != 0U);
 
@@ -186,22 +206,29 @@ airplay_control_cipher_result_t airplay_control_cipher_decrypt(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (input_consumed != NULL) *input_consumed = 0U;
-    if (output_len != NULL) *output_len = 0U;
+    if (input_consumed != NULL)
+        *input_consumed = 0U;
+    if (output_len != NULL)
+        *output_len = 0U;
     if (cipher == NULL || input_consumed == NULL || output_len == NULL ||
         (input == NULL && input_len != 0U) ||
-        (output == NULL && output_capacity != 0U)) {
+        (output == NULL && output_capacity != 0U))
+    {
         return AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT;
     }
-    if (cipher->failed) return AIRPLAY_CONTROL_CIPHER_FAILED_STATE;
+    if (cipher->failed)
+        return AIRPLAY_CONTROL_CIPHER_FAILED_STATE;
 
     size_t consumed = 0U;
     size_t produced = 0U;
-    for (;;) {
-        if (cipher->expected_frame_len == 0U && cipher->pending_len >= CIPHER_HEADER_BYTES) {
+    for (;;)
+    {
+        if (cipher->expected_frame_len == 0U && cipher->pending_len >= CIPHER_HEADER_BYTES)
+        {
             size_t plaintext_len = (size_t)cipher->pending[0] |
                                    ((size_t)cipher->pending[1] << 8U);
-            if (plaintext_len > AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES) {
+            if (plaintext_len > AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES)
+            {
                 *input_consumed = consumed;
                 *output_len = produced;
                 return poison(cipher, AIRPLAY_CONTROL_CIPHER_FRAME_TOO_LARGE);
@@ -210,10 +237,12 @@ airplay_control_cipher_result_t airplay_control_cipher_decrypt(
         }
 
         if (cipher->expected_frame_len != 0U &&
-            cipher->pending_len == cipher->expected_frame_len) {
+            cipher->pending_len == cipher->expected_frame_len)
+        {
             size_t plaintext_len = cipher->expected_frame_len -
                                    CIPHER_HEADER_BYTES - CIPHER_TAG_BYTES;
-            if (plaintext_len > output_capacity - produced) {
+            if (plaintext_len > output_capacity - produced)
+            {
                 *input_consumed = consumed;
                 *output_len = produced;
                 return AIRPLAY_CONTROL_CIPHER_OUTPUT_TOO_SMALL;
@@ -228,7 +257,8 @@ airplay_control_cipher_result_t airplay_control_cipher_decrypt(
                 cipher->pending + CIPHER_HEADER_BYTES,
                 plaintext_len == 0U ? &empty_output : output + produced);
             mbedtls_platform_zeroize(nonce, sizeof(nonce));
-            if (rc != 0) {
+            if (rc != 0)
+            {
                 *input_consumed = consumed;
                 *output_len = produced;
                 return poison(cipher, AIRPLAY_CONTROL_CIPHER_AUTH_FAILED);
@@ -241,17 +271,22 @@ airplay_control_cipher_result_t airplay_control_cipher_decrypt(
             continue;
         }
 
-        if (consumed == input_len) break;
+        if (consumed == input_len)
+            break;
         size_t target = cipher->expected_frame_len;
-        if (target == 0U) target = CIPHER_HEADER_BYTES;
-        if (cipher->pending_len >= target || target > sizeof(cipher->pending)) {
+        if (target == 0U)
+            target = CIPHER_HEADER_BYTES;
+        if (cipher->pending_len >= target || target > sizeof(cipher->pending))
+        {
             *input_consumed = consumed;
             *output_len = produced;
             return poison(cipher, AIRPLAY_CONTROL_CIPHER_FRAME_TOO_LARGE);
         }
         size_t take = target - cipher->pending_len;
-        if (take > input_len - consumed) take = input_len - consumed;
-        if (take > sizeof(cipher->pending) - cipher->pending_len) {
+        if (take > input_len - consumed)
+            take = input_len - consumed;
+        if (take > sizeof(cipher->pending) - cipher->pending_len)
+        {
             *input_consumed = consumed;
             *output_len = produced;
             return poison(cipher, AIRPLAY_CONTROL_CIPHER_FRAME_TOO_LARGE);
@@ -269,7 +304,8 @@ airplay_control_cipher_result_t airplay_control_cipher_decrypt(
 
 void airplay_control_cipher_destroy(airplay_control_cipher_t *cipher)
 {
-    if (cipher == NULL) return;
+    if (cipher == NULL)
+        return;
     mbedtls_chachapoly_free(&cipher->read_ctx);
     mbedtls_chachapoly_free(&cipher->write_ctx);
     mbedtls_platform_zeroize(cipher, sizeof(*cipher));

@@ -9,57 +9,309 @@
  * {"streams": [{"streamConnectionID": 12345, "type": 110}]}
  */
 static const uint8_t k_setup_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
-    0xd1, 0x01, 0x02,
-    0x57, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x73,
-    0xa1, 0x03,
-    0xd2, 0x04, 0x05, 0x06, 0x07,
-    0x5f, 0x10, 0x12, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
-    0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44,
-    0x54, 0x74, 0x79, 0x70, 0x65,
-    0x11, 0x30, 0x39,
-    0x10, 0x6e,
-    0x08, 0x0b, 0x13, 0x15, 0x1a, 0x2f, 0x34, 0x37,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x39,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x57,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x5f,
+    0x10,
+    0x12,
+    0x73,
+    0x74,
+    0x72,
+    0x65,
+    0x61,
+    0x6d,
+    0x43,
+    0x6f,
+    0x6e,
+    0x6e,
+    0x65,
+    0x63,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x49,
+    0x44,
+    0x54,
+    0x74,
+    0x79,
+    0x70,
+    0x65,
+    0x11,
+    0x30,
+    0x39,
+    0x10,
+    0x6e,
+    0x08,
+    0x0b,
+    0x13,
+    0x15,
+    0x1a,
+    0x2f,
+    0x34,
+    0x37,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x39,
 };
 
 /* Python plistlib binary encoding of a /info main display at 1920x1080. */
 static const uint8_t k_display_info_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
-    0xd1, 0x01, 0x02,
-    0x58, 0x64, 0x69, 0x73, 0x70, 0x6c, 0x61, 0x79, 0x73,
-    0xa1, 0x03,
-    0xd2, 0x04, 0x05, 0x06, 0x07,
-    0x5b, 0x77, 0x69, 0x64, 0x74, 0x68, 0x50, 0x69, 0x78, 0x65, 0x6c, 0x73,
-    0x5c, 0x68, 0x65, 0x69, 0x67, 0x68, 0x74, 0x50, 0x69, 0x78, 0x65, 0x6c, 0x73,
-    0x11, 0x07, 0x80,
-    0x11, 0x04, 0x38,
-    0x08, 0x0b, 0x14, 0x16, 0x1b, 0x27, 0x34, 0x37,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3a,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x58,
+    0x64,
+    0x69,
+    0x73,
+    0x70,
+    0x6c,
+    0x61,
+    0x79,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x5b,
+    0x77,
+    0x69,
+    0x64,
+    0x74,
+    0x68,
+    0x50,
+    0x69,
+    0x78,
+    0x65,
+    0x6c,
+    0x73,
+    0x5c,
+    0x68,
+    0x65,
+    0x69,
+    0x67,
+    0x68,
+    0x74,
+    0x50,
+    0x69,
+    0x78,
+    0x65,
+    0x6c,
+    0x73,
+    0x11,
+    0x07,
+    0x80,
+    0x11,
+    0x04,
+    0x38,
+    0x08,
+    0x0b,
+    0x14,
+    0x16,
+    0x1b,
+    0x27,
+    0x34,
+    0x37,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x3a,
 };
 
 /* Same structure with widthPixels=65536, which cannot fit the HID report coordinates. */
 static const uint8_t k_oversize_display_info_plist[] = {
-    0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
-    0xd1, 0x01, 0x02,
-    0x58, 0x64, 0x69, 0x73, 0x70, 0x6c, 0x61, 0x79, 0x73,
-    0xa1, 0x03,
-    0xd2, 0x04, 0x05, 0x06, 0x07,
-    0x5b, 0x77, 0x69, 0x64, 0x74, 0x68, 0x50, 0x69, 0x78, 0x65, 0x6c, 0x73,
-    0x5c, 0x68, 0x65, 0x69, 0x67, 0x68, 0x74, 0x50, 0x69, 0x78, 0x65, 0x6c, 0x73,
-    0x12, 0x00, 0x01, 0x00, 0x00,
-    0x11, 0x04, 0x38,
-    0x08, 0x0b, 0x14, 0x16, 0x1b, 0x27, 0x34, 0x39,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3c,
+    0x62,
+    0x70,
+    0x6c,
+    0x69,
+    0x73,
+    0x74,
+    0x30,
+    0x30,
+    0xd1,
+    0x01,
+    0x02,
+    0x58,
+    0x64,
+    0x69,
+    0x73,
+    0x70,
+    0x6c,
+    0x61,
+    0x79,
+    0x73,
+    0xa1,
+    0x03,
+    0xd2,
+    0x04,
+    0x05,
+    0x06,
+    0x07,
+    0x5b,
+    0x77,
+    0x69,
+    0x64,
+    0x74,
+    0x68,
+    0x50,
+    0x69,
+    0x78,
+    0x65,
+    0x6c,
+    0x73,
+    0x5c,
+    0x68,
+    0x65,
+    0x69,
+    0x67,
+    0x68,
+    0x74,
+    0x50,
+    0x69,
+    0x78,
+    0x65,
+    0x6c,
+    0x73,
+    0x12,
+    0x00,
+    0x01,
+    0x00,
+    0x00,
+    0x11,
+    0x04,
+    0x38,
+    0x08,
+    0x0b,
+    0x14,
+    0x16,
+    0x1b,
+    0x27,
+    0x34,
+    0x39,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x3c,
 };
 
 static void test_setup_stream_lookup(void)
@@ -95,10 +347,10 @@ static void test_setup_stream_lookup(void)
     assert(airplay_bplist_get_uint(&doc, value, &number) == AIRPLAY_BPLIST_OK);
     assert(number == 110U);
 
-    assert(airplay_bplist_get_string(&doc, (airplay_bplist_object_t){.id = 1U},
+    assert(airplay_bplist_get_string(&doc, (airplay_bplist_object_t){ .id = 1U },
                                      name, sizeof(name), &name_len) == AIRPLAY_BPLIST_OK);
     assert(name_len == 7U && strcmp(name, "streams") == 0);
-    assert(airplay_bplist_get_type(&doc, (airplay_bplist_object_t){.id = 1U},
+    assert(airplay_bplist_get_type(&doc, (airplay_bplist_object_t){ .id = 1U },
                                    &type, NULL) == AIRPLAY_BPLIST_OK);
     assert(type == AIRPLAY_BPLIST_ASCII_STRING);
     assert(airplay_bplist_dict_get(&doc, root, "missing", &value) ==
@@ -149,7 +401,7 @@ static void test_rejects_malformed_documents(void)
     memcpy(malformed, k_setup_plist, sizeof(malformed));
     malformed[20] = 0xffU; /* array element references an absent object */
     assert(airplay_bplist_open(malformed, sizeof(malformed), &doc) == AIRPLAY_BPLIST_OK);
-    airplay_bplist_object_t streams = {.id = 2U};
+    airplay_bplist_object_t streams = { .id = 2U };
     airplay_bplist_object_t value;
     assert(airplay_bplist_array_get(&doc, streams, 0U, &value) ==
            AIRPLAY_BPLIST_INVALID_OBJECT);
@@ -219,13 +471,10 @@ static void test_builds_multi_stream_setup_response(void)
     uint8_t output[512];
     size_t output_len = 0U;
     airplay_bplist_stream_entry_t entries[4] = {
-        {.stream_type = 110U, .data_port = 40000U},
-        {.stream_type = 100U, .data_port = 40002U, .control_port = 40003U,
-         .has_connection_id = true, .stream_connection_id = 777U},
-        {.stream_type = 101U, .data_port = 40004U, .control_port = 40005U,
-         .has_connection_id = true, .stream_connection_id = 778U},
-        {.stream_type = 102U, .data_port = 40006U, .control_port = 40007U,
-         .has_connection_id = true, .stream_connection_id = 779U},
+        { .stream_type = 110U, .data_port = 40000U },
+        { .stream_type = 100U, .data_port = 40002U, .control_port = 40003U, .has_connection_id = true, .stream_connection_id = 777U },
+        { .stream_type = 101U, .data_port = 40004U, .control_port = 40005U, .has_connection_id = true, .stream_connection_id = 778U },
+        { .stream_type = 102U, .data_port = 40006U, .control_port = 40007U, .has_connection_id = true, .stream_connection_id = 779U },
     };
     assert(airplay_bplist_build_streams_setup_response(
                entries, 4U, output, sizeof(output), &output_len) ==
@@ -288,7 +537,7 @@ static void test_builds_multi_stream_setup_response(void)
     assert(airplay_bplist_build_streams_setup_response(
                entries, 0U, output, sizeof(output), &output_len) ==
            AIRPLAY_BPLIST_INVALID_ARGUMENT);
-    airplay_bplist_stream_entry_t bad = {.stream_type = 110U, .data_port = 0U};
+    airplay_bplist_stream_entry_t bad = { .stream_type = 110U, .data_port = 0U };
     assert(airplay_bplist_build_streams_setup_response(
                &bad, 1U, output, sizeof(output), &output_len) ==
            AIRPLAY_BPLIST_INVALID_ARGUMENT);
@@ -296,28 +545,39 @@ static void test_builds_multi_stream_setup_response(void)
 
 static void test_independent_initial_features(void)
 {
-    uint8_t classic[512],bytes[512]; size_t original,length;
-    assert(airplay_bplist_build_initial_setup_response(49152,49153,classic,sizeof(classic),&original)==AIRPLAY_BPLIST_OK);
-    for (unsigned mask=0;mask<4;++mask) {
-        bool vehicle=(mask&1)!=0,ui=(mask&2)!=0;
-        assert(airplay_bplist_build_initial_setup_response_features(49152,49153,vehicle,ui,bytes,sizeof(bytes),&length)==AIRPLAY_BPLIST_OK);
-        if (!mask) assert(length==original && !memcmp(bytes,classic,length));
-        airplay_bplist_doc_t d; airplay_bplist_object_t root,features,item; airplay_bplist_type_t type; uint64_t count;
-        assert(airplay_bplist_open(bytes,length,&d)==AIRPLAY_BPLIST_OK && airplay_bplist_root(&d,&root)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_dict_get(&d,root,"enabledFeatures",&features)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_get_type(&d,features,&type,&count)==AIRPLAY_BPLIST_OK && type==AIRPLAY_BPLIST_ARRAY);
-        assert(count==2U+(vehicle ? 1U : 0U)+(ui ? 1U : 0U));
-        const char *expected[4]={"iAPChannel","viewAreas"}; size_t n=2;
-        if (vehicle) expected[n++]="vehicleStateProtocol";
-        if (ui) expected[n++]="uiSync";
-        for (size_t i=0;i<n;++i) {
-            char text[64]; size_t size;
-            assert(airplay_bplist_array_get(&d,features,i,&item)==AIRPLAY_BPLIST_OK);
-            assert(airplay_bplist_get_string(&d,item,text,sizeof(text),&size)==AIRPLAY_BPLIST_OK && !strcmp(text,expected[i]));
+    uint8_t classic[512], bytes[512];
+    size_t original, length;
+    assert(airplay_bplist_build_initial_setup_response(49152, 49153, classic, sizeof(classic), &original) == AIRPLAY_BPLIST_OK);
+    for (unsigned mask = 0; mask < 4; ++mask)
+    {
+        bool vehicle = (mask & 1) != 0, ui = (mask & 2) != 0;
+        assert(airplay_bplist_build_initial_setup_response_features(49152, 49153, vehicle, ui, bytes, sizeof(bytes), &length) == AIRPLAY_BPLIST_OK);
+        if (!mask)
+            assert(length == original && !memcmp(bytes, classic, length));
+        airplay_bplist_doc_t d;
+        airplay_bplist_object_t root, features, item;
+        airplay_bplist_type_t type;
+        uint64_t count;
+        assert(airplay_bplist_open(bytes, length, &d) == AIRPLAY_BPLIST_OK && airplay_bplist_root(&d, &root) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&d, root, "enabledFeatures", &features) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_type(&d, features, &type, &count) == AIRPLAY_BPLIST_OK && type == AIRPLAY_BPLIST_ARRAY);
+        assert(count == 2U + (vehicle ? 1U : 0U) + (ui ? 1U : 0U));
+        const char *expected[4] = { "iAPChannel", "viewAreas" };
+        size_t n = 2;
+        if (vehicle)
+            expected[n++] = "vehicleStateProtocol";
+        if (ui)
+            expected[n++] = "uiSync";
+        for (size_t i = 0; i < n; ++i)
+        {
+            char text[64];
+            size_t size;
+            assert(airplay_bplist_array_get(&d, features, i, &item) == AIRPLAY_BPLIST_OK);
+            assert(airplay_bplist_get_string(&d, item, text, sizeof(text), &size) == AIRPLAY_BPLIST_OK && !strcmp(text, expected[i]));
         }
-        size_t full=length;
-        for (size_t i=0;i<full;++i)
-            assert(airplay_bplist_build_initial_setup_response_features(49152,49153,vehicle,ui,bytes,i,&length)==AIRPLAY_BPLIST_OUTPUT_TOO_SMALL);
+        size_t full = length;
+        for (size_t i = 0; i < full; ++i)
+            assert(airplay_bplist_build_initial_setup_response_features(49152, 49153, vehicle, ui, bytes, i, &length) == AIRPLAY_BPLIST_OUTPUT_TOO_SMALL);
     }
 }
 

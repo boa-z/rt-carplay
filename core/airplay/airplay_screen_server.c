@@ -13,7 +13,8 @@
 
 #define SCREEN_INITIAL_BODY_BYTES 4096U
 
-struct airplay_screen_server {
+struct airplay_screen_server
+{
     const struct rtcp_os *os;
     const struct rtcp_net *net;
     int listener_fd;
@@ -58,22 +59,27 @@ static uint32_t read_le32(const uint8_t *bytes)
 
 static void notify_exit(airplay_screen_server_t *server)
 {
-    if (server->exit_notified || server->stop_requested) return;
+    if (server->exit_notified || server->stop_requested)
+        return;
     server->exit_notified = true;
-    if (server->on_unexpected_exit != NULL) {
+    if (server->on_unexpected_exit != NULL)
+    {
         server->on_unexpected_exit(server->exit_context);
     }
 }
 
 static void fail_server(airplay_screen_server_t *server, const char *reason)
 {
-    if (server->failed) return;
+    if (server->failed)
+        return;
     RTCP_LOGW(TAG, "screen_peer=closing reason=%s", reason);
-    if (server->client_fd >= 0) {
+    if (server->client_fd >= 0)
+    {
         server->net->close(server->client_fd);
         server->client_fd = -1;
     }
-    if (server->listener_fd >= 0) {
+    if (server->listener_fd >= 0)
+    {
         server->net->close(server->listener_fd);
         server->listener_fd = -1;
     }
@@ -83,23 +89,28 @@ static void fail_server(airplay_screen_server_t *server, const char *reason)
 
 static bool ensure_body(airplay_screen_server_t *server, size_t required)
 {
-    if (required <= server->body_capacity) return true;
+    if (required <= server->body_capacity)
+        return true;
     size_t capacity = server->body_capacity != 0U
                           ? server->body_capacity
                           : (server->max_body_bytes < SCREEN_INITIAL_BODY_BYTES
                                  ? server->max_body_bytes
                                  : SCREEN_INITIAL_BODY_BYTES);
-    while (capacity < required) {
-        if (capacity >= server->max_body_bytes / 2U) {
+    while (capacity < required)
+    {
+        if (capacity >= server->max_body_bytes / 2U)
+        {
             capacity = server->max_body_bytes;
             break;
         }
         capacity *= 2U;
     }
-    if (capacity < required || capacity > server->max_body_bytes) return false;
+    if (capacity < required || capacity > server->max_body_bytes)
+        return false;
 
     uint8_t *body = realloc(server->body, capacity);
-    if (body == NULL) return false;
+    if (body == NULL)
+        return false;
     server->body = body;
     server->body_capacity = capacity;
     return true;
@@ -116,14 +127,18 @@ static uint32_t bounded_us(uint64_t us)
 }
 void airplay_screen_server_owner_tick(airplay_screen_server_t *server)
 {
-    if (!server || server->failed) return;
+    if (!server || server->failed)
+        return;
     uint64_t now = screen_now_us(server);
-    if (server->have_owner) {
+    if (server->have_owner)
+    {
         uint32_t gap = bounded_us(now - server->last_owner_us);
-        if (gap > server->stats.owner_gap_max_us) server->stats.owner_gap_max_us = gap;
+        if (gap > server->stats.owner_gap_max_us)
+            server->stats.owner_gap_max_us = gap;
         server->stats.owner_gap_over100ms += gap >= 100000U;
     }
-    server->last_owner_us = now; server->have_owner = true;
+    server->last_owner_us = now;
+    server->have_owner = true;
     ++server->stats.owner_calls;
 }
 static int screen_recv(airplay_screen_server_t *server, void *data, size_t length)
@@ -132,60 +147,74 @@ static int screen_recv(airplay_screen_server_t *server, void *data, size_t lengt
     int n = server->net->recv(server->client_fd, data, length);
     uint64_t ended = screen_now_us(server);
     uint32_t blocked = bounded_us(ended - started);
-    if (blocked > server->stats.recv_block_max_us) server->stats.recv_block_max_us = blocked;
+    if (blocked > server->stats.recv_block_max_us)
+        server->stats.recv_block_max_us = blocked;
     server->stats.recv_block_over10ms += blocked >= 10000U;
     /* Exclude idle time BETWEEN complete messages. This is a partial-message
      * fragment gap, still including USB/TCP delivery and owner scheduling. */
-    if (n > 0) {
-        if (server->have_fragment && server->header_len != 0U) {
+    if (n > 0)
+    {
+        if (server->have_fragment && server->header_len != 0U)
+        {
             uint32_t gap = bounded_us(ended - server->last_fragment_us);
             ++server->stats.partial_gaps;
             server->stats.partial_gap_over100ms += gap >= 100000U;
-            if (gap > server->stats.partial_gap_max_us) server->stats.partial_gap_max_us = gap;
+            if (gap > server->stats.partial_gap_max_us)
+                server->stats.partial_gap_max_us = gap;
         }
-        server->last_fragment_us = ended; server->have_fragment = true;
+        server->last_fragment_us = ended;
+        server->have_fragment = true;
     }
     return n;
 }
 
 static void handle_client(airplay_screen_server_t *server)
 {
-    if (server->header_len < sizeof(server->header)) {
+    if (server->header_len < sizeof(server->header))
+    {
         int received = screen_recv(
             server, server->header + server->header_len,
             sizeof(server->header) - server->header_len);
-        if (received <= 0) {
+        if (received <= 0)
+        {
             fail_server(server, received == 0 ? "peer_closed" : "header_read");
             return;
         }
-        if (server->header_len == 0U) server->assembly_start_us = screen_now_us(server);
+        if (server->header_len == 0U)
+            server->assembly_start_us = screen_now_us(server);
         ++server->stats.recv_calls;
         server->stats.wire_bytes += (size_t)received;
         server->header_len += (size_t)received;
-        if (server->header_len < sizeof(server->header)) return;
+        if (server->header_len < sizeof(server->header))
+            return;
 
         server->body_expected = read_le32(server->header);
         if (server->body_expected > server->max_body_bytes ||
-            !ensure_body(server, server->body_expected)) {
+            !ensure_body(server, server->body_expected))
+        {
             fail_server(server, "body_too_large");
             return;
         }
         server->body_len = 0U;
-        if (server->body_expected != 0U) return;
+        if (server->body_expected != 0U)
+            return;
     }
 
-    if (server->body_len < server->body_expected) {
+    if (server->body_len < server->body_expected)
+    {
         int received = screen_recv(
             server, server->body + server->body_len,
             server->body_expected - server->body_len);
-        if (received <= 0) {
+        if (received <= 0)
+        {
             fail_server(server, received == 0 ? "peer_closed" : "body_read");
             return;
         }
         ++server->stats.recv_calls;
         server->stats.wire_bytes += (size_t)received;
         server->body_len += (size_t)received;
-        if (server->body_len < server->body_expected) return;
+        if (server->body_len < server->body_expected)
+            return;
     }
 
     uint64_t arrival_us = screen_now_us(server);
@@ -201,20 +230,27 @@ static void handle_client(airplay_screen_server_t *server)
     server->stats.process_us += process_us;
     if (process_us > server->stats.process_max_us)
         server->stats.process_max_us = process_us > UINT32_MAX ? UINT32_MAX : (uint32_t)process_us;
-    if (result == RTCP_OK && server->header[4] == 0U) {
-        if (server->stats.frames != 0U) {
+    if (result == RTCP_OK && server->header[4] == 0U)
+    {
+        if (server->stats.frames != 0U)
+        {
             uint64_t gap = arrival_us - server->last_frame_us;
             ++server->stats.frame_gap_count;
             server->stats.frame_gap_us += gap;
             if (gap > server->stats.frame_gap_max_us)
                 server->stats.frame_gap_max_us = gap > UINT32_MAX ? UINT32_MAX : (uint32_t)gap;
-            if (gap <= 40000U) ++server->stats.frame_gap_le40ms;
-            else if (gap <= 100000U) ++server->stats.frame_gap_le100ms;
-            else ++server->stats.frame_gap_gt100ms;
+            if (gap <= 40000U)
+                ++server->stats.frame_gap_le40ms;
+            else if (gap <= 100000U)
+                ++server->stats.frame_gap_le100ms;
+            else
+                ++server->stats.frame_gap_gt100ms;
         }
         airplay_screen_header_info_t info;
-        if (airplay_screen_parse_header(server->header, server->body_len, &info)) {
-            if (server->stats.frames != 0U && info.sender_time_ns > server->last_sender_ns) {
+        if (airplay_screen_parse_header(server->header, server->body_len, &info))
+        {
+            if (server->stats.frames != 0U && info.sender_time_ns > server->last_sender_ns)
+            {
                 uint64_t gap = (info.sender_time_ns - server->last_sender_ns) / 1000U;
                 ++server->stats.sender_gap_count;
                 server->stats.sender_gap_us += gap;
@@ -226,10 +262,12 @@ static void handle_client(airplay_screen_server_t *server)
         server->last_frame_us = arrival_us;
         ++server->stats.frames;
     }
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         RTCP_LOGW(TAG, "screen_message=discarded opcode=%u rc=%d",
                   (unsigned)server->header[4], result);
-        if (result == RTCP_EIO && server->header[4] == 0U) {
+        if (result == RTCP_EIO && server->header[4] == 0U)
+        {
             fail_server(server, "frame_authentication_failed");
             return;
         }
@@ -246,17 +284,21 @@ int airplay_screen_server_start(const struct rtcp_os *os,
                                 const airplay_screen_server_config_t *config,
                                 airplay_screen_server_t **out_server)
 {
-    if (out_server == NULL) return RTCP_EINVAL;
+    if (out_server == NULL)
+        return RTCP_EINVAL;
     *out_server = NULL;
     if (os == NULL || net == NULL || output_key == NULL || config == NULL ||
-        config->max_body_bytes == 0U || config->on_message == NULL) {
+        config->max_body_bytes == 0U || config->on_message == NULL)
+    {
         return RTCP_EINVAL;
     }
     uint8_t family = config->family == 0U ? RTCP_AF_INET : config->family;
-    if (family != RTCP_AF_INET && family != RTCP_AF_INET6) return RTCP_EINVAL;
+    if (family != RTCP_AF_INET && family != RTCP_AF_INET6)
+        return RTCP_EINVAL;
 
     airplay_screen_server_t *server = calloc(1U, sizeof(*server));
-    if (server == NULL) return RTCP_ENOMEM;
+    if (server == NULL)
+        return RTCP_ENOMEM;
     server->os = os;
     server->net = net;
     server->listener_fd = -1;
@@ -270,20 +312,23 @@ int airplay_screen_server_start(const struct rtcp_os *os,
     server->stream = airplay_screen_stream_create(
         output_key, config->max_body_bytes, config->on_message,
         config->message_context);
-    if (server->stream == NULL) {
+    if (server->stream == NULL)
+    {
         free(server);
         return RTCP_ENOMEM;
     }
 
     int listener_fd = net->listen(family, config->requested_port);
-    if (listener_fd < 0) {
+    if (listener_fd < 0)
+    {
         airplay_screen_stream_destroy(server->stream);
         free(server);
         return listener_fd;
     }
     server->listener_fd = listener_fd;
     server->port = net->local_port != NULL ? net->local_port(listener_fd) : 0U;
-    if (server->port == 0U) {
+    if (server->port == 0U)
+    {
         net->close(listener_fd);
         airplay_screen_stream_destroy(server->stream);
         free(server);
@@ -303,33 +348,41 @@ uint16_t airplay_screen_server_get_port(const airplay_screen_server_t *server)
 
 int airplay_screen_server_get_fd(const airplay_screen_server_t *server)
 {
-    if (server == NULL || server->failed) return -1;
-    if (server->client_fd >= 0) return server->client_fd;
+    if (server == NULL || server->failed)
+        return -1;
+    if (server->client_fd >= 0)
+        return server->client_fd;
     return server->listener_fd;
 }
 
 void airplay_screen_server_get_stats(const airplay_screen_server_t *server,
-                                      airplay_screen_server_stats_t *stats)
+                                     airplay_screen_server_stats_t *stats)
 {
-    if (stats == NULL) return;
-    if (server == NULL) memset(stats, 0, sizeof(*stats));
-    else {
+    if (stats == NULL)
+        return;
+    if (server == NULL)
+        memset(stats, 0, sizeof(*stats));
+    else
+    {
         *stats = server->stats;
         stats->pending_header_bytes = (uint32_t)server->header_len;
         stats->pending_body_bytes = (uint32_t)(server->body_expected - server->body_len);
-        stats->pending_age_ms = server->header_len ?
-            bounded_us((screen_now_us(server) - server->assembly_start_us) / 1000U) : 0;
+        stats->pending_age_ms = server->header_len ? bounded_us((screen_now_us(server) - server->assembly_start_us) / 1000U) : 0;
     }
 }
 
 void airplay_screen_server_poll(airplay_screen_server_t *server)
 {
-    if (server == NULL || server->failed) return;
+    if (server == NULL || server->failed)
+        return;
 
-    if (server->client_fd < 0) {
-        if (server->listener_fd < 0) return;
+    if (server->client_fd < 0)
+    {
+        if (server->listener_fd < 0)
+            return;
         int client_fd = server->net->accept(server->listener_fd, NULL);
-        if (client_fd < 0) {
+        if (client_fd < 0)
+        {
             fail_server(server, "accept");
             return;
         }
@@ -348,34 +401,50 @@ void airplay_screen_server_poll(airplay_screen_server_t *server)
      * One callback/recv can overrun the time budget; this is cooperative. */
     uint64_t started = screen_now_us(server);
     ++server->stats.read_batches;
-    for (unsigned reads = 0; reads < 16U; ++reads) {
+    for (unsigned reads = 0; reads < 16U; ++reads)
+    {
         handle_client(server); /* initial readiness supplied by the owner */
-        if (server->failed || server->stop_requested) break;
-        if (reads == 15U || screen_now_us(server) - started >= 2000U) {
+        if (server->failed || server->stop_requested)
+            break;
+        if (reads == 15U || screen_now_us(server) - started >= 2000U)
+        {
             ++server->stats.read_budget_yields;
             break;
         }
-        if (!server->net->poll) break; /* legacy caller supplies readiness */
+        if (!server->net->poll)
+            break; /* legacy caller supplies readiness */
         struct rtcp_pollfd fd = {
-            .fd = server->client_fd, .events = RTCP_POLLIN, .revents = 0,
+            .fd = server->client_fd,
+            .events = RTCP_POLLIN,
+            .revents = 0,
         };
         int ready = server->net->poll(&fd, 1, 0);
-        if (ready < 0) { fail_server(server, "burst_poll"); break; }
-        if (ready == 0 || !(fd.revents & RTCP_POLLIN)) break;
+        if (ready < 0)
+        {
+            fail_server(server, "burst_poll");
+            break;
+        }
+        if (ready == 0 || !(fd.revents & RTCP_POLLIN))
+            break;
     }
 }
 
 void airplay_screen_server_stop(airplay_screen_server_t *server,
                                 const struct rtcp_net *net)
 {
-    if (server == NULL) return;
+    if (server == NULL)
+        return;
     server->stop_requested = true;
-    if (net != NULL && net->close != NULL) {
-        if (server->client_fd >= 0) net->close(server->client_fd);
-        if (server->listener_fd >= 0) net->close(server->listener_fd);
+    if (net != NULL && net->close != NULL)
+    {
+        if (server->client_fd >= 0)
+            net->close(server->client_fd);
+        if (server->listener_fd >= 0)
+            net->close(server->listener_fd);
     }
     airplay_screen_stream_destroy(server->stream);
-    if (server->body != NULL) {
+    if (server->body != NULL)
+    {
         mbedtls_platform_zeroize(server->body, server->body_capacity);
         free(server->body);
     }

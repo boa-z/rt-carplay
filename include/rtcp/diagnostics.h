@@ -7,7 +7,8 @@
 
 /* Owner-thread snapshots. Elapsed wall time includes callbacks/preemption;
  * counters do not establish presentation quality or clock synchronization. */
-typedef struct {
+typedef struct
+{
     uint32_t recv_calls;
     uint32_t owner_calls, owner_gap_over100ms;
     uint32_t owner_gap_max_us; /* lifetime maxima, explicitly labeled */
@@ -35,7 +36,8 @@ typedef struct {
 /* Experimental alternate transport, owner-thread snapshot. Counters survive
  * selective close until next open; open/close counts reset on stop/start.
  * last_error is transport-level EIO on unexpected loss, not a codec verdict. */
-typedef struct {
+typedef struct
+{
     bool configured, ready;
     uint16_t port;
     uint32_t opened, closed;
@@ -43,14 +45,16 @@ typedef struct {
     rtcp_screen_stats_t screen;
 } rtcp_alt_video_status_t;
 
-typedef struct {
+typedef struct
+{
     bool active;
     uint32_t requests_sent, responses_received;
     uint32_t requests_received, responses_sent;
     uint32_t rejected, send_errors, timeouts;
 } rtcp_timing_stats_t;
 
-typedef struct {
+typedef struct
+{
     unsigned active_streams;
     uint32_t datagrams, auth_failures;
     uint32_t malformed, replay_drops, delivered, sink_rejected;
@@ -62,7 +66,8 @@ typedef struct {
 
 /* datagrams precede authentication; active_streams counts active Audio SETUP.
  * Sink packet counters separately describe payloads accepted by the host. */
-typedef struct {
+typedef struct
+{
     rtcp_screen_stats_t screen;
     rtcp_audio_stats_t audio;
     rtcp_timing_stats_t timing;

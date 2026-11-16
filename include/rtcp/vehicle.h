@@ -6,40 +6,62 @@
 #include <stdint.h>
 #include "rtcp/data_stream.h"
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 /* Bounded foundation, not a complete vehicle catalogue or Ultra certification.
  * Host assigns the actual accessory/service/characteristic IDs and types.
  * All calls belong to one serialized owner; callbacks must not reenter. */
-#define RTCP_VEHICLE_MAX_CHARACTERISTICS 8U
-#define RTCP_VEHICLE_MAX_VALUE_BYTES 256U
-#define RTCP_VEHICLE_DATASTREAM_UUID RTCP_DATA_STREAM_VEHICLE_UUID
+#define RTCP_VEHICLE_MAX_CHARACTERISTICS  8U
+#define RTCP_VEHICLE_MAX_VALUE_BYTES      256U
+#define RTCP_VEHICLE_DATASTREAM_UUID      RTCP_DATA_STREAM_VEHICLE_UUID
 #define RTCP_VEHICLE_HIGH_DATASTREAM_UUID RTCP_DATA_STREAM_VEHICLE_HIGH_UUID
 
-typedef enum {
-    RTCP_VEHICLE_BOOL = 0, RTCP_VEHICLE_UINT8 = 1,
-    RTCP_VEHICLE_UINT32 = 3, RTCP_VEHICLE_UINT64 = 4,
-    RTCP_VEHICLE_INT32 = 7, RTCP_VEHICLE_FLOAT = 9,
-    RTCP_VEHICLE_STRING = 10, RTCP_VEHICLE_DATA = 11
+typedef enum
+{
+    RTCP_VEHICLE_BOOL = 0,
+    RTCP_VEHICLE_UINT8 = 1,
+    RTCP_VEHICLE_UINT32 = 3,
+    RTCP_VEHICLE_UINT64 = 4,
+    RTCP_VEHICLE_INT32 = 7,
+    RTCP_VEHICLE_FLOAT = 9,
+    RTCP_VEHICLE_STRING = 10,
+    RTCP_VEHICLE_DATA = 11
 } rtcp_vehicle_format_t;
-typedef enum { RTCP_VEHICLE_PHONE, RTCP_VEHICLE_CAR, RTCP_VEHICLE_SHARED } rtcp_vehicle_owner_t;
-typedef enum { RTCP_VEHICLE_NORMAL, RTCP_VEHICLE_HIGH } rtcp_vehicle_lane_t;
+typedef enum
+{
+    RTCP_VEHICLE_PHONE,
+    RTCP_VEHICLE_CAR,
+    RTCP_VEHICLE_SHARED
+} rtcp_vehicle_owner_t;
+typedef enum
+{
+    RTCP_VEHICLE_NORMAL,
+    RTCP_VEHICLE_HIGH
+} rtcp_vehicle_lane_t;
 
 /* Strings are UTF-8 bytes with explicit length, without a trailing NUL.
  * Uint64 is limited to INT64_MAX by this OPACK foundation; larger values must
  * not be advertised. A missing value is represented by has_value=false. */
-typedef struct {
+typedef struct
+{
     rtcp_vehicle_format_t format;
-    union {
+    union
+    {
         bool boolean;
         int64_t integer;
         double real;
-        struct { size_t length; uint8_t bytes[RTCP_VEHICLE_MAX_VALUE_BYTES]; } blob;
+        struct
+        {
+            size_t length;
+            uint8_t bytes[RTCP_VEHICLE_MAX_VALUE_BYTES];
+        } blob;
     } as;
 } rtcp_vehicle_value_t;
 
-typedef struct {
+typedef struct
+{
     int64_t accessory_iid, accessory_type, service_iid, service_type, iid, type;
     rtcp_vehicle_format_t format;
     rtcp_vehicle_owner_t owner;
@@ -56,21 +78,24 @@ typedef struct {
 /* Optional service-level controls, described using LIVI's sender/hasResponse
  * and named parameter arrays. IDs/types belong to the actual host, not SDK.
  * Parameters are required, ordered by the descriptor and copied on delivery. */
-#define RTCP_VEHICLE_MAX_CONTROLS 4U
+#define RTCP_VEHICLE_MAX_CONTROLS           4U
 #define RTCP_VEHICLE_MAX_CONTROL_PARAMETERS 4U
-#define RTCP_VEHICLE_MAX_PARAMETER_NAME 32U
-typedef struct {
+#define RTCP_VEHICLE_MAX_PARAMETER_NAME     32U
+typedef struct
+{
     const char *name;
     rtcp_vehicle_format_t format;
     size_t maximum_length; /* STRING/DATA only, 1..MAX_VALUE_BYTES. */
 } rtcp_vehicle_control_parameter_t;
-typedef struct {
+typedef struct
+{
     int64_t service_iid, iid, type;
     bool urgent;
     const rtcp_vehicle_control_parameter_t *request, *response;
     size_t request_count, response_count;
 } rtcp_vehicle_control_t;
-typedef struct {
+typedef struct
+{
     size_t count;
     rtcp_vehicle_value_t values[RTCP_VEHICLE_MAX_CONTROL_PARAMETERS];
 } rtcp_vehicle_control_values_t;
@@ -78,7 +103,8 @@ typedef struct {
 /* validate_write is a pure policy check; return false to refuse a phone write.
  * did_write runs only after the response fits and the new value is committed.
  * Neither callback implies actual vehicle actuation or feedback. */
-typedef struct {
+typedef struct
+{
     size_t struct_size;
     const char *plugin_name;
     int64_t plugin_id;
@@ -102,7 +128,8 @@ typedef struct {
 } rtcp_vehicle_config_t;
 
 /* Local diagnostics, not wire command IDs or proof of phone receipt. */
-typedef enum {
+typedef enum
+{
     RTCP_VEHICLE_METHOD_UNKNOWN = 0,
     RTCP_VEHICLE_METHOD_CONFIG,
     RTCP_VEHICLE_METHOD_READ,
@@ -113,7 +140,8 @@ typedef enum {
 } rtcp_vehicle_method_t;
 
 typedef struct rtcp_vehicle rtcp_vehicle_t;
-typedef struct {
+typedef struct
+{
     size_t characteristics, subscribed, pending_notifications;
     uint32_t requests, rejected_messages, committed_writes, refused_writes;
     uint32_t notifications;
@@ -133,7 +161,8 @@ typedef struct {
 
 /* Receiver-owned delivery workspace; counters are cumulative until destroy.
  * Queued means copied by transport, not acknowledged or applied by the phone. */
-typedef struct {
+typedef struct
+{
     bool attached;
     size_t pending_reply_bytes[2], pending_notification_bytes;
     uint64_t queued_messages, queue_retries, rejected_requests;

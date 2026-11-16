@@ -24,7 +24,8 @@
 
 #define RTCP_PLIST_MAX_DEPTH 4U
 
-typedef struct {
+typedef struct
+{
     uint8_t *buffer;
     size_t capacity;
     size_t length;

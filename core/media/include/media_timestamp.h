@@ -4,7 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     bool initialized;
     bool sender_clock_active;
     uint64_t sender_origin_ns;

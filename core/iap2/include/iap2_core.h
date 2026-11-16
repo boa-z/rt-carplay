@@ -6,7 +6,8 @@
 
 typedef struct iap2_core iap2_core_t;
 
-typedef enum {
+typedef enum
+{
     IAP2_CORE_IDLE = 0,
     IAP2_CORE_WAIT_MARKER,
     IAP2_CORE_NEGOTIATING,
@@ -50,7 +51,6 @@ bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
 iap2_core_state_t iap2_core_state(const iap2_core_t *core);
 uint32_t iap2_core_rx_frames(const iap2_core_t *core);
 uint32_t iap2_core_bad_frames(const iap2_core_t *core);
-
 
 /* Before start only. TCP iAP2 uses control session version 2 and zero-ACK
  * synchronization; RFCOMM/USB defaults remain unchanged. */

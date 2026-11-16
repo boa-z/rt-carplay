@@ -15,13 +15,14 @@
 #include "mbedtls/md.h"
 #include "mbedtls/platform_util.h"
 
-#define TEST_KEY_BYTES 32U
-#define TEST_SIG_BYTES 64U
-#define TEST_NONCE_BYTES 12U
-#define TEST_ID "controller-test"
+#define TEST_KEY_BYTES    32U
+#define TEST_SIG_BYTES    64U
+#define TEST_NONCE_BYTES  12U
+#define TEST_ID           "controller-test"
 #define TEST_ACCESSORY_ID "accessory-test"
 
-typedef struct {
+typedef struct
+{
     uint8_t random_counter;
     bool fail_random;
     const uint8_t *controller_key;
@@ -32,8 +33,10 @@ typedef struct {
 static bool test_random(uint8_t *output, size_t output_len, void *context)
 {
     provider_fixture_t *fixture = context;
-    if (fixture->fail_random) return false;
-    for (size_t i = 0; i < output_len; ++i) {
+    if (fixture->fail_random)
+        return false;
+    for (size_t i = 0; i < output_len; ++i)
+    {
         output[i] = fixture->random_counter++;
     }
     return true;
@@ -55,16 +58,21 @@ static bool fake_signature(const uint8_t key[TEST_KEY_BYTES],
 {
     const mbedtls_md_info_t *sha512 =
         mbedtls_md_info_from_type(MBEDTLS_MD_SHA512);
-    if (sha512 == NULL) return false;
+    if (sha512 == NULL)
+        return false;
     mbedtls_md_context_t ctx;
     mbedtls_md_init(&ctx);
     int rc = mbedtls_md_setup(&ctx, sha512, 0);
-    if (rc == 0) rc = mbedtls_md_starts(&ctx);
-    if (rc == 0) rc = mbedtls_md_update(&ctx, key, TEST_KEY_BYTES);
-    if (rc == 0 && message_len != 0U) {
+    if (rc == 0)
+        rc = mbedtls_md_starts(&ctx);
+    if (rc == 0)
+        rc = mbedtls_md_update(&ctx, key, TEST_KEY_BYTES);
+    if (rc == 0 && message_len != 0U)
+    {
         rc = mbedtls_md_update(&ctx, message, message_len);
     }
-    if (rc == 0) rc = mbedtls_md_finish(&ctx, signature);
+    if (rc == 0)
+        rc = mbedtls_md_finish(&ctx, signature);
     mbedtls_md_free(&ctx);
     return rc == 0;
 }
@@ -89,7 +97,8 @@ static bool verify_controller(const uint8_t public_key[TEST_KEY_BYTES],
     uint8_t expected[TEST_SIG_BYTES];
     if (fixture->fail_verify ||
         memcmp(public_key, fixture->controller_key, TEST_KEY_BYTES) != 0 ||
-        !fake_signature(public_key, message, message_len, expected)) {
+        !fake_signature(public_key, message, message_len, expected))
+    {
         return false;
     }
     uint8_t diff = 0;
@@ -105,7 +114,8 @@ static bool lookup_controller(const uint8_t *identifier,
 {
     provider_fixture_t *fixture = context;
     if (identifier_len != sizeof(TEST_ID) - 1U ||
-        memcmp(identifier, TEST_ID, sizeof(TEST_ID) - 1U) != 0) {
+        memcmp(identifier, TEST_ID, sizeof(TEST_ID) - 1U) != 0)
+    {
         return false;
     }
     memcpy(public_key, fixture->controller_key, TEST_KEY_BYTES);
@@ -199,7 +209,8 @@ static void derive_key(const uint8_t shared[TEST_KEY_BYTES],
 static void decode_hex(const char *hex, uint8_t *output, size_t output_len)
 {
     assert(strlen(hex) == output_len * 2U);
-    for (size_t i = 0; i < output_len; ++i) {
+    for (size_t i = 0; i < output_len; ++i)
+    {
         unsigned int value = 0U;
         assert(sscanf(hex + i * 2U, "%2x", &value) == 1);
         output[i] = (uint8_t)value;
@@ -296,15 +307,44 @@ static void test_complete_exchange(bool tamper_controller_signature)
                sizeof(controller_public)) == 0);
     assert(public_len == sizeof(controller_public));
 
-    provider_fixture_t fixture = {0};
+    provider_fixture_t fixture = { 0 };
     fixture.random_counter = 11U;
     fixture.controller_key = (const uint8_t[TEST_KEY_BYTES]){
-        0x43,0x4f,0x4e,0x54,0x52,0x4f,0x4c,0x4c,
-        0x45,0x52,0x2d,0x54,0x45,0x53,0x54,0x2d,
-        0x4b,0x45,0x59,0x2d,0x4d,0x41,0x54,0x45,
-        0x52,0x49,0x41,0x4c,0x2d,0x30,0x30,0x31,
+        0x43,
+        0x4f,
+        0x4e,
+        0x54,
+        0x52,
+        0x4f,
+        0x4c,
+        0x4c,
+        0x45,
+        0x52,
+        0x2d,
+        0x54,
+        0x45,
+        0x53,
+        0x54,
+        0x2d,
+        0x4b,
+        0x45,
+        0x59,
+        0x2d,
+        0x4d,
+        0x41,
+        0x54,
+        0x45,
+        0x52,
+        0x49,
+        0x41,
+        0x4c,
+        0x2d,
+        0x30,
+        0x30,
+        0x31,
     };
-    for (size_t i = 0; i < sizeof(fixture.accessory_secret); ++i) {
+    for (size_t i = 0; i < sizeof(fixture.accessory_secret); ++i)
+    {
         fixture.accessory_secret[i] = (uint8_t)(0xa0U + i);
     }
     airplay_pair_verify_config_t config = {
@@ -321,9 +361,8 @@ static void test_complete_exchange(bool tamper_controller_signature)
            AIRPLAY_PAIR_VERIFY_OK);
     const uint8_t state1 = 1U;
     const airplay_tlv8_item_t m1_items[] = {
-        {.type = 0x06U, .value = &state1, .value_len = 1U},
-        {.type = 0x03U, .value = controller_public,
-         .value_len = sizeof(controller_public)},
+        { .type = 0x06U, .value = &state1, .value_len = 1U },
+        { .type = 0x03U, .value = controller_public, .value_len = sizeof(controller_public) },
     };
     request_len = encode_tlv(m1_items, 2U, request, sizeof(request));
     assert(airplay_pair_verify_handle(session, request, request_len, response,
@@ -387,12 +426,11 @@ static void test_complete_exchange(bool tamper_controller_signature)
     assert(fake_signature(fixture.controller_key, controller_signature_input,
                           TEST_KEY_BYTES + sizeof(TEST_ID) - 1U + TEST_KEY_BYTES,
                           controller_signature));
-    if (tamper_controller_signature) controller_signature[0] ^= 0x01U;
+    if (tamper_controller_signature)
+        controller_signature[0] ^= 0x01U;
     const airplay_tlv8_item_t m3_sub_items[] = {
-        {.type = 0x01U, .value = (const uint8_t *)TEST_ID,
-         .value_len = sizeof(TEST_ID) - 1U},
-        {.type = 0x0aU, .value = controller_signature,
-         .value_len = sizeof(controller_signature)},
+        { .type = 0x01U, .value = (const uint8_t *)TEST_ID, .value_len = sizeof(TEST_ID) - 1U },
+        { .type = 0x0aU, .value = controller_signature, .value_len = sizeof(controller_signature) },
     };
     submessage_len = encode_tlv(m3_sub_items, 2U, submessage,
                                 sizeof(submessage));
@@ -400,20 +438,23 @@ static void test_complete_exchange(bool tamper_controller_signature)
                    encrypted, &encrypted_len);
     const uint8_t state3 = 3U;
     const airplay_tlv8_item_t m3_items[] = {
-        {.type = 0x06U, .value = &state3, .value_len = 1U},
-        {.type = 0x05U, .value = encrypted, .value_len = encrypted_len},
+        { .type = 0x06U, .value = &state3, .value_len = 1U },
+        { .type = 0x05U, .value = encrypted, .value_len = encrypted_len },
     };
     request_len = encode_tlv(m3_items, 2U, request, sizeof(request));
     airplay_pair_verify_result_t result = airplay_pair_verify_handle(
         session, request, request_len, response, sizeof(response),
         &response_len);
-    if (tamper_controller_signature) {
+    if (tamper_controller_signature)
+    {
         assert(result == AIRPLAY_PAIR_VERIFY_AUTH_FAILED);
         airplay_pair_verify_control_keys_t keys;
         assert(airplay_pair_verify_get_control_keys(session, &keys) ==
                AIRPLAY_PAIR_VERIFY_STATE_ERROR);
         airplay_pair_verify_destroy(session);
-    } else {
+    }
+    else
+    {
         assert(result == AIRPLAY_PAIR_VERIFY_OK);
         response_state = 0U;
         assert(get_tlv(response, response_len, 0x06U, &response_state, 1U) ==
@@ -486,8 +527,8 @@ int main(void)
     uint8_t output[128];
     size_t output_len = 0U;
     uint8_t counter = 0U;
-    provider_fixture_t fixture = {.random_counter = 0U, .fail_random = true};
-    uint8_t controller_key[TEST_KEY_BYTES] = {0};
+    provider_fixture_t fixture = { .random_counter = 0U, .fail_random = true };
+    uint8_t controller_key[TEST_KEY_BYTES] = { 0 };
     fixture.controller_key = controller_key;
     airplay_pair_verify_config_t config = {
         .accessory_identifier = (const uint8_t *)TEST_ACCESSORY_ID,
@@ -502,10 +543,10 @@ int main(void)
     assert(airplay_pair_verify_create(&config, &session) ==
            AIRPLAY_PAIR_VERIFY_OK);
     const uint8_t state1 = 1U;
-    const uint8_t public_key[TEST_KEY_BYTES] = {9U};
+    const uint8_t public_key[TEST_KEY_BYTES] = { 9U };
     const airplay_tlv8_item_t request_items[] = {
-        {.type = 0x06U, .value = &state1, .value_len = 1U},
-        {.type = 0x03U, .value = public_key, .value_len = sizeof(public_key)},
+        { .type = 0x06U, .value = &state1, .value_len = 1U },
+        { .type = 0x03U, .value = public_key, .value_len = sizeof(public_key) },
     };
     size_t request_len = encode_tlv(request_items, 2U, output, sizeof(output));
     uint8_t response[128];

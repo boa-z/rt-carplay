@@ -23,7 +23,8 @@
 
 typedef struct iap2_session iap2_session_t;
 
-typedef struct {
+typedef struct
+{
     const char *ssid;
     const char *passphrase;
     uint8_t channel;
@@ -31,7 +32,8 @@ typedef struct {
     uint8_t bssid[6];
 } iap2_session_wifi_t;
 
-typedef struct {
+typedef struct
+{
     uint16_t airplay_port;
     const char *ip_address;
     const char *device_identifier;
@@ -42,7 +44,8 @@ typedef struct {
     bool transport_connected; /* TCP accepted; stop wired startup retries before SETUP. */
 } iap2_session_airplay_t;
 
-typedef enum {
+typedef enum
+{
     IAP2_SESSION_EVENT_IDENTIFICATION_ACCEPTED = 0,
     IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED,
     IAP2_SESSION_EVENT_MFI_CERTIFICATE_SENT,
@@ -62,12 +65,12 @@ typedef enum {
      * bring-up log can tell a phone rejection (0xAA04) apart from a local
      * certificate/signature failure.
      */
-    IAP2_SESSION_EVENT_MFI_CERT_FAILED,       /* cert read or 0xAA01 send failed */
-    IAP2_SESSION_EVENT_MFI_CHALLENGE_INVALID, /* 0xAA02 body missing/bad length */
-    IAP2_SESSION_EVENT_MFI_SIGN_FAILED,       /* coprocessor sign returned an error */
-    IAP2_SESSION_EVENT_MFI_STATE_INVALID,     /* 0xAA02/0xAA05 out of sequence */
-    IAP2_SESSION_EVENT_MFI_ACK_FAILED,        /* 0xAA03 was not link-acked */
-    IAP2_SESSION_EVENT_MFI_PHONE_REJECTED,    /* phone sent 0xAA04 */
+    IAP2_SESSION_EVENT_MFI_CERT_FAILED,          /* cert read or 0xAA01 send failed */
+    IAP2_SESSION_EVENT_MFI_CHALLENGE_INVALID,    /* 0xAA02 body missing/bad length */
+    IAP2_SESSION_EVENT_MFI_SIGN_FAILED,          /* coprocessor sign returned an error */
+    IAP2_SESSION_EVENT_MFI_STATE_INVALID,        /* 0xAA02/0xAA05 out of sequence */
+    IAP2_SESSION_EVENT_MFI_ACK_FAILED,           /* 0xAA03 was not link-acked */
+    IAP2_SESSION_EVENT_MFI_PHONE_REJECTED,       /* phone sent 0xAA04 */
     IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED, /* 0xAA03 could not be queued */
     IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED,
     IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED, /* link ACK, not application acceptance */
@@ -80,7 +83,8 @@ typedef enum {
  * identification profile, the Wi-Fi exchange and the 0x4301 body; the iAP2
  * link, MFi and message sequencing are shared.
  */
-typedef enum {
+typedef enum
+{
     IAP2_SESSION_TRANSPORT_WIRELESS = 0,
     IAP2_SESSION_TRANSPORT_WIRED_USB,
 } iap2_session_transport_t;
@@ -91,10 +95,11 @@ typedef void (*iap2_session_event_cb_t)(iap2_session_event_t event, void *contex
 /* Optional synchronous observer. Body is borrowed until return; do not retain
  * it or reenter/destroy the session. Outgoing means queued, not peer accepted. */
 typedef void (*iap2_session_message_cb_t)(bool outgoing, uint16_t message_id,
-                                         const uint8_t *body, size_t body_len,
-                                         void *context);
+                                          const uint8_t *body, size_t body_len,
+                                          void *context);
 
-typedef struct {
+typedef struct
+{
     iap2_identity_config_t identity; /* strings are borrowed for the session lifetime */
     const struct rtcp_mfi *mfi;      /* NULL disables the MFi exchange */
     iap2_core_tx_cb_t tx;
@@ -118,11 +123,11 @@ typedef struct {
     iap2_session_message_cb_t observe_message;
 } iap2_session_config_t;
 
-#define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES 4U
-#define IAP2_SESSION_PRE_TRANSPORT_WIFI_CONFIG_LIMIT 5U
+#define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES       4U
+#define IAP2_SESSION_PRE_TRANSPORT_WIFI_CONFIG_LIMIT  5U
 #define IAP2_SESSION_POST_TRANSPORT_WIFI_CONFIG_LIMIT 2U
-#define IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS 10000U
-#define IAP2_SESSION_CARPLAY_REINVITE_MAX 5U
+#define IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS     10000U
+#define IAP2_SESSION_CARPLAY_REINVITE_MAX             5U
 
 iap2_session_t *iap2_session_create(const iap2_session_config_t *config);
 void iap2_session_destroy(iap2_session_t *session);

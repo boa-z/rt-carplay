@@ -23,7 +23,7 @@
 #define CARPLAY_CTRL_CONNECT_PATH "/ctrl-int/1/connect"
 /* Vendor reference sends "carplay" as the Host header; the phone's control
  * server does not use it for routing. */
-#define CARPLAY_CTRL_HOST "carplay"
+#define CARPLAY_CTRL_HOST       "carplay"
 #define CARPLAY_CTRL_TIMEOUT_MS 1500
 
 /* Parses the AirPlay device id ("AA:BB:CC:DD:EE:FF", colons optional) into

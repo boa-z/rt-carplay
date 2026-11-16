@@ -11,5 +11,5 @@ size_t airplay_audio_sender_frames(const airplay_audio_sender_t *);
  * sealed datagram bytes or a negative error. Every seal consumes its nonce,
  * even if the caller subsequently fails to transmit the packet. */
 int airplay_audio_sender_encode(airplay_audio_sender_t *, const int16_t *, size_t frames,
-                               bool mute, uint8_t *wire, size_t capacity);
+                                bool mute, uint8_t *wire, size_t capacity);
 void airplay_audio_sender_destroy(airplay_audio_sender_t *);

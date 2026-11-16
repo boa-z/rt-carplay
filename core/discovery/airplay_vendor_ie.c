@@ -2,12 +2,22 @@
 #include "airplay_vendor_ie.h"
 
 static const uint8_t carplay_vendor_ie[AIRPLAY_VENDOR_IE_BYTES] = {
-    0xDD, 0x08, 0x00, 0xA0, 0x40, 0x00, 0x00, 0x02, 0x00, 0x22,
+    0xDD,
+    0x08,
+    0x00,
+    0xA0,
+    0x40,
+    0x00,
+    0x00,
+    0x02,
+    0x00,
+    0x22,
 };
 
 const uint8_t *airplay_vendor_ie(size_t *len)
 {
-    if (len != NULL) *len = sizeof(carplay_vendor_ie);
+    if (len != NULL)
+        *len = sizeof(carplay_vendor_ie);
     return carplay_vendor_ie;
 }
 

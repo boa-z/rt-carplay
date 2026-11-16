@@ -23,19 +23,21 @@ int public_receiver_host(const rtcp_platform_t *platform,
 }
 
 int public_receiver_diagnostics(rtcp_receiver_t *receiver,
-                                 rtcp_receiver_diagnostics_t *diagnostics,
-                                 rtcp_addr_t *peer)
+                                rtcp_receiver_diagnostics_t *diagnostics,
+                                rtcp_addr_t *peer)
 {
     int result = rtcp_receiver_get_diagnostics(receiver, diagnostics);
-    if (result != RTCP_OK) return result;
+    if (result != RTCP_OK)
+        return result;
     return rtcp_receiver_get_peer(receiver, peer);
 }
 
 int public_receiver_data_stream(rtcp_receiver_t *receiver,
-    rtcp_data_stream_status_t *status, const uint8_t *body, size_t length)
+                                rtcp_data_stream_status_t *status, const uint8_t *body, size_t length)
 {
     int result = rtcp_receiver_get_data_stream_status(receiver, RTCP_DATA_STREAM_VEHICLE, status);
-    if (result) return result;
+    if (result)
+        return result;
     return rtcp_receiver_send_data_stream(receiver, RTCP_DATA_STREAM_VEHICLE, body, length);
 }
 
@@ -51,7 +53,8 @@ int public_receiver_ui_sync(rtcp_receiver_t *receiver, rtcp_ui_sync_delivery_sta
 
 int public_ui_choice_handoff(rtcp_ui_sync_t *ui, rtcp_ui_sync_choice_t *choice)
 {
-    int result=rtcp_ui_sync_peek_choice(ui,choice);
-    if (result) return result;
+    int result = rtcp_ui_sync_peek_choice(ui, choice);
+    if (result)
+        return result;
     return rtcp_ui_sync_consume_choice(ui);
 }

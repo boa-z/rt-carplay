@@ -7,19 +7,20 @@
 #include "rtcp/os.h"
 #include "rtcp/net.h"
 
-#define RTCP_CAPABILITIES_MAX_BYTES 6144U
+#define RTCP_CAPABILITIES_MAX_BYTES    6144U
 #define RTCP_IDENTITY_PUBLIC_KEY_BYTES 32U
-#define RTCP_IDENTITY_SIGNATURE_BYTES 64U
+#define RTCP_IDENTITY_SIGNATURE_BYTES  64U
 
 /* Identity and controller-store operations. All callbacks run on the
  * receiver owner. Credentials and contexts remain borrowed until destroy. */
 typedef bool (*rtcp_identity_random_cb_t)(uint8_t *, size_t, void *);
 typedef bool (*rtcp_identity_sign_cb_t)(const uint8_t *, size_t, uint8_t[64], void *);
 typedef bool (*rtcp_identity_verify_cb_t)(const uint8_t[32], const uint8_t *,
-                                        size_t, const uint8_t[64], void *);
+                                          size_t, const uint8_t[64], void *);
 typedef bool (*rtcp_pairing_save_cb_t)(const uint8_t *, size_t, const uint8_t[32], void *);
 typedef bool (*rtcp_pairing_lookup_cb_t)(const uint8_t *, size_t, uint8_t[32], void *);
-typedef struct {
+typedef struct
+{
     const char *pairing_code;
     const uint8_t *accessory_identifier;
     size_t accessory_identifier_len;
@@ -30,7 +31,8 @@ typedef struct {
     rtcp_pairing_save_cb_t save_pairing;
     void *provider_context;
 } rtcp_pair_setup_provider_t;
-typedef struct {
+typedef struct
+{
     const uint8_t *accessory_identifier;
     size_t accessory_identifier_len;
     rtcp_identity_random_cb_t random;
@@ -39,12 +41,14 @@ typedef struct {
     rtcp_pairing_lookup_cb_t lookup_controller;
     void *provider_context;
 } rtcp_pair_verify_provider_t;
-typedef struct {
+typedef struct
+{
     rtcp_pair_setup_provider_t pair_setup;
     rtcp_pair_verify_provider_t pair_verify;
 } rtcp_pairing_provider_t;
 
-typedef struct {
+typedef struct
+{
     const struct rtcp_os *os;
     const struct rtcp_net *net;
     rtcp_pairing_provider_t pairing;
@@ -59,7 +63,8 @@ typedef struct {
 
 /* Optional authenticated iAP2 tunnel. The host owns radio/Wi-Fi policy.
  * A false tick retires only the tunnel, preserving the media session. */
-typedef struct {
+typedef struct
+{
     bool (*on_bytes)(const uint8_t *, size_t, void *);
     bool (*on_tick)(void *);
     void (*on_stop)(void *);

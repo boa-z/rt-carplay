@@ -8,27 +8,46 @@
 #include "airplay_txt.h"
 #include "rtcp/rtcp.h"
 
-static const uint8_t k_ipv4[4] = {192U, 168U, 1U, 10U};
+static const uint8_t k_ipv4[4] = { 192U, 168U, 1U, 10U };
 static const uint8_t *incoming;
 static size_t incoming_len;
 static rtcp_addr_t incoming_from;
 static int fake_open(uint8_t family, uint16_t port, bool reuse)
-{ assert(family == RTCP_AF_INET && port == MDNS_PORT && reuse); return 42; }
+{
+    assert(family == RTCP_AF_INET && port == MDNS_PORT && reuse);
+    return 42;
+}
 static int fake_join(int fd, const uint8_t group[4])
-{ assert(fd == 42 && group[3] == 251); return 0; }
+{
+    assert(fd == 42 && group[3] == 251);
+    return 0;
+}
 static int fake_poll(struct rtcp_pollfd *fds, int count, int timeout)
-{ (void)timeout; assert(count == 1); fds[0].revents = RTCP_POLLIN; return 1; }
+{
+    (void)timeout;
+    assert(count == 1);
+    fds[0].revents = RTCP_POLLIN;
+    return 1;
+}
 static int fake_recv(int fd, void *data, size_t capacity, rtcp_addr_t *from)
 {
     assert(fd == 42 && incoming_len <= capacity);
-    memcpy(data, incoming, incoming_len); *from = incoming_from;
+    memcpy(data, incoming, incoming_len);
+    *from = incoming_from;
     return (int)incoming_len;
 }
 static int fake_send(int fd, const rtcp_addr_t *to, const void *data, size_t len)
-{ assert(fd == 42 && to && data); return (int)len; }
-static void fake_close(int fd) { assert(fd == 42); }
+{
+    assert(fd == 42 && to && data);
+    return (int)len;
+}
+static void fake_close(int fd)
+{
+    assert(fd == 42);
+}
 
-typedef struct {
+typedef struct
+{
     const uint8_t *buffer;
     size_t length;
     size_t offset;
@@ -50,24 +69,30 @@ static bool read_name(const uint8_t *packet, size_t length, size_t *offset,
     size_t used = 0U;
     bool jumped = false;
     unsigned jumps = 0U;
-    for (;;) {
+    for (;;)
+    {
         assert(pos < length);
         uint8_t label = packet[pos++];
-        if (label == 0U) {
-            if (!jumped) *offset = pos;
+        if (label == 0U)
+        {
+            if (!jumped)
+                *offset = pos;
             out[used] = '\0';
             return true;
         }
-        if ((label & 0xC0U) == 0xC0U) {
+        if ((label & 0xC0U) == 0xC0U)
+        {
             assert(pos < length);
             size_t target = (size_t)(((label & 0x3FU) << 8U) | packet[pos++]);
-            if (!jumped) *offset = pos;
+            if (!jumped)
+                *offset = pos;
             jumped = true;
             pos = target;
             assert(jumps++ < 16U);
             continue;
         }
-        if (used != 0U) out[used++] = '.';
+        if (used != 0U)
+            out[used++] = '.';
         assert(used + label < capacity);
         memcpy(out + used, packet + pos, label);
         used += label;
@@ -88,7 +113,8 @@ static void open_packet(dns_view_t *view, const uint8_t *buffer, size_t length)
     view->additional = read16(buffer + 10U);
 }
 
-typedef struct {
+typedef struct
+{
     char name[128];
     uint16_t type;
     uint16_t class_flags;
@@ -117,9 +143,11 @@ static void next_record(dns_view_t *view, rr_view_t *record)
 static const rr_view_t *find_record(dns_view_t *view, unsigned count,
                                     uint16_t type, rr_view_t *storage)
 {
-    for (unsigned i = 0U; i < count; ++i) {
+    for (unsigned i = 0U; i < count; ++i)
+    {
         next_record(view, storage);
-        if (storage->type == type) return storage;
+        if (storage->type == type)
+            return storage;
     }
     return NULL;
 }
@@ -146,7 +174,8 @@ static size_t build_query(uint8_t *packet, size_t capacity, uint16_t id,
     used = 12U;
 
     const char *label = name;
-    while (label != NULL && *label != '\0') {
+    while (label != NULL && *label != '\0')
+    {
         const char *dot = strchr(label, '.');
         size_t len = dot != NULL ? (size_t)(dot - label) : strlen(label);
         assert(used + 1U + len < capacity);
@@ -285,14 +314,15 @@ int main(void)
 
     /* Before any RTSP connection, learn a discovery candidate only from a
      * parsed question for our records. Never learn our own looped packets. */
-    const struct rtcp_net net = {.udp_open = fake_open, .udp_join = fake_join,
-        .poll = fake_poll, .udp_recvfrom = fake_recv, .udp_sendto = fake_send,
-        .close = fake_close};
+    const struct rtcp_net net = { .udp_open = fake_open, .udp_join = fake_join, .poll = fake_poll, .udp_recvfrom = fake_recv, .udp_sendto = fake_send, .close = fake_close };
     assert(!mdns_responder_open(responder, &net));
     rtcp_addr_t peer;
-    incoming = query; incoming_len = query_len;
-    incoming_from.family = RTCP_AF_INET; incoming_from.port = MDNS_PORT;
-    memcpy(incoming_from.addr, k_ipv4, 4); ++incoming_from.addr[3];
+    incoming = query;
+    incoming_len = query_len;
+    incoming_from.family = RTCP_AF_INET;
+    incoming_from.port = MDNS_PORT;
+    memcpy(incoming_from.addr, k_ipv4, 4);
+    ++incoming_from.addr[3];
     assert(!mdns_responder_poll(responder, &net, 0)); /* unrelated query */
     assert(!mdns_responder_take_query_peer(responder, &peer));
     incoming_len = build_query(query, sizeof(query), 0, "_airplay._tcp.local", 12, 1);
@@ -303,7 +333,8 @@ int main(void)
     memcpy(incoming_from.addr, k_ipv4, 4);
     assert(mdns_responder_poll(responder, &net, 0) == 1);
     assert(!mdns_responder_take_query_peer(responder, &peer));
-    ++incoming_from.addr[3]; incoming_len = 8;
+    ++incoming_from.addr[3];
+    incoming_len = 8;
     assert(!mdns_responder_poll(responder, &net, 0));
     assert(!mdns_responder_take_query_peer(responder, &peer));
     incoming_len = mdns_responder_build_announcement(responder, response, sizeof(response));

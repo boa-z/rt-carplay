@@ -6,21 +6,21 @@
 
 int main(void)
 {
-    rtcp_display_profile_t p = {.struct_size = sizeof(p)};
+    rtcp_display_profile_t p = { .struct_size = sizeof(p) };
     assert(rtcp_display_profile_validate(NULL, 1024, 600));
     assert(rtcp_display_profile_validate(&p, 1024, 600));
     p.uuid = "";
     assert(!rtcp_display_profile_validate(&p, 1024, 600));
     p.uuid = "01234567-89ab-cdef-0123-456789abcdef";
-    p.view_area = (rtcp_display_rect_t){20, 10, 1000, 580};
-    p.safe_area = (rtcp_display_rect_t){30, 20, 980, 560};
+    p.view_area = (rtcp_display_rect_t){ 20, 10, 1000, 580 };
+    p.safe_area = (rtcp_display_rect_t){ 30, 20, 980, 560 };
     assert(rtcp_display_profile_validate(&p, 1024, 600));
     p.safe_area.x = 0;
     assert(!rtcp_display_profile_validate(&p, 1024, 600));
     p.safe_area.x = 30;
     --p.struct_size;
     assert(!rtcp_display_profile_validate(&p, 1024, 600));
-    rtcp_display_rect_t viewport = {224, 0, 800, 600}, dst;
+    rtcp_display_rect_t viewport = { 224, 0, 800, 600 }, dst;
     assert(rtcp_display_fit(&viewport, 1024, 600, &dst));
     assert(dst.x == 224 && dst.y == 66 && dst.width == 800 && dst.height == 468);
     uint16_t x = 99, y = 99;
@@ -38,7 +38,7 @@ int main(void)
                 assert(x < 1024 && y < 600);
     viewport.x = UINT16_MAX;
     assert(!rtcp_display_fit(&viewport, 1024, 600, &dst));
-    viewport = (rtcp_display_rect_t){0, 0, 1, 600};
+    viewport = (rtcp_display_rect_t){ 0, 0, 1, 600 };
     assert(!rtcp_display_fit(&viewport, UINT16_MAX, 1, &dst));
     puts("display profile and aspect-fit/HID bounds passed");
     return 0;

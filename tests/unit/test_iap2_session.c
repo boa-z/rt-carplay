@@ -7,16 +7,18 @@
 
 #include "rtcp/rtcp.h"
 
-#define TX_CAPACITY 65536U
+#define TX_CAPACITY           65536U
 #define MAX_RECORDED_MESSAGES 64U
 
-typedef struct {
+typedef struct
+{
     uint16_t id;
     uint8_t body[1600];
     size_t body_len;
 } csm_record_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t tx[TX_CAPACITY];
     size_t tx_len;
     size_t scanned;
@@ -35,17 +37,22 @@ static void observe_message(bool outgoing, uint16_t id, const uint8_t *body,
                             size_t length, void *context)
 {
     harness_t *h = context;
-    if (outgoing) ++h->observed_tx;
-    else ++h->observed_rx;
+    if (outgoing)
+        ++h->observed_tx;
+    else
+        ++h->observed_rx;
     assert(length <= sizeof(h->observed.body));
-    h->observed.id = id; h->observed.body_len = length;
-    if (length) memcpy(h->observed.body, body, length);
+    h->observed.id = id;
+    h->observed.body_len = length;
+    if (length)
+        memcpy(h->observed.body, body, length);
 }
 
 static bool capture_tx(const uint8_t *bytes, size_t len, void *context)
 {
     harness_t *h = context;
-    if (len > sizeof(h->tx) - h->tx_len) return false;
+    if (len > sizeof(h->tx) - h->tx_len)
+        return false;
     memcpy(h->tx + h->tx_len, bytes, len);
     h->tx_len += len;
     return true;
@@ -54,15 +61,18 @@ static bool capture_tx(const uint8_t *bytes, size_t len, void *context)
 static void capture_event(iap2_session_event_t event, void *context)
 {
     harness_t *h = context;
-    if (h->event_count < sizeof(h->events) / sizeof(h->events[0])) {
+    if (h->event_count < sizeof(h->events) / sizeof(h->events[0]))
+    {
         h->events[h->event_count++] = (unsigned)event;
     }
 }
 
 static bool event_seen(const harness_t *h, iap2_session_event_t event)
 {
-    for (unsigned i = 0; i < h->event_count; ++i) {
-        if (h->events[i] == (unsigned)event) return true;
+    for (unsigned i = 0; i < h->event_count; ++i)
+    {
+        if (h->events[i] == (unsigned)event)
+            return true;
     }
     return false;
 }
@@ -77,10 +87,13 @@ static bool find_body_parameter(const uint8_t *body, size_t body_len,
                                 size_t *payload_len)
 {
     size_t offset = 0U;
-    while (offset + 4U <= body_len) {
+    while (offset + 4U <= body_len)
+    {
         uint16_t length = read_be16(body + offset);
-        if (length < 4U || length > body_len - offset) return false;
-        if (read_be16(body + offset + 2U) == id) {
+        if (length < 4U || length > body_len - offset)
+            return false;
+        if (read_be16(body + offset + 2U) == id)
+        {
             *payload = body + offset + 4U;
             *payload_len = length - 4U;
             return true;
@@ -112,7 +125,8 @@ static size_t make_peer_frame(uint8_t control, uint8_t seq, uint8_t ack, uint8_t
     out[6] = ack;
     out[7] = sid;
     out[8] = checksum(out, 8);
-    if (payload != NULL) {
+    if (payload != NULL)
+    {
         memcpy(out + 9, payload, payload_len);
         out[frame_len - 1] = checksum(payload, payload_len);
     }
@@ -148,7 +162,8 @@ static void feed_peer_csm(iap2_session_t *session, uint16_t message_id,
     csm[3] = (uint8_t)csm_len;
     csm[4] = (uint8_t)(message_id >> 8);
     csm[5] = (uint8_t)message_id;
-    if (body_len != 0U) memcpy(csm + 6, body, body_len);
+    if (body_len != 0U)
+        memcpy(csm + 6, body, body_len);
     feed_peer_frame(session, 0x40, g_harness.peer_seq++, 0, 10, csm, csm_len, now_ms);
 }
 
@@ -158,31 +173,39 @@ static void drain_tx(iap2_session_t *session, uint64_t now_ms)
 {
     harness_t *h = &g_harness;
     size_t pos = h->scanned;
-    if (pos == 0U && h->tx_len >= 6U) {
-        static const uint8_t marker[] = {0xff, 0x55, 0x02, 0x00, 0xee, 0x10};
-        if (memcmp(h->tx, marker, sizeof(marker)) == 0) pos = sizeof(marker);
+    if (pos == 0U && h->tx_len >= 6U)
+    {
+        static const uint8_t marker[] = { 0xff, 0x55, 0x02, 0x00, 0xee, 0x10 };
+        if (memcmp(h->tx, marker, sizeof(marker)) == 0)
+            pos = sizeof(marker);
     }
-    while (pos < h->tx_len) {
-        if (h->tx_len - pos < 9U) break;
+    while (pos < h->tx_len)
+    {
+        if (h->tx_len - pos < 9U)
+            break;
         size_t frame_len = ((size_t)h->tx[pos + 2] << 8) | h->tx[pos + 3];
-        if (frame_len < 9U || frame_len > h->tx_len - pos) break;
+        if (frame_len < 9U || frame_len > h->tx_len - pos)
+            break;
         uint8_t control = h->tx[pos + 4];
         uint8_t seq = h->tx[pos + 5];
         const uint8_t *payload = h->tx + pos + 9;
         size_t payload_len = frame_len - 10U;
         if ((control & 0x80U) == 0U && payload_len >= 6U &&
-            payload[0] == 0x40U && payload[1] == 0x40U) {
+            payload[0] == 0x40U && payload[1] == 0x40U)
+        {
             assert(h->message_count < MAX_RECORDED_MESSAGES);
             csm_record_t *record = &h->messages[h->message_count++];
             record->id = (uint16_t)(((uint16_t)payload[4] << 8) | payload[5]);
             record->body_len = payload_len - 6U;
             assert(record->body_len <= sizeof(record->body));
-            if (record->body_len != 0U) {
+            if (record->body_len != 0U)
+            {
                 memcpy(record->body, payload + 6, record->body_len);
             }
         }
         pos += frame_len;
-        if (payload_len > 0U && (control & 0x80U) == 0U) {
+        if (payload_len > 0U && (control & 0x80U) == 0U)
+        {
             feed_peer_frame(session, 0x40, h->peer_seq, seq, 0, NULL, 0, now_ms);
         }
     }
@@ -193,14 +216,31 @@ static void handshake(iap2_session_t *session)
 {
     harness_t *h = &g_harness;
     iap2_session_link_up(session, 0);
-    static const uint8_t marker[] = {0xff, 0x55, 0x02, 0x00, 0xee, 0x10};
+    static const uint8_t marker[] = { 0xff, 0x55, 0x02, 0x00, 0xee, 0x10 };
     feed_raw(session, marker, sizeof(marker), 1);
     drain_tx(session, 2);
     h->peer_seq = 30;
 
     uint8_t sync[19] = {
-        1, 1, 0x08, 0x00, 0x0f, 0xa0, 0x01, 0xf4, 4, 1,
-        10, 0, 1, 11, 2, 1, 12, 1, 2,
+        1,
+        1,
+        0x08,
+        0x00,
+        0x0f,
+        0xa0,
+        0x01,
+        0xf4,
+        4,
+        1,
+        10,
+        0,
+        1,
+        11,
+        2,
+        1,
+        12,
+        1,
+        2,
     };
     feed_peer_frame(session, 0x80, 30, 0, 0, sync, sizeof(sync), 3);
     drain_tx(session, 4);
@@ -225,7 +265,8 @@ static int fake_sign(const uint8_t *challenge, size_t len,
 {
     (void)challenge;
     (void)len;
-    if (sig_cap < 128U) return RTCP_EINVAL;
+    if (sig_cap < 128U)
+        return RTCP_EINVAL;
     memset(sig, SIG_BYTES, 128U);
     *sig_len = 128U;
     return RTCP_OK;
@@ -234,7 +275,8 @@ static int fake_sign(const uint8_t *challenge, size_t len,
 static int fake_read_cert(uint8_t *der, size_t cap, size_t *der_len)
 {
     size_t len = 908U;
-    if (cap < len) return RTCP_EINVAL;
+    if (cap < len)
+        return RTCP_EINVAL;
     memset(der, CERT_BYTES, len);
     *der_len = len;
     return RTCP_OK;
@@ -271,7 +313,8 @@ static bool wired_tcp_connected, wired_event_connected;
 static bool fake_wired_airplay(iap2_session_airplay_t *out, void *context)
 {
     (void)context;
-    if (!wired_endpoint_ready) return false;
+    if (!wired_endpoint_ready)
+        return false;
     out->airplay_port = 7100U;
     out->ip_address = "fe80::1234";
     out->device_identifier = "11:22:33:44:55:66";
@@ -285,8 +328,10 @@ static bool fake_wired_airplay(iap2_session_airplay_t *out, void *context)
 
 static const csm_record_t *last_message(const harness_t *h, uint16_t id)
 {
-    for (size_t i = h->message_count; i > 0U; --i) {
-        if (h->messages[i - 1U].id == id) return &h->messages[i - 1U];
+    for (size_t i = h->message_count; i > 0U; --i)
+    {
+        if (h->messages[i - 1U].id == id)
+            return &h->messages[i - 1U];
     }
     return NULL;
 }
@@ -311,7 +356,7 @@ int main(void)
             .hardware_version = "host",
             .language = "en",
             .wifi_ssid = "rtcp-test",
-            .bluetooth_address = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+            .bluetooth_address = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
         },
         .mfi = &mfi,
         .tx = capture_tx,
@@ -399,14 +444,18 @@ int main(void)
 
     /* No second invite while the first one is outstanding. */
     size_t invites = 0U;
-    for (size_t i = 0; i < h->message_count; ++i) {
-        if (h->messages[i].id == 0x4301U) ++invites;
+    for (size_t i = 0; i < h->message_count; ++i)
+    {
+        if (h->messages[i].id == 0x4301U)
+            ++invites;
     }
     feed_peer_csm(session, 0x4300, NULL, 0, 80);
     drain_tx(session, 81);
     size_t invites_after = 0U;
-    for (size_t i = 0; i < h->message_count; ++i) {
-        if (h->messages[i].id == 0x4301U) ++invites_after;
+    for (size_t i = 0; i < h->message_count; ++i)
+    {
+        if (h->messages[i].id == 0x4301U)
+            ++invites_after;
     }
     assert(invites_after == invites);
     assert(!event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
@@ -436,199 +485,207 @@ int main(void)
     /* ------------------------------------------------------------------ */
     /* Wired USB transport                                                 */
     /* ------------------------------------------------------------------ */
-    for (unsigned wired_case = 0; wired_case < 5; ++wired_case) {
-    memset(h, 0, sizeof(*h));
-    wired_endpoint_ready = true;
-    wired_tcp_connected = wired_event_connected = false;
-    iap2_session_config_t wired_config = {
-        .identity = {
-            .name = "rt-carplay wired",
-            .model_identifier = "RTCP-TEST",
-            .manufacturer = "rt-carplay",
-            .serial_number = "001122334455",
-            .firmware_version = "0.1",
-            .hardware_version = "host",
-            .language = "en",
-            .wifi_ssid = NULL,
-            .bluetooth_address = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
-        },
-        .mfi = &mfi,
-        .tx = capture_tx,
-        .get_wifi = NULL,
-        .get_airplay = fake_wired_airplay,
-        .on_event = capture_event,
-        .context = h,
-        .transport = IAP2_SESSION_TRANSPORT_WIRED_USB,
-        .car_play_interface_number = 3U,
-        .available_current_ma = 0U,
-        .battery_should_charge = false,
-        .wired_reinvite_delay_ms = wired_case ? 10000U : 0U,
-        .observe_message = observe_message,
-    };
-    session = iap2_session_create(&wired_config);
-    assert(session != NULL);
+    for (unsigned wired_case = 0; wired_case < 5; ++wired_case)
+    {
+        memset(h, 0, sizeof(*h));
+        wired_endpoint_ready = true;
+        wired_tcp_connected = wired_event_connected = false;
+        iap2_session_config_t wired_config = {
+            .identity = {
+                .name = "rt-carplay wired",
+                .model_identifier = "RTCP-TEST",
+                .manufacturer = "rt-carplay",
+                .serial_number = "001122334455",
+                .firmware_version = "0.1",
+                .hardware_version = "host",
+                .language = "en",
+                .wifi_ssid = NULL,
+                .bluetooth_address = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
+            },
+            .mfi = &mfi,
+            .tx = capture_tx,
+            .get_wifi = NULL,
+            .get_airplay = fake_wired_airplay,
+            .on_event = capture_event,
+            .context = h,
+            .transport = IAP2_SESSION_TRANSPORT_WIRED_USB,
+            .car_play_interface_number = 3U,
+            .available_current_ma = 0U,
+            .battery_should_charge = false,
+            .wired_reinvite_delay_ms = wired_case ? 10000U : 0U,
+            .observe_message = observe_message,
+        };
+        session = iap2_session_create(&wired_config);
+        assert(session != NULL);
 
-    handshake(session);
-    drain_tx(session, 6);
+        handshake(session);
+        drain_tx(session, 6);
 
-    feed_peer_csm(session, 0x1d00, NULL, 0, 10);
-    drain_tx(session, 11);
-    const csm_record_t *wired_identification = last_message(h, 0x1d01);
-    assert(wired_identification != NULL);
-    assert(h->observed_rx == 1 && h->observed_tx == 1);
-    assert(h->observed.id == 0x1d01 && h->observed.body_len == wired_identification->body_len);
-    assert(!memcmp(h->observed.body, wired_identification->body, h->observed.body_len));
-    const uint8_t *field = NULL;
-    size_t field_len = 0U;
-    assert(find_body_parameter(wired_identification->body,
-                               wired_identification->body_len, 8, &field,
-                               &field_len));
-    assert(field_len == 1U && field[0] == 2U);
-    const uint8_t *usb_group = NULL;
-    size_t usb_group_len = 0U;
-    assert(find_body_parameter(wired_identification->body,
-                               wired_identification->body_len, 16,
-                               &usb_group, &usb_group_len));
-    assert(find_body_parameter(usb_group, usb_group_len, 3, &field,
-                               &field_len));
-    assert(field_len == 1U && field[0] == 3U);
-    assert(!find_body_parameter(wired_identification->body,
-                                wired_identification->body_len, 17, &field,
-                                &field_len));
-    assert(!find_body_parameter(wired_identification->body,
-                                wired_identification->body_len, 24, &field,
-                                &field_len));
+        feed_peer_csm(session, 0x1d00, NULL, 0, 10);
+        drain_tx(session, 11);
+        const csm_record_t *wired_identification = last_message(h, 0x1d01);
+        assert(wired_identification != NULL);
+        assert(h->observed_rx == 1 && h->observed_tx == 1);
+        assert(h->observed.id == 0x1d01 && h->observed.body_len == wired_identification->body_len);
+        assert(!memcmp(h->observed.body, wired_identification->body, h->observed.body_len));
+        const uint8_t *field = NULL;
+        size_t field_len = 0U;
+        assert(find_body_parameter(wired_identification->body,
+                                   wired_identification->body_len, 8, &field,
+                                   &field_len));
+        assert(field_len == 1U && field[0] == 2U);
+        const uint8_t *usb_group = NULL;
+        size_t usb_group_len = 0U;
+        assert(find_body_parameter(wired_identification->body,
+                                   wired_identification->body_len, 16,
+                                   &usb_group, &usb_group_len));
+        assert(find_body_parameter(usb_group, usb_group_len, 3, &field,
+                                   &field_len));
+        assert(field_len == 1U && field[0] == 3U);
+        assert(!find_body_parameter(wired_identification->body,
+                                    wired_identification->body_len, 17, &field,
+                                    &field_len));
+        assert(!find_body_parameter(wired_identification->body,
+                                    wired_identification->body_len, 24, &field,
+                                    &field_len));
 
-    /* Identification and MFi may complete in either order on the wired
+        /* Identification and MFi may complete in either order on the wired
      * link; the power update and subscriptions wait for both. */
-    feed_peer_csm(session, 0x1d02, NULL, 0, 20);
-    drain_tx(session, 21);
-    assert(iap2_session_identification_accepted(session));
-    assert(last_message(h, 0x5000) == NULL);
+        feed_peer_csm(session, 0x1d02, NULL, 0, 20);
+        drain_tx(session, 21);
+        assert(iap2_session_identification_accepted(session));
+        assert(last_message(h, 0x5000) == NULL);
 
-    feed_peer_csm(session, 0xaa00, NULL, 0, 30);
-    drain_tx(session, 31);
-    uint8_t wired_challenge_body[24];
-    memset(wired_challenge_body, 0x33, sizeof(wired_challenge_body));
-    wired_challenge_body[0] = 0;
-    wired_challenge_body[1] = 24;
-    wired_challenge_body[2] = 0;
-    wired_challenge_body[3] = 0;
-    feed_peer_csm(session, 0xaa02, wired_challenge_body,
-                  sizeof(wired_challenge_body), 40);
-    drain_tx(session, 41);
-    feed_peer_csm(session, 0xaa05, NULL, 0, 50);
-    drain_tx(session, 51);
-    assert(iap2_session_is_authenticated(session));
+        feed_peer_csm(session, 0xaa00, NULL, 0, 30);
+        drain_tx(session, 31);
+        uint8_t wired_challenge_body[24];
+        memset(wired_challenge_body, 0x33, sizeof(wired_challenge_body));
+        wired_challenge_body[0] = 0;
+        wired_challenge_body[1] = 24;
+        wired_challenge_body[2] = 0;
+        wired_challenge_body[3] = 0;
+        feed_peer_csm(session, 0xaa02, wired_challenge_body,
+                      sizeof(wired_challenge_body), 40);
+        drain_tx(session, 41);
+        feed_peer_csm(session, 0xaa05, NULL, 0, 50);
+        drain_tx(session, 51);
+        assert(iap2_session_is_authenticated(session));
 
-    /* PowerSourceUpdate (0xAE03) precedes the subscription burst. */
-    size_t power_index = SIZE_MAX;
-    size_t subscription_index = SIZE_MAX;
-    for (size_t i = 0; i < h->message_count; ++i) {
-        if (h->messages[i].id == 0xae03U && power_index == SIZE_MAX) {
-            power_index = i;
+        /* PowerSourceUpdate (0xAE03) precedes the subscription burst. */
+        size_t power_index = SIZE_MAX;
+        size_t subscription_index = SIZE_MAX;
+        for (size_t i = 0; i < h->message_count; ++i)
+        {
+            if (h->messages[i].id == 0xae03U && power_index == SIZE_MAX)
+            {
+                power_index = i;
+            }
+            if (h->messages[i].id == 0x5000U && subscription_index == SIZE_MAX)
+            {
+                subscription_index = i;
+            }
         }
-        if (h->messages[i].id == 0x5000U && subscription_index == SIZE_MAX) {
-            subscription_index = i;
-        }
-    }
-    assert(power_index != SIZE_MAX);
-    assert(subscription_index != SIZE_MAX);
-    assert(power_index < subscription_index);
-    const csm_record_t *power = last_message(h, 0xae03);
-    assert(power != NULL && power->body_len == 11U);
-    assert(read_be16(power->body) == 6U);      /* param 0, u16 */
-    assert(power->body[4] == 0U && power->body[5] == 0U);
-    assert(read_be16(power->body + 6) == 5U);  /* param 1, one byte */
-    assert(power->body[10] == 0U);
+        assert(power_index != SIZE_MAX);
+        assert(subscription_index != SIZE_MAX);
+        assert(power_index < subscription_index);
+        const csm_record_t *power = last_message(h, 0xae03);
+        assert(power != NULL && power->body_len == 11U);
+        assert(read_be16(power->body) == 6U); /* param 0, u16 */
+        assert(power->body[4] == 0U && power->body[5] == 0U);
+        assert(read_be16(power->body + 6) == 5U); /* param 1, one byte */
+        assert(power->body[10] == 0U);
 
-    /* Wired sessions never send the accessory Wi-Fi configuration. */
-    feed_peer_csm(session, 0x4e0e, NULL, 0, 60);
-    feed_peer_csm(session, 0x5702, NULL, 0, 61);
-    drain_tx(session, 62);
-    assert(last_message(h, 0x5703) == NULL);
-    assert(!event_seen(h, IAP2_SESSION_EVENT_WIFI_CONFIG_SENT));
+        /* Wired sessions never send the accessory Wi-Fi configuration. */
+        feed_peer_csm(session, 0x4e0e, NULL, 0, 60);
+        feed_peer_csm(session, 0x5702, NULL, 0, 61);
+        drain_tx(session, 62);
+        assert(last_message(h, 0x5703) == NULL);
+        assert(!event_seen(h, IAP2_SESSION_EVENT_WIFI_CONFIG_SENT));
 
-    /* Availability can arrive before IPHETH/DAD is ready. Do not advertise
+        /* Availability can arrive before IPHETH/DAD is ready. Do not advertise
      * an invalid endpoint or require the phone to send availability again. */
-    wired_endpoint_ready = false;
-    feed_peer_csm(session, 0x4300, NULL, 0, 70);
-    drain_tx(session, 71);
-    assert(last_message(h, 0x4301) == NULL);
-    iap2_session_advance(session, 72);
-    assert(last_message(h, 0x4301) == NULL);
-    wired_endpoint_ready = true;
-    iap2_session_advance(session, 73);
-    drain_tx(session, 74);
-    /* The deferred wired StartSession still uses group 0 addresses. */
-    const csm_record_t *wired_start = last_message(h, 0x4301);
-    assert(wired_start != NULL);
-    const uint8_t *wired_attributes = NULL;
-    size_t wired_attributes_len = 0U;
-    assert(find_body_parameter(wired_start->body, wired_start->body_len, 0,
-                               &wired_attributes, &wired_attributes_len));
-    assert(find_body_parameter(wired_attributes, wired_attributes_len, 0,
-                               &field, &field_len));
-    assert(field_len == sizeof("fe80::1234"));
-    assert(memcmp(field, "fe80::1234", field_len) == 0);
-    assert(!find_body_parameter(wired_start->body, wired_start->body_len, 1,
-                                &field, &field_len));
-    assert(find_body_parameter(wired_start->body, wired_start->body_len, 2,
-                               &field, &field_len));
-    assert(field_len == 4U && field[2] == 0x1bU && field[3] == 0xbcU);
-
-    /* Disabled by default; opt-in allows exactly one compatibility retry.
-     * Either TCP or event connection suppresses it before SETUP completes. */
-    wired_tcp_connected = wired_case == 2;
-    wired_event_connected = wired_case == 3;
-    wired_endpoint_ready = wired_case != 4;
-    iap2_session_advance(session,
-                         73U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS);
-    drain_tx(session, 74U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS);
-    size_t wired_invites = 0U;
-    for (size_t i = 0; i < h->message_count; ++i) {
-        if (h->messages[i].id == 0x4301U) ++wired_invites;
-    }
-    assert(wired_invites == (wired_case == 1 ? 2U : 1U));
-    assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT) == (wired_case == 1));
-    if (wired_case == 4) {
-        wired_endpoint_ready = true;
-        iap2_session_advance(session, 10075);
-        drain_tx(session, 10076);
-        ++wired_invites;
-        assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
-    }
-    iap2_session_advance(session, 20080);
-    drain_tx(session, 20081);
-    size_t count = 0;
-    for (size_t i = 0; i < h->message_count; ++i)
-        count += h->messages[i].id == 0x4301U;
-    assert(count == wired_invites); /* Never a periodic retry loop. */
-
-    if (wired_case == 0) {
-        /* A new phone request is answered even after an earlier send.
-         * Temporary endpoint loss must retain this new request as well. */
         wired_endpoint_ready = false;
-        feed_peer_csm(session, 0x4300, NULL, 0, 20090);
-        drain_tx(session, 20091);
+        feed_peer_csm(session, 0x4300, NULL, 0, 70);
+        drain_tx(session, 71);
+        assert(last_message(h, 0x4301) == NULL);
+        iap2_session_advance(session, 72);
+        assert(last_message(h, 0x4301) == NULL);
         wired_endpoint_ready = true;
-        iap2_session_advance(session, 20092);
-        drain_tx(session, 20093);
-        count = 0;
-        for (size_t i = 0; i < h->message_count; ++i)
-            count += h->messages[i].id == 0x4301U;
-        assert(count == 2U);
-        wired_tcp_connected = true;
-        feed_peer_csm(session, 0x4300, NULL, 0, 20100);
-        drain_tx(session, 20101);
-        count = 0;
-        for (size_t i = 0; i < h->message_count; ++i)
-            count += h->messages[i].id == 0x4301U;
-        assert(count == 2U); /* An accepted TCP must not be interrupted. */
-    }
+        iap2_session_advance(session, 73);
+        drain_tx(session, 74);
+        /* The deferred wired StartSession still uses group 0 addresses. */
+        const csm_record_t *wired_start = last_message(h, 0x4301);
+        assert(wired_start != NULL);
+        const uint8_t *wired_attributes = NULL;
+        size_t wired_attributes_len = 0U;
+        assert(find_body_parameter(wired_start->body, wired_start->body_len, 0,
+                                   &wired_attributes, &wired_attributes_len));
+        assert(find_body_parameter(wired_attributes, wired_attributes_len, 0,
+                                   &field, &field_len));
+        assert(field_len == sizeof("fe80::1234"));
+        assert(memcmp(field, "fe80::1234", field_len) == 0);
+        assert(!find_body_parameter(wired_start->body, wired_start->body_len, 1,
+                                    &field, &field_len));
+        assert(find_body_parameter(wired_start->body, wired_start->body_len, 2,
+                                   &field, &field_len));
+        assert(field_len == 4U && field[2] == 0x1bU && field[3] == 0xbcU);
 
-    iap2_session_link_down(session);
-    iap2_session_destroy(session);
+        /* Disabled by default; opt-in allows exactly one compatibility retry.
+     * Either TCP or event connection suppresses it before SETUP completes. */
+        wired_tcp_connected = wired_case == 2;
+        wired_event_connected = wired_case == 3;
+        wired_endpoint_ready = wired_case != 4;
+        iap2_session_advance(session,
+                             73U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS);
+        drain_tx(session, 74U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS);
+        size_t wired_invites = 0U;
+        for (size_t i = 0; i < h->message_count; ++i)
+        {
+            if (h->messages[i].id == 0x4301U)
+                ++wired_invites;
+        }
+        assert(wired_invites == (wired_case == 1 ? 2U : 1U));
+        assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT) == (wired_case == 1));
+        if (wired_case == 4)
+        {
+            wired_endpoint_ready = true;
+            iap2_session_advance(session, 10075);
+            drain_tx(session, 10076);
+            ++wired_invites;
+            assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
+        }
+        iap2_session_advance(session, 20080);
+        drain_tx(session, 20081);
+        size_t count = 0;
+        for (size_t i = 0; i < h->message_count; ++i)
+            count += h->messages[i].id == 0x4301U;
+        assert(count == wired_invites); /* Never a periodic retry loop. */
+
+        if (wired_case == 0)
+        {
+            /* A new phone request is answered even after an earlier send.
+         * Temporary endpoint loss must retain this new request as well. */
+            wired_endpoint_ready = false;
+            feed_peer_csm(session, 0x4300, NULL, 0, 20090);
+            drain_tx(session, 20091);
+            wired_endpoint_ready = true;
+            iap2_session_advance(session, 20092);
+            drain_tx(session, 20093);
+            count = 0;
+            for (size_t i = 0; i < h->message_count; ++i)
+                count += h->messages[i].id == 0x4301U;
+            assert(count == 2U);
+            wired_tcp_connected = true;
+            feed_peer_csm(session, 0x4300, NULL, 0, 20100);
+            drain_tx(session, 20101);
+            count = 0;
+            for (size_t i = 0; i < h->message_count; ++i)
+                count += h->messages[i].id == 0x4301U;
+            assert(count == 2U); /* An accepted TCP must not be interrupted. */
+        }
+
+        iap2_session_link_down(session);
+        iap2_session_destroy(session);
     }
 
     puts("iap2 session host test passed");

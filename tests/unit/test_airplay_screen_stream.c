@@ -15,7 +15,8 @@
 
 #define TEST_MAX_BODY_BYTES (1024U * 1024U)
 
-typedef struct {
+typedef struct
+{
     uint32_t calls;
     airplay_screen_message_type_t type;
     uint8_t bytes[32];
@@ -50,7 +51,8 @@ static void put_le64(uint8_t *out, uint64_t value)
 static void make_nonce(uint64_t counter, uint8_t nonce[12])
 {
     memset(nonce, 0, 4U);
-    for (size_t i = 0U; i < 8U; ++i) {
+    for (size_t i = 0U; i < 8U; ++i)
+    {
         nonce[4U + i] = (uint8_t)(counter >> (8U * i));
     }
 }
@@ -130,25 +132,101 @@ static int discard_large_message(airplay_screen_message_type_t type,
 int main(void)
 {
     static const uint8_t key[AIRPLAY_SCREEN_KEY_BYTES] = {
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
-        0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+        0x10,
+        0x11,
+        0x12,
+        0x13,
+        0x14,
+        0x15,
+        0x16,
+        0x17,
+        0x18,
+        0x19,
+        0x1a,
+        0x1b,
+        0x1c,
+        0x1d,
+        0x1e,
+        0x1f,
+        0x20,
+        0x21,
+        0x22,
+        0x23,
+        0x24,
+        0x25,
+        0x26,
+        0x27,
+        0x28,
+        0x29,
+        0x2a,
+        0x2b,
+        0x2c,
+        0x2d,
+        0x2e,
+        0x2f,
     };
-    static const uint8_t plaintext[] = {0, 0, 0, 2, 0x65, 0xaa};
-    static const uint8_t expected_annex_b[] = {0, 0, 0, 1, 0x65, 0xaa};
+    static const uint8_t plaintext[] = { 0, 0, 0, 2, 0x65, 0xaa };
+    static const uint8_t expected_annex_b[] = { 0, 0, 0, 1, 0x65, 0xaa };
     static const uint8_t avcc[] = {
-        0, 0, 0, 0, 'a', 'v', 'c', 'C',
-        1, 100, 0, 31, 0xff, 0xe1, 0, 3, 0x67, 0x64, 0x00, 1, 0, 2, 0x68, 0xee,
+        0,
+        0,
+        0,
+        0,
+        'a',
+        'v',
+        'c',
+        'C',
+        1,
+        100,
+        0,
+        31,
+        0xff,
+        0xe1,
+        0,
+        3,
+        0x67,
+        0x64,
+        0x00,
+        1,
+        0,
+        2,
+        0x68,
+        0xee,
     };
     static const uint8_t raw_avcc[] = {
-        1, 100, 0, 31, 0xff, 0xe1, 0, 3, 0x67, 0x64, 0x00, 1, 0, 2, 0x68, 0xee,
+        1,
+        100,
+        0,
+        31,
+        0xff,
+        0xe1,
+        0,
+        3,
+        0x67,
+        0x64,
+        0x00,
+        1,
+        0,
+        2,
+        0x68,
+        0xee,
     };
     static const uint8_t expected_config[] = {
-        0, 0, 0, 1, 0x67, 0x64, 0x00,
-        0, 0, 0, 1, 0x68, 0xee,
+        0,
+        0,
+        0,
+        1,
+        0x67,
+        0x64,
+        0x00,
+        0,
+        0,
+        0,
+        1,
+        0x68,
+        0xee,
     };
-    callback_capture_t capture = {0};
+    callback_capture_t capture = { 0 };
     uint8_t header[AIRPLAY_SCREEN_HEADER_BYTES];
     uint8_t body_storage[AIRPLAY_SCREEN_CONFIG_BYTES + sizeof(avcc) + AIRPLAY_SCREEN_TAG_BYTES];
     uint8_t *body = body_storage + AIRPLAY_SCREEN_CONFIG_BYTES;
@@ -163,7 +241,20 @@ int main(void)
     assert(extracted_config_len == sizeof(expected_config));
     assert(memcmp(extracted_config, expected_config, sizeof(expected_config)) == 0);
     static const uint8_t hvc_config[] = {
-        0, 0, 0, 0, 'h', 'v', 'c', 'C', 1, 1, 0, 0, 0, 0,
+        0,
+        0,
+        0,
+        0,
+        'h',
+        'v',
+        'c',
+        'C',
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
     };
     assert(!airplay_screen_extract_avcc_to_annex_b(hvc_config, sizeof(hvc_config),
                                                    extracted_config,
@@ -251,7 +342,7 @@ int main(void)
                                          45678U) == RTCP_OK);
     assert(large_frame_calls == 1U);
     assert(airplay_screen_stream_frame_counter(large_stream) == 1U);
-    static const uint8_t annex_b_start_code[] = {0U, 0U, 0U, 1U};
+    static const uint8_t annex_b_start_code[] = { 0U, 0U, 0U, 1U };
     assert(memcmp(large_body, annex_b_start_code, sizeof(annex_b_start_code)) == 0);
     airplay_screen_stream_destroy(large_stream);
     free(large_body_storage);

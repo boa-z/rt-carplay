@@ -7,7 +7,8 @@
 
 #include "rtcp/rtcp.h"
 
-typedef struct {
+typedef struct
+{
     uint8_t data[512];
     size_t len;
 } builder_t;
@@ -22,7 +23,15 @@ static void put(builder_t *builder, const uint8_t *bytes, size_t length)
 static void put_config(builder_t *builder, uint8_t value)
 {
     uint8_t config[9] = {
-        9, RTCP_USB_DESC_CONFIGURATION, 0, 0, 0, value, 0, 0x80, 1,
+        9,
+        RTCP_USB_DESC_CONFIGURATION,
+        0,
+        0,
+        0,
+        value,
+        0,
+        0x80,
+        1,
     };
     put(builder, config, sizeof(config));
 }
@@ -32,7 +41,15 @@ static void put_interface(builder_t *builder, uint8_t number, uint8_t alt,
                           uint8_t subclass, uint8_t protocol)
 {
     uint8_t interface[9] = {
-        9, 0x04, number, alt, endpoints, class_code, subclass, protocol, 0,
+        9,
+        0x04,
+        number,
+        alt,
+        endpoints,
+        class_code,
+        subclass,
+        protocol,
+        0,
     };
     put(builder, interface, sizeof(interface));
 }
@@ -41,8 +58,13 @@ static void put_endpoint(builder_t *builder, uint8_t address,
                          uint8_t attributes, uint16_t max_packet)
 {
     uint8_t endpoint[7] = {
-        7, 0x05, address, attributes, (uint8_t)max_packet,
-        (uint8_t)(max_packet >> 8U), 0,
+        7,
+        0x05,
+        address,
+        attributes,
+        (uint8_t)max_packet,
+        (uint8_t)(max_packet >> 8U),
+        0,
     };
     put(builder, endpoint, sizeof(endpoint));
 }
@@ -53,8 +75,19 @@ static void put_cs_ethernet(builder_t *builder, uint8_t mac_string,
                             uint16_t max_segment)
 {
     uint8_t descriptor[13] = {
-        13, 0x24, 0x0f, mac_string, 0, 0, 0, 0,
-        (uint8_t)max_segment, (uint8_t)(max_segment >> 8U), 0, 0, 0,
+        13,
+        0x24,
+        0x0f,
+        mac_string,
+        0,
+        0,
+        0,
+        0,
+        (uint8_t)max_segment,
+        (uint8_t)(max_segment >> 8U),
+        0,
+        0,
+        0,
     };
     put(builder, descriptor, sizeof(descriptor));
 }
@@ -198,7 +231,7 @@ static void test_lookup_rejects_wrong_protocol(void)
 static void test_invalid_descriptors(void)
 {
     rtcp_usb_device_t device;
-    uint8_t short_descriptor[8] = {9, RTCP_USB_DESC_CONFIGURATION};
+    uint8_t short_descriptor[8] = { 9, RTCP_USB_DESC_CONFIGURATION };
     memset(&device, 0, sizeof(device));
     assert(rtcp_usb_parse_configuration(&device, short_descriptor,
                                         sizeof(short_descriptor)) ==
@@ -354,7 +387,8 @@ static void test_ncm_requires_adjacent_data_interface(void)
     assert(rtcp_usb_configuration_kind(&device) == RTCP_USB_CONFIG_OTHER);
 }
 
-typedef struct {
+typedef struct
+{
     char text[2048];
     size_t length;
 } capture_t;

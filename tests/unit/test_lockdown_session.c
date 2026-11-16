@@ -17,8 +17,8 @@
 #include "rtcp/plist.h"
 #include "rtcp/rtcp.h"
 
-#define LOCKDOWN_PORT 62078U
-#define SERVICE_PORT 7000U
+#define LOCKDOWN_PORT   62078U
+#define SERVICE_PORT    7000U
 #define MAX_CONNECTIONS 8U
 
 /* The phone's device public key, in the format GetValue DevicePublicKey
@@ -38,7 +38,8 @@ static uint32_t rng_state = 0x5eed1234U;
 static int test_rng(void *context, uint8_t *output, size_t length)
 {
     (void)context;
-    for (size_t i = 0U; i < length; ++i) {
+    for (size_t i = 0U; i < length; ++i)
+    {
         rng_state ^= rng_state << 13;
         rng_state ^= rng_state >> 17;
         rng_state ^= rng_state << 5;
@@ -58,7 +59,8 @@ static int test_rng_ssl(void *context, unsigned char *output, size_t length)
 
 #define PIPE_CAPACITY 65536U
 
-typedef struct {
+typedef struct
+{
     pthread_mutex_t lock;
     pthread_cond_t cond;
     uint8_t data[PIPE_CAPACITY];
@@ -90,8 +92,10 @@ static int pipe_read(void *context, void *buffer, size_t length,
     int rc;
 
     pthread_mutex_lock(&pipe->lock);
-    while (pipe->used == 0U && !pipe->writer_closed) {
-        if (timeout_ms == 0U) {
+    while (pipe->used == 0U && !pipe->writer_closed)
+    {
+        if (timeout_ms == 0U)
+        {
             pthread_mutex_unlock(&pipe->lock);
             return RTCP_ETIMEDOUT;
         }
@@ -99,22 +103,26 @@ static int pipe_read(void *context, void *buffer, size_t length,
         clock_gettime(CLOCK_REALTIME, &deadline);
         deadline.tv_sec += (time_t)(timeout_ms / 1000U);
         deadline.tv_nsec += (long)(timeout_ms % 1000U) * 1000000L;
-        if (deadline.tv_nsec >= 1000000000L) {
+        if (deadline.tv_nsec >= 1000000000L)
+        {
             deadline.tv_sec += 1;
             deadline.tv_nsec -= 1000000000L;
         }
         rc = pthread_cond_timedwait(&pipe->cond, &pipe->lock, &deadline);
-        if (rc == ETIMEDOUT && pipe->used == 0U && !pipe->writer_closed) {
+        if (rc == ETIMEDOUT && pipe->used == 0U && !pipe->writer_closed)
+        {
             pthread_mutex_unlock(&pipe->lock);
             return RTCP_ETIMEDOUT;
         }
     }
-    if (pipe->used == 0U) {
+    if (pipe->used == 0U)
+    {
         pthread_mutex_unlock(&pipe->lock);
         return 0;
     }
     count = length < pipe->used ? length : pipe->used;
-    for (size_t i = 0U; i < count; ++i) {
+    for (size_t i = 0U; i < count; ++i)
+    {
         output[i] = pipe->data[pipe->read_pos];
         pipe->read_pos = (pipe->read_pos + 1U) % PIPE_CAPACITY;
     }
@@ -130,8 +138,10 @@ static int pipe_write(void *context, const void *data, size_t length)
     const uint8_t *input = data;
 
     pthread_mutex_lock(&pipe->lock);
-    for (size_t i = 0U; i < length; ++i) {
-        while (pipe->used == PIPE_CAPACITY) {
+    for (size_t i = 0U; i < length; ++i)
+    {
+        while (pipe->used == PIPE_CAPACITY)
+        {
             pthread_cond_wait(&pipe->cond, &pipe->lock);
         }
         pipe->data[pipe->write_pos] = input[i];
@@ -148,7 +158,8 @@ static const rtcp_stream_ops_t pipe_ops = {
     .write = pipe_write,
 };
 
-typedef struct {
+typedef struct
+{
     rtcp_stream_t in;
     rtcp_stream_t out;
 } duplex_t;
@@ -181,7 +192,8 @@ static int tls_send(void *context, const unsigned char *data, size_t length)
     rtcp_stream_t *stream = context;
     int ret = stream->ops->write(stream->context, data, length);
 
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
     return (int)length;
@@ -192,10 +204,12 @@ static int tls_recv(void *context, unsigned char *buffer, size_t length)
     rtcp_stream_t *stream = context;
     int ret = stream->ops->read(stream->context, buffer, length, 5000U);
 
-    if (ret == RTCP_ETIMEDOUT) {
+    if (ret == RTCP_ETIMEDOUT)
+    {
         return MBEDTLS_ERR_SSL_TIMEOUT;
     }
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
     return ret;
@@ -203,7 +217,8 @@ static int tls_recv(void *context, unsigned char *buffer, size_t length)
 
 /* An established mbedTLS server session presented as an rtcp_stream_t so the
  * plist helpers can read requests from it. */
-typedef struct {
+typedef struct
+{
     mbedtls_ssl_context *ssl;
 } tls_stream_context_t;
 
@@ -214,17 +229,22 @@ static int tls_stream_read(void *context, void *buffer, size_t length,
     int retries = 0;
 
     (void)timeout_ms;
-    for (;;) {
+    for (;;)
+    {
         int ret = mbedtls_ssl_read(tls->ssl, buffer, length);
-        if (ret > 0) {
+        if (ret > 0)
+        {
             return ret;
         }
-        if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+        if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+        {
             return 0;
         }
         if (ret == MBEDTLS_ERR_SSL_WANT_READ ||
-            ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            if (++retries <= 16) {
+            ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+        {
+            if (++retries <= 16)
+            {
                 continue;
             }
         }
@@ -238,15 +258,18 @@ static int tls_stream_write(void *context, const void *data, size_t length)
     const uint8_t *cursor = data;
     size_t written = 0U;
 
-    while (written < length) {
+    while (written < length)
+    {
         int ret = mbedtls_ssl_write(tls->ssl, cursor + written,
                                     length - written);
-        if (ret > 0) {
+        if (ret > 0)
+        {
             written += (size_t)ret;
             continue;
         }
         if (ret != MBEDTLS_ERR_SSL_WANT_READ &&
-            ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            ret != MBEDTLS_ERR_SSL_WANT_WRITE)
+        {
             return RTCP_EIO;
         }
     }
@@ -264,7 +287,8 @@ static const rtcp_stream_ops_t tls_stream_ops = {
 
 typedef struct phone phone_t;
 
-typedef struct {
+typedef struct
+{
     phone_t *phone;
     pipe_t client_to_server;
     pipe_t server_to_client;
@@ -274,7 +298,8 @@ typedef struct {
     uint16_t port;
 } connection_t;
 
-struct phone {
+struct phone
+{
     pthread_mutex_t lock;
     unsigned pair_requests;
     unsigned pair_pending_answers;
@@ -291,13 +316,16 @@ static int read_exact(rtcp_stream_t *stream, void *buffer, size_t length)
 {
     uint8_t *cursor = buffer;
 
-    while (length != 0U) {
+    while (length != 0U)
+    {
         int received = stream->ops->read(stream->context, cursor, length,
                                          5000U);
-        if (received < 0) {
+        if (received < 0)
+        {
             return received;
         }
-        if (received == 0) {
+        if (received == 0)
+        {
             return RTCP_EIO;
         }
         cursor += (size_t)received;
@@ -313,16 +341,19 @@ static int read_frame(rtcp_stream_t *stream, uint8_t *buffer, size_t capacity,
     uint32_t frame_length;
     int ret = read_exact(stream, header, sizeof(header));
 
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         return ret;
     }
     frame_length = ((uint32_t)header[0] << 24) | ((uint32_t)header[1] << 16) |
                    ((uint32_t)header[2] << 8) | header[3];
-    if (frame_length == 0U || frame_length >= capacity) {
+    if (frame_length == 0U || frame_length >= capacity)
+    {
         return RTCP_EIO;
     }
     ret = read_exact(stream, buffer, frame_length);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         return ret;
     }
     buffer[frame_length] = '\0';
@@ -341,13 +372,15 @@ static int write_frame(rtcp_stream_t *stream, const uint8_t *document,
     header[2] = (uint8_t)(length >> 8);
     header[3] = (uint8_t)length;
     ret = stream->ops->write(stream->context, header, sizeof(header));
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         return ret;
     }
     return stream->ops->write(stream->context, document, length);
 }
 
-typedef struct {
+typedef struct
+{
     uint8_t buffer[4096];
     rtcp_plist_writer_t writer;
 } reply_t;
@@ -429,7 +462,8 @@ static int tls_server_handshake(rtcp_stream_t *raw, mbedtls_ssl_context *ssl,
                              NULL, 0U) != 0 ||
         mbedtls_ssl_config_defaults(config, MBEDTLS_SSL_IS_SERVER,
                                     MBEDTLS_SSL_TRANSPORT_STREAM,
-                                    MBEDTLS_SSL_PRESET_DEFAULT) != 0) {
+                                    MBEDTLS_SSL_PRESET_DEFAULT) != 0)
+    {
         return RTCP_EIO;
     }
     mbedtls_ssl_conf_rng(config, test_rng_ssl, NULL);
@@ -439,7 +473,8 @@ static int tls_server_handshake(rtcp_stream_t *raw, mbedtls_ssl_context *ssl,
     mbedtls_ssl_conf_max_version(config, MBEDTLS_SSL_MAJOR_VERSION_3,
                                  MBEDTLS_SSL_MINOR_VERSION_3);
     if (mbedtls_ssl_conf_own_cert(config, certificate, key) != 0 ||
-        mbedtls_ssl_setup(ssl, config) != 0) {
+        mbedtls_ssl_setup(ssl, config) != 0)
+    {
         return RTCP_EIO;
     }
     mbedtls_ssl_set_bio(ssl, raw, tls_send, tls_recv, NULL);
@@ -471,7 +506,8 @@ static void serve_lockdown_tls(rtcp_stream_t *raw)
     size_t length;
 
     if (tls_server_handshake(raw, &ssl, &config, &certificate, &key) !=
-        RTCP_OK) {
+        RTCP_OK)
+    {
         tls_server_free(&ssl, &config, &certificate, &key);
         return;
     }
@@ -481,7 +517,8 @@ static void serve_lockdown_tls(rtcp_stream_t *raw)
 
     if (read_frame(&tls, buffer, sizeof(buffer), &length) == RTCP_OK &&
         strstr((const char *)buffer, "<string>StartService</string>") !=
-            NULL) {
+            NULL)
+    {
         reply_t reply;
         reply_init(&reply);
         assert(rtcp_plist_key(&reply.writer, "Request"));
@@ -492,7 +529,8 @@ static void serve_lockdown_tls(rtcp_stream_t *raw)
         assert(rtcp_plist_boolean(&reply.writer, s_phone.service_ssl));
         (void)send_reply(&tls, &reply);
 
-        while (tls_stream_read(&tls_context, buffer, sizeof(buffer), 0) > 0) {
+        while (tls_stream_read(&tls_context, buffer, sizeof(buffer), 0) > 0)
+        {
         }
     }
     tls_server_free(&ssl, &config, &certificate, &key);
@@ -503,56 +541,80 @@ static void serve_lockdown(rtcp_stream_t *raw)
     uint8_t buffer[16U * 1024U];
     size_t length;
 
-    for (;;) {
-        if (read_frame(raw, buffer, sizeof(buffer), &length) != RTCP_OK) {
+    for (;;)
+    {
+        if (read_frame(raw, buffer, sizeof(buffer), &length) != RTCP_OK)
+        {
             return;
         }
         const char *document = (const char *)buffer;
-        if (strstr(document, "<string>SetValue</string>") != NULL) {
-            if (send_request_ok(raw, "SetValue") != RTCP_OK) {
+        if (strstr(document, "<string>SetValue</string>") != NULL)
+        {
+            if (send_request_ok(raw, "SetValue") != RTCP_OK)
+            {
                 return;
             }
-        } else if (strstr(document, "DevicePublicKey") != NULL) {
+        }
+        else if (strstr(document, "DevicePublicKey") != NULL)
+        {
             if (send_get_value_data(raw, (const uint8_t *)device_public_key_pem,
                                     strlen(device_public_key_pem)) !=
-                RTCP_OK) {
+                RTCP_OK)
+            {
                 return;
             }
-        } else if (strstr(document, "WiFiAddress") != NULL) {
-            if (send_get_value_string(raw, "00:11:22:33:44:55") != RTCP_OK) {
+        }
+        else if (strstr(document, "WiFiAddress") != NULL)
+        {
+            if (send_get_value_string(raw, "00:11:22:33:44:55") != RTCP_OK)
+            {
                 return;
             }
-        } else if (strstr(document, "<string>Pair</string>") != NULL) {
+        }
+        else if (strstr(document, "<string>Pair</string>") != NULL)
+        {
             unsigned seen;
             pthread_mutex_lock(&s_phone.lock);
             seen = ++s_phone.pair_requests;
             pthread_mutex_unlock(&s_phone.lock);
-            if (seen <= s_phone.pair_pending_answers) {
+            if (seen <= s_phone.pair_pending_answers)
+            {
                 if (send_error(raw, "PairingDialogResponsePending") !=
-                    RTCP_OK) {
+                    RTCP_OK)
+                {
                     return;
                 }
-            } else if (s_phone.deny_pair) {
-                if (send_error(raw, "UserDeniedPairing") != RTCP_OK) {
+            }
+            else if (s_phone.deny_pair)
+            {
+                if (send_error(raw, "UserDeniedPairing") != RTCP_OK)
+                {
                     return;
                 }
-            } else if (send_request_ok(raw, "Pair") != RTCP_OK) {
+            }
+            else if (send_request_ok(raw, "Pair") != RTCP_OK)
+            {
                 return;
             }
-        } else if (strstr(document, "<string>StartSession</string>") !=
-                   NULL) {
+        }
+        else if (strstr(document, "<string>StartSession</string>") !=
+                 NULL)
+        {
             reply_t reply;
             reply_init(&reply);
             assert(rtcp_plist_key(&reply.writer, "Request"));
             assert(rtcp_plist_string(&reply.writer, "StartSession"));
             assert(rtcp_plist_key(&reply.writer, "EnableSessionSSL"));
             assert(rtcp_plist_boolean(&reply.writer, true));
-            if (send_reply(raw, &reply) != RTCP_OK) {
+            if (send_reply(raw, &reply) != RTCP_OK)
+            {
                 return;
             }
             serve_lockdown_tls(raw);
             return;
-        } else if (send_error(raw, "InvalidRequest") != RTCP_OK) {
+        }
+        else if (send_error(raw, "InvalidRequest") != RTCP_OK)
+        {
             return;
         }
     }
@@ -571,9 +633,11 @@ static void serve_service(rtcp_stream_t *raw)
     uint8_t buffer[128];
     int received;
 
-    if (s_phone.service_ssl) {
+    if (s_phone.service_ssl)
+    {
         if (tls_server_handshake(raw, &ssl, &config, &certificate, &key) !=
-            RTCP_OK) {
+            RTCP_OK)
+        {
             tls_server_free(&ssl, &config, &certificate, &key);
             return;
         }
@@ -582,18 +646,22 @@ static void serve_service(rtcp_stream_t *raw)
         stream.context = &tls_context;
     }
 
-    do {
+    do
+    {
         received = stream.ops->read(stream.context, buffer, sizeof(buffer),
                                     5000U);
-        if (received > 0) {
+        if (received > 0)
+        {
             if (stream.ops->write(stream.context, buffer,
-                                  (size_t)received) != RTCP_OK) {
+                                  (size_t)received) != RTCP_OK)
+            {
                 break;
             }
         }
     } while (received > 0);
 
-    if (s_phone.service_ssl) {
+    if (s_phone.service_ssl)
+    {
         tls_server_free(&ssl, &config, &certificate, &key);
     }
 }
@@ -603,9 +671,12 @@ static void *connection_thread(void *argument)
     connection_t *connection = argument;
     rtcp_stream_t raw = { &duplex_ops, &connection->duplex };
 
-    if (connection->port == LOCKDOWN_PORT) {
+    if (connection->port == LOCKDOWN_PORT)
+    {
         serve_lockdown(&raw);
-    } else {
+    }
+    else
+    {
         serve_service(&raw);
     }
     return NULL;
@@ -623,7 +694,8 @@ static int connection_read(void *context, void *buffer, size_t length,
 {
     connection_t *connection = context;
 
-    if (connection->port == SERVICE_PORT && fail_service_tls_read) return RTCP_ETIMEDOUT;
+    if (connection->port == SERVICE_PORT && fail_service_tls_read)
+        return RTCP_ETIMEDOUT;
     return pipe_read(&connection->server_to_client, buffer, length,
                      timeout_ms);
 }
@@ -643,10 +715,13 @@ static const rtcp_stream_ops_t connection_ops = {
 static int fake_open(void *user, uint16_t port, rtcp_stream_t *stream)
 {
     (void)user;
-    if (port == SERVICE_PORT && fail_service_open) return RTCP_ETIMEDOUT;
-    for (size_t i = 0U; i < MAX_CONNECTIONS; ++i) {
+    if (port == SERVICE_PORT && fail_service_open)
+        return RTCP_ETIMEDOUT;
+    for (size_t i = 0U; i < MAX_CONNECTIONS; ++i)
+    {
         connection_t *connection = &s_connections[i];
-        if (connection->used) {
+        if (connection->used)
+        {
             continue;
         }
         memset(connection, 0, sizeof(*connection));
@@ -728,7 +803,8 @@ static void make_config(rtcp_lockdown_session_config_t *config,
 
 static void assert_connections_closed(void)
 {
-    for (size_t i = 0U; i < MAX_CONNECTIONS; ++i) {
+    for (size_t i = 0U; i < MAX_CONNECTIONS; ++i)
+    {
         assert(!s_connections[i].used);
     }
 }
@@ -859,23 +935,32 @@ static void test_denied_pairing(void)
 static unsigned timeout_closes;
 static int diagnostic_read(void *context, void *buffer, size_t length, uint32_t ms)
 {
-    (void)context; (void)buffer; (void)length;
+    (void)context;
+    (void)buffer;
+    (void)length;
     assert(ms == 25U);
     return RTCP_ETIMEDOUT;
 }
 static int diagnostic_write(void *context, const void *data, size_t length)
 {
-    (void)context; assert(data && length); return RTCP_OK;
+    (void)context;
+    assert(data && length);
+    return RTCP_OK;
 }
 static int diagnostic_open(void *user, uint16_t port, rtcp_stream_t *stream)
 {
-    (void)user; assert(port == LOCKDOWN_PORT);
-    static const rtcp_stream_ops_t ops = {diagnostic_read, diagnostic_write};
-    stream->ops = &ops; stream->context = NULL; return RTCP_OK;
+    (void)user;
+    assert(port == LOCKDOWN_PORT);
+    static const rtcp_stream_ops_t ops = { diagnostic_read, diagnostic_write };
+    stream->ops = &ops;
+    stream->context = NULL;
+    return RTCP_OK;
 }
 static void diagnostic_close(void *user, const rtcp_stream_t *stream)
 {
-    (void)user; assert(stream->ops); ++timeout_closes;
+    (void)user;
+    assert(stream->ops);
+    ++timeout_closes;
 }
 static void test_timeout_diagnostic_survives_cleanup(void)
 {

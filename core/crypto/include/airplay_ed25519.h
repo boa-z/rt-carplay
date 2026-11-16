@@ -12,11 +12,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIRPLAY_ED25519_SEED_BYTES 32U
+#define AIRPLAY_ED25519_SEED_BYTES       32U
 #define AIRPLAY_ED25519_PUBLIC_KEY_BYTES 32U
-#define AIRPLAY_ED25519_SIGNATURE_BYTES 64U
+#define AIRPLAY_ED25519_SIGNATURE_BYTES  64U
 
-typedef struct {
+typedef struct
+{
     uint8_t public_key[AIRPLAY_ED25519_PUBLIC_KEY_BYTES];
     /* seed || public key, the layout orlp/ed25519 expects when signing. */
     uint8_t private_key[64];

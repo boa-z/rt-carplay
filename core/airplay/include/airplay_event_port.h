@@ -17,7 +17,8 @@ typedef struct airplay_event_port airplay_event_port_t;
 
 typedef void (*airplay_event_port_state_cb_t)(bool connected, void *context);
 
-typedef struct {
+typedef struct
+{
     airplay_pair_verify_event_keys_t keys;
     uint32_t stream_id;
     uint32_t initial_cseq;

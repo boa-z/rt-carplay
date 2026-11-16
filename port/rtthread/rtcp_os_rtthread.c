@@ -20,12 +20,14 @@ static uint64_t now_ms(void)
     static bool initialized;
     static uint32_t previous;
     static uint64_t elapsed;
-    rt_base_t irq=rt_hw_interrupt_disable();
-    uint32_t current=(uint32_t)rt_tick_get_millisecond();
-    if (initialized) elapsed+=(uint32_t)(current-previous);
-    else initialized=true;
-    previous=current;
-    uint64_t result=elapsed;
+    rt_base_t irq = rt_hw_interrupt_disable();
+    uint32_t current = (uint32_t)rt_tick_get_millisecond();
+    if (initialized)
+        elapsed += (uint32_t)(current - previous);
+    else
+        initialized = true;
+    previous = current;
+    uint64_t result = elapsed;
     rt_hw_interrupt_enable(irq);
     return result;
 }
@@ -56,13 +58,16 @@ static rtcp_thread_t thread_create(const char *name,
                                    void (*fn)(void *), void *arg,
                                    size_t stack, int prio)
 {
-    if (fn == NULL) return NULL;
+    if (fn == NULL)
+        return NULL;
     rt_thread_t thread = rt_thread_create(name,
                                           (void (*)(void *))fn, arg,
                                           (rt_uint32_t)stack,
                                           (rt_uint8_t)prio, 10);
-    if (thread == NULL) return NULL;
-    if (rt_thread_startup(thread) != RT_EOK) {
+    if (thread == NULL)
+        return NULL;
+    if (rt_thread_startup(thread) != RT_EOK)
+    {
         rt_thread_delete(thread);
         return NULL;
     }
@@ -76,17 +81,20 @@ static rtcp_mutex_t mutex_create(void)
 
 static void mutex_lock(rtcp_mutex_t mutex)
 {
-    if (mutex != NULL) (void)rt_mutex_take((rt_mutex_t)mutex, RT_WAITING_FOREVER);
+    if (mutex != NULL)
+        (void)rt_mutex_take((rt_mutex_t)mutex, RT_WAITING_FOREVER);
 }
 
 static void mutex_unlock(rtcp_mutex_t mutex)
 {
-    if (mutex != NULL) (void)rt_mutex_release((rt_mutex_t)mutex);
+    if (mutex != NULL)
+        (void)rt_mutex_release((rt_mutex_t)mutex);
 }
 
 static void mutex_destroy(rtcp_mutex_t mutex)
 {
-    if (mutex != NULL) (void)rt_mutex_delete((rt_mutex_t)mutex);
+    if (mutex != NULL)
+        (void)rt_mutex_delete((rt_mutex_t)mutex);
 }
 
 const struct rtcp_os rtcp_os_rtthread = {

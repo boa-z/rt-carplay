@@ -9,7 +9,8 @@
 
 #define BLOB_CAPACITY 1024U
 
-typedef struct {
+typedef struct
+{
     uint8_t blob[BLOB_CAPACITY];
     size_t len;
     unsigned saves;
@@ -20,7 +21,8 @@ static memory_backend_t g_memory;
 static int memory_load(uint8_t *blob, size_t capacity, size_t *len, void *context)
 {
     memory_backend_t *memory = context;
-    if (capacity < memory->len) return RTCP_EINVAL;
+    if (capacity < memory->len)
+        return RTCP_EINVAL;
     memcpy(blob, memory->blob, memory->len);
     *len = memory->len;
     return RTCP_OK;
@@ -29,7 +31,8 @@ static int memory_load(uint8_t *blob, size_t capacity, size_t *len, void *contex
 static int memory_save(const uint8_t *blob, size_t len, void *context)
 {
     memory_backend_t *memory = context;
-    if (len > sizeof(memory->blob)) return RTCP_EINVAL;
+    if (len > sizeof(memory->blob))
+        return RTCP_EINVAL;
     memcpy(memory->blob, blob, len);
     memory->len = len;
     ++memory->saves;
@@ -106,8 +109,9 @@ int main(void)
     /* Fill the table, then reject the ninth controller. */
     assert(airplay_pairing_store_save_pairing(id_b, sizeof(id_b) - 1U,
                                               key_a, NULL));
-    for (unsigned i = 2U; i < AIRPLAY_PAIRING_STORE_MAX_CONTROLLERS; ++i) {
-        uint8_t id[8] = {'c', 't', 'r', 'l', (uint8_t)('0' + i), 0, 0, 0};
+    for (unsigned i = 2U; i < AIRPLAY_PAIRING_STORE_MAX_CONTROLLERS; ++i)
+    {
+        uint8_t id[8] = { 'c', 't', 'r', 'l', (uint8_t)('0' + i), 0, 0, 0 };
         assert(airplay_pairing_store_save_pairing(id, 5U, key_a, NULL));
     }
     assert(airplay_pairing_store_count(&count) == RTCP_OK &&

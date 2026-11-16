@@ -4,7 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     const char *name;
     const char *model_identifier;
     const char *manufacturer;

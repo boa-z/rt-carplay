@@ -9,7 +9,8 @@
 #define RTCP_BT_EV_DISCONNECTED 2
 #define RTCP_BT_EV_LINK_KEY     3
 
-struct rtcp_bt {
+struct rtcp_bt
+{
     int (*enable)(const char *name, const uint8_t bdaddr[6]);
     int (*rfcomm_listen)(uint8_t channel, const char *name,
                          const char *uuid128, uint8_t *out_channel);

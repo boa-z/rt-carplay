@@ -7,7 +7,8 @@
 
 #include "rtcp/rtcp.h"
 
-typedef struct {
+typedef struct
+{
     rtcp_mutex_t mutex;
     int value;
     int done;
@@ -27,7 +28,7 @@ int main(void)
     /* The complete optional endpoint set must fit one portable poll batch. */
     struct rtcp_pollfd endpoints[RTCP_NET_POLL_MAX];
     for (unsigned i = 0; i < RTCP_NET_POLL_MAX; ++i)
-        endpoints[i] = (struct rtcp_pollfd){.fd = -1, .events = RTCP_POLLIN};
+        endpoints[i] = (struct rtcp_pollfd){ .fd = -1, .events = RTCP_POLLIN };
     assert(rtcp_net_linux.poll(endpoints, RTCP_NET_POLL_MAX, 0) == 0);
     assert(rtcp_net_linux.poll(endpoints, RTCP_NET_POLL_MAX + 1, 0) == RTCP_EINVAL);
     /* Clock and sleep. */
@@ -45,16 +46,18 @@ int main(void)
     rtcp_os_linux.free(value);
 
     /* Mutex + detached thread. */
-    shared_t shared = {0};
+    shared_t shared = { 0 };
     shared.mutex = rtcp_os_linux.mutex_create();
     assert(shared.mutex != NULL);
     assert(rtcp_os_linux.thread_create("worker", worker, &shared, 4096, 5) != NULL);
     unsigned spins = 0U;
-    for (;;) {
+    for (;;)
+    {
         rtcp_os_linux.mutex_lock(shared.mutex);
         int done = shared.done;
         rtcp_os_linux.mutex_unlock(shared.mutex);
-        if (done) break;
+        if (done)
+            break;
         assert(++spins < 2000U);
         rtcp_os_linux.sleep_ms(1);
     }
@@ -63,8 +66,8 @@ int main(void)
 
     /* CSPRNG. */
     assert(rtcp_os_linux.random != NULL);
-    uint8_t random_a[32] = {0};
-    uint8_t random_b[32] = {0};
+    uint8_t random_a[32] = { 0 };
+    uint8_t random_b[32] = { 0 };
     assert(rtcp_os_linux.random(random_a, sizeof(random_a)));
     assert(rtcp_os_linux.random(random_b, sizeof(random_b)));
     assert(memcmp(random_a, random_b, sizeof(random_a)) != 0);
@@ -77,7 +80,7 @@ int main(void)
 
     rtcp_addr_t peer = {
         .family = RTCP_AF_INET,
-        .addr = {127, 0, 0, 1},
+        .addr = { 127, 0, 0, 1 },
         .port = port,
     };
     int client = rtcp_net_linux.connect(&peer);
@@ -98,7 +101,7 @@ int main(void)
     assert(rtcp_net_linux.poll(&pollfd, 1, 1000) == 1);
     assert(pollfd.revents & RTCP_POLLIN);
 
-    char buffer[16] = {0};
+    char buffer[16] = { 0 };
     int received = rtcp_net_linux.recv(server, buffer, sizeof(buffer) - 1U);
     assert(received == (int)(sizeof(ping) - 1U));
     assert(memcmp(buffer, ping, sizeof(ping) - 1U) == 0);
@@ -121,17 +124,18 @@ int main(void)
     /* IPv6 loopback, the wired CarPlay transport.  Skip only when the host
      * has no IPv6 loopback at all. */
     int listener6 = rtcp_net_linux.listen(RTCP_AF_INET6, 0);
-    if (listener6 >= 0) {
+    if (listener6 >= 0)
+    {
         uint16_t port6 = rtcp_net_linux_local_port(listener6);
         assert(port6 != 0U);
         rtcp_addr_t loopback6 = {
             .family = RTCP_AF_INET6,
-            .addr = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+            .addr = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
             .port = port6,
         };
         int client6 = rtcp_net_linux.connect(&loopback6);
         assert(client6 >= 0);
-        rtcp_addr_t peer6 = {0};
+        rtcp_addr_t peer6 = { 0 };
         int server6 = rtcp_net_linux.accept(listener6, &peer6);
         assert(server6 >= 0);
         assert(peer6.family == RTCP_AF_INET6 && peer6.port != 0U);
@@ -159,7 +163,7 @@ int main(void)
         assert(sender6 >= 0);
         rtcp_addr_t unicast6 = {
             .family = RTCP_AF_INET6,
-            .addr = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+            .addr = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
             .port = udp_port6,
         };
         static const char datagram6[] = "wired";
@@ -172,14 +176,16 @@ int main(void)
             .revents = 0,
         };
         assert(rtcp_net_linux.poll(&poll6_udp, 1, 1000) == 1);
-        rtcp_addr_t source6 = {0};
+        rtcp_addr_t source6 = { 0 };
         assert(rtcp_net_linux.udp_recvfrom(receiver6, buffer, sizeof(buffer),
                                            &source6) ==
                (int)sizeof(datagram6));
         assert(source6.family == RTCP_AF_INET6);
         rtcp_net_linux.close(receiver6);
         rtcp_net_linux.close(sender6);
-    } else {
+    }
+    else
+    {
         puts("IPv6 loopback unavailable; skipped");
     }
 
@@ -194,7 +200,7 @@ int main(void)
 
     rtcp_addr_t unicast = {
         .family = RTCP_AF_INET,
-        .addr = {127, 0, 0, 1},
+        .addr = { 127, 0, 0, 1 },
         .port = udp_port,
     };
     static const char datagram[] = "mDNS";
@@ -210,7 +216,7 @@ int main(void)
     assert(rtcp_net_linux.poll(&datagram_poll, 1, 1000) == 1);
     assert(datagram_poll.revents & RTCP_POLLIN);
 
-    rtcp_addr_t source = {0};
+    rtcp_addr_t source = { 0 };
     memset(buffer, 0, sizeof(buffer));
     int datagram_len = rtcp_net_linux.udp_recvfrom(receiver, buffer,
                                                    sizeof(buffer), &source);
@@ -226,7 +232,7 @@ int main(void)
     rtcp_net_linux.close(sender);
 
     /* Documented stubs. */
-    uint8_t bdaddr[6] = {0};
+    uint8_t bdaddr[6] = { 0 };
     assert(rtcp_bt_linux.enable("linux", bdaddr) == RTCP_ENOTSUP);
     assert(rtcp_wifi_linux.ap_start("ssid", "pass", 6) == RTCP_ENOTSUP);
 

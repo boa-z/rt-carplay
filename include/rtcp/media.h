@@ -7,12 +7,18 @@
 #include "rtcp/net.h"
 
 #define RTCP_AUDIO_STREAM_MAIN 100U
-#define RTCP_AUDIO_STREAM_ALT 101U
+#define RTCP_AUDIO_STREAM_ALT  101U
 #define RTCP_AUDIO_STREAM_HIGH 102U
 #define RTCP_AUDIO_MAX_STREAMS 8U
 
-typedef enum { RTCP_AUDIO_LPCM, RTCP_AUDIO_AAC_LC, RTCP_AUDIO_OPUS } rtcp_audio_codec_kind_t;
-typedef struct {
+typedef enum
+{
+    RTCP_AUDIO_LPCM,
+    RTCP_AUDIO_AAC_LC,
+    RTCP_AUDIO_OPUS
+} rtcp_audio_codec_kind_t;
+typedef struct
+{
     uint32_t sample_rate;
     uint8_t channels;
     rtcp_audio_codec_kind_t codec;
@@ -21,7 +27,8 @@ typedef struct {
     bool stream_slot_valid;
 } rtcp_audio_format_t;
 
-typedef struct {
+typedef struct
+{
     bool has_call, call_active;
     bool has_speech;
     int speech_mode;
@@ -38,20 +45,23 @@ typedef struct {
     uint32_t screen_permanent_entity;
 } rtcp_audio_modes_t;
 
-typedef struct {
+typedef struct
+{
     rtcp_audio_format_t format;
     uint8_t input_key[32];
-    uint8_t payload_type; /* CarPlay stream type (100), not the codec enum. */
+    uint8_t payload_type;       /* CarPlay stream type (100), not the codec enum. */
     unsigned frames_per_packet; /* per channel; 0 selects MTU-safe default */
 } rtcp_audio_sender_config_t;
-typedef struct {
+typedef struct
+{
     rtcp_audio_sender_config_t sender;
     rtcp_addr_t peer;
     const struct rtcp_net *net;
     bool telephony;
 } rtcp_audio_input_config_t;
 
-typedef enum {
+typedef enum
+{
     RTCP_VIDEO_CONFIG_H264,
     RTCP_VIDEO_FRAME_H264,
 } rtcp_video_message_type_t;
@@ -60,16 +70,17 @@ typedef enum {
  * is the sender timestamp; arrival_time_us is local monotonic receive time.
  * An asynchronous sink must copy before returning. No UI policy is implied. */
 typedef int (*rtcp_video_packet_cb_t)(rtcp_video_message_type_t type,
-    uint8_t *annex_b, size_t length, size_t prefix_capacity,
-    uint64_t sender_time_ns, uint64_t arrival_time_us, void *context);
+                                      uint8_t *annex_b, size_t length, size_t prefix_capacity,
+                                      uint64_t sender_time_ns, uint64_t arrival_time_us, void *context);
 /* Decrypted audio: LPCM is interleaved little-endian S16; AAC/Opus remain
  * encoded packets identified by format->codec. Never relabel them as PCM.
  * All pointers are borrowed until return, including format. */
 typedef int (*rtcp_audio_packet_cb_t)(uint16_t stream_type, const uint8_t *data,
-    size_t length, const rtcp_audio_format_t *format, uint32_t rtp_timestamp,
-    uint64_t arrival_time_us, void *context);
+                                      size_t length, const rtcp_audio_format_t *format, uint32_t rtp_timestamp,
+                                      uint64_t arrival_time_us, void *context);
 
-typedef struct {
+typedef struct
+{
     /* NULL video selects an intentional discard sink; NULL audio refuses
      * audio SETUP, retaining the protocol's existing behavior. */
     rtcp_video_packet_cb_t on_video;

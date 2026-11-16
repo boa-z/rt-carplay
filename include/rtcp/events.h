@@ -4,7 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     bool running;
     bool transport_connected; /* RTSP socket accepted; not authentication. */
     bool authenticated;       /* Pair-Verify and ControlCipher completed. */
@@ -20,6 +21,6 @@ typedef struct {
  * state is borrowed until return; copy it to notify another thread. Querying
  * state is permitted here; reentrant lifecycle calls return RTCP_ESTATE. */
 typedef void (*rtcp_receiver_event_cb_t)(const rtcp_receiver_state_t *state,
-                                        void *context);
+                                         void *context);
 
 #endif

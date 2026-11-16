@@ -5,7 +5,11 @@
 #include <stdbool.h>
 #define RTCP_AUDIO_PACKET_MAX 4096U
 typedef struct rtcp_audio_jitter rtcp_audio_jitter_t;
-typedef struct { uint64_t accepted, late, duplicates, overflow; size_t queued; } rtcp_audio_jitter_stats_t;
+typedef struct
+{
+    uint64_t accepted, late, duplicates, overflow;
+    size_t queued;
+} rtcp_audio_jitter_stats_t;
 /* No internal locks: enqueue/pop/flush must be serialized by the caller.
  * Ordering uses authenticated RTP timestamps (including wrap), not unauthenticated
  * RTP sequence numbers. delay_us is a bounded startup/reordering wait. */

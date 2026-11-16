@@ -5,7 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
-typedef struct {
+typedef struct
+{
     size_t count;
     size_t body_bytes;
     bool fail;
@@ -26,7 +27,7 @@ static void test_fragmentation_coalescing_and_responses(void)
 {
     airplay_control_stream_t *stream = NULL;
     assert(airplay_control_stream_create(&stream) == AIRPLAY_CONTROL_STREAM_OK);
-    fixture_t fixture = {0};
+    fixture_t fixture = { 0 };
     static const uint8_t request1[] =
         "POST /command RTSP/1.0\r\nCSeq: 1\r\nContent-Length: 3\r\n\r\none";
     static const uint8_t response[] = "RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n";
@@ -41,7 +42,8 @@ static void test_fragmentation_coalescing_and_responses(void)
     memcpy(combined + offset, request2, sizeof(request2) - 1U);
     offset += sizeof(request2) - 1U;
 
-    for (size_t i = 0U; i < offset; ++i) {
+    for (size_t i = 0U; i < offset; ++i)
+    {
         airplay_control_stream_result_t result = airplay_control_stream_feed(
             stream, combined + i, 1U, on_request, &fixture);
         assert(result == AIRPLAY_CONTROL_STREAM_OK ||
@@ -56,7 +58,7 @@ static void test_limits_and_callback_failure(void)
 {
     airplay_control_stream_t *stream = NULL;
     assert(airplay_control_stream_create(&stream) == AIRPLAY_CONTROL_STREAM_OK);
-    fixture_t fixture = {.fail = true};
+    fixture_t fixture = { .fail = true };
     static const uint8_t request[] = "POST /event RTSP/1.0\r\nCSeq: 7\r\n\r\n";
     assert(airplay_control_stream_feed(stream, request, sizeof(request) - 1U,
                                        on_request, &fixture) ==

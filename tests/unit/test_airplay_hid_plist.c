@@ -24,7 +24,7 @@ static size_t string_object(const uint8_t *plist, size_t offset,
 
 int main(void)
 {
-    const uint8_t report[] = {0, 1, 9, 0, 7, 0, 1, 0, 0, 0, 0, 0};
+    const uint8_t report[] = { 0, 1, 9, 0, 7, 0, 1, 0, 0, 0, 0, 0 };
     uint8_t plist[160];
     size_t length = 0;
     assert(airplay_hid_plist_encode(0x2a2a2a2aU, report, sizeof(report),
@@ -38,7 +38,7 @@ int main(void)
     assert(read_be64(plist + trailer + 16) == 0);
     assert(plist[trailer + 6] == 1 && plist[trailer + 7] == 1);
     assert(plist[8] == 0xd3);
-    assert(memcmp(plist + 9, (uint8_t[]){1, 2, 3, 4, 5, 6}, 6) == 0);
+    assert(memcmp(plist + 9, (uint8_t[]){ 1, 2, 3, 4, 5, 6 }, 6) == 0);
 
     size_t offsets[7];
     for (size_t i = 0; i < 7; ++i) offsets[i] = plist[offset_table + i];

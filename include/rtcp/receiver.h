@@ -15,7 +15,8 @@
 #include "rtcp/ui_sync.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 typedef struct rtcp_receiver rtcp_receiver_t;
@@ -24,13 +25,14 @@ typedef struct rtcp_receiver rtcp_receiver_t;
  * /info bytes. OS/net tables, identity data and callback contexts remain
  * borrowed and immutable until destroy. No board or protocol-private header
  * is needed to populate this structure. See receiver_compat.h for migration. */
-typedef struct {
+typedef struct
+{
     rtcp_platform_t platform;
     rtcp_media_backend_t media;
     rtcp_iap2_backend_t iap2;
-    uint16_t port;        /* 0 selects the standard RTSP port (7000). */
-    uint16_t screen_port; /* 0 requests an ephemeral Screen DataStream port. */
-    uint8_t family;       /* 0/RTCP_AF_INET or RTCP_AF_INET6. */
+    uint16_t port;                /* 0 selects the standard RTSP port (7000). */
+    uint16_t screen_port;         /* 0 requests an ephemeral Screen DataStream port. */
+    uint8_t family;               /* 0/RTCP_AF_INET or RTCP_AF_INET6. */
     size_t screen_max_body_bytes; /* 0 selects the protocol default. */
     void (*on_event_state)(bool connected, void *context);
     void *event_state_context;
@@ -105,13 +107,13 @@ bool rtcp_receiver_send_iap(rtcp_receiver_t *, const uint8_t *, size_t);
  * Sending to attached Vehicle State/UI Sync lanes returns ESTATE; update
  * their models through the corresponding owner-thread APIs instead. */
 int rtcp_receiver_send_data_stream(rtcp_receiver_t *, rtcp_data_stream_kind_t,
-                                    const uint8_t *, size_t);
+                                   const uint8_t *, size_t);
 int rtcp_receiver_get_data_stream_status(const rtcp_receiver_t *,
-    rtcp_data_stream_kind_t, rtcp_data_stream_status_t *);
+                                         rtcp_data_stream_kind_t, rtcp_data_stream_status_t *);
 int rtcp_receiver_get_vehicle_delivery_status(const rtcp_receiver_t *,
-    rtcp_vehicle_delivery_status_t *);
+                                              rtcp_vehicle_delivery_status_t *);
 int rtcp_receiver_get_ui_sync_delivery_status(const rtcp_receiver_t *,
-    rtcp_ui_sync_delivery_status_t *);
+                                              rtcp_ui_sync_delivery_status_t *);
 
 #ifdef __cplusplus
 }

@@ -3,23 +3,25 @@
 
 #include <string.h>
 
-#define FORCE_KEYFRAME_PLIST_BYTES 65U
-#define FORCE_KEYFRAME_OBJECTS 3U
+#define FORCE_KEYFRAME_PLIST_BYTES   65U
+#define FORCE_KEYFRAME_OBJECTS       3U
 #define FORCE_KEYFRAME_TRAILER_BYTES 32U
 
 bool airplay_command_plist_encode_force_keyframe(uint8_t *output,
                                                  size_t output_capacity,
                                                  size_t *output_len)
 {
-    static const uint8_t magic[] = {'b', 'p', 'l', 'i', 's', 't', '0', '0'};
-    static const uint8_t dictionary[] = {0xd1, 0x01, 0x02};
+    static const uint8_t magic[] = { 'b', 'p', 'l', 'i', 's', 't', '0', '0' };
+    static const uint8_t dictionary[] = { 0xd1, 0x01, 0x02 };
     static const char key[] = "type";
     static const char command[] = "forceKeyFrame";
-    static const uint8_t offsets[] = {8U, 11U, 16U};
+    static const uint8_t offsets[] = { 8U, 11U, 16U };
 
-    if (output_len != NULL) *output_len = 0U;
+    if (output_len != NULL)
+        *output_len = 0U;
     if (output == NULL || output_len == NULL ||
-        output_capacity < FORCE_KEYFRAME_PLIST_BYTES) {
+        output_capacity < FORCE_KEYFRAME_PLIST_BYTES)
+    {
         return false;
     }
 

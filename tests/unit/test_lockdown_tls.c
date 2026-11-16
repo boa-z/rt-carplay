@@ -33,7 +33,8 @@ static uint32_t rng_state = 0x2468ace0U;
 static int test_rng(void *context, uint8_t *output, size_t length)
 {
     (void)context;
-    for (size_t i = 0U; i < length; ++i) {
+    for (size_t i = 0U; i < length; ++i)
+    {
         rng_state ^= rng_state << 13;
         rng_state ^= rng_state >> 17;
         rng_state ^= rng_state << 5;
@@ -49,7 +50,8 @@ static int test_rng_ssl(void *context, unsigned char *output, size_t length)
 
 #define PIPE_CAPACITY 65536U
 
-typedef struct {
+typedef struct
+{
     pthread_mutex_t lock;
     pthread_cond_t cond;
     uint8_t data[PIPE_CAPACITY];
@@ -81,8 +83,10 @@ static int pipe_read(void *context, void *buffer, size_t length,
     int rc;
 
     pthread_mutex_lock(&pipe->lock);
-    while (pipe->used == 0U && !pipe->writer_closed) {
-        if (timeout_ms == 0U) {
+    while (pipe->used == 0U && !pipe->writer_closed)
+    {
+        if (timeout_ms == 0U)
+        {
             pthread_mutex_unlock(&pipe->lock);
             return RTCP_ETIMEDOUT;
         }
@@ -90,22 +94,26 @@ static int pipe_read(void *context, void *buffer, size_t length,
         clock_gettime(CLOCK_REALTIME, &deadline);
         deadline.tv_sec += (time_t)(timeout_ms / 1000U);
         deadline.tv_nsec += (long)(timeout_ms % 1000U) * 1000000L;
-        if (deadline.tv_nsec >= 1000000000L) {
+        if (deadline.tv_nsec >= 1000000000L)
+        {
             deadline.tv_sec += 1;
             deadline.tv_nsec -= 1000000000L;
         }
         rc = pthread_cond_timedwait(&pipe->cond, &pipe->lock, &deadline);
-        if (rc == ETIMEDOUT && pipe->used == 0U && !pipe->writer_closed) {
+        if (rc == ETIMEDOUT && pipe->used == 0U && !pipe->writer_closed)
+        {
             pthread_mutex_unlock(&pipe->lock);
             return RTCP_ETIMEDOUT;
         }
     }
-    if (pipe->used == 0U) {
+    if (pipe->used == 0U)
+    {
         pthread_mutex_unlock(&pipe->lock);
         return 0;
     }
     count = length < pipe->used ? length : pipe->used;
-    for (size_t i = 0U; i < count; ++i) {
+    for (size_t i = 0U; i < count; ++i)
+    {
         output[i] = pipe->data[pipe->read_pos];
         pipe->read_pos = (pipe->read_pos + 1U) % PIPE_CAPACITY;
     }
@@ -121,8 +129,10 @@ static int pipe_write(void *context, const void *data, size_t length)
     const uint8_t *input = data;
 
     pthread_mutex_lock(&pipe->lock);
-    for (size_t i = 0U; i < length; ++i) {
-        while (pipe->used == PIPE_CAPACITY) {
+    for (size_t i = 0U; i < length; ++i)
+    {
+        while (pipe->used == PIPE_CAPACITY)
+        {
             pthread_cond_wait(&pipe->cond, &pipe->lock);
         }
         pipe->data[pipe->write_pos] = input[i];
@@ -140,7 +150,8 @@ static const rtcp_stream_ops_t pipe_ops = {
 };
 
 /* One duplex stream built from two unidirectional pipes. */
-typedef struct {
+typedef struct
+{
     rtcp_stream_t in;
     rtcp_stream_t out;
 } duplex_t;
@@ -166,7 +177,8 @@ static const rtcp_stream_ops_t duplex_ops = {
     .write = duplex_write,
 };
 
-typedef struct {
+typedef struct
+{
     pipe_t client_to_server;
     pipe_t server_to_client;
     rtcp_pair_record_t *record;
@@ -185,7 +197,8 @@ static int server_send(void *context, const unsigned char *data,
     int ret;
 
     ret = duplex->out.ops->write(duplex->out.context, data, length);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
     return (int)length;
@@ -196,10 +209,12 @@ static int server_recv(void *context, unsigned char *buffer, size_t length)
     duplex_t *duplex = context;
     int ret = duplex->in.ops->read(duplex->in.context, buffer, length, 5000U);
 
-    if (ret == RTCP_ETIMEDOUT) {
+    if (ret == RTCP_ETIMEDOUT)
+    {
         return MBEDTLS_ERR_SSL_TIMEOUT;
     }
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
     return ret;
@@ -249,10 +264,12 @@ static void *server_thread(void *argument)
     mbedtls_ssl_set_bio(&ssl, &transport, server_send, server_recv, NULL);
 
     server->handshake_ret = mbedtls_ssl_handshake(&ssl);
-    if (server->handshake_ret == 0) {
+    if (server->handshake_ret == 0)
+    {
         server->read_ret =
             mbedtls_ssl_read(&ssl, (unsigned char *)server->request, 4U);
-        if (server->read_ret == 4) {
+        if (server->read_ret == 4)
+        {
             /* Hold the reply back so the client exercises a read timeout
              * and then a successful retry on the same session. */
             struct timespec delay = { 0, 200 * 1000 * 1000L };

@@ -31,7 +31,8 @@ static uint32_t rng_state = 0x12345678U;
 static int test_rng(void *context, uint8_t *output, size_t length)
 {
     (void)context;
-    for (size_t i = 0U; i < length; ++i) {
+    for (size_t i = 0U; i < length; ++i)
+    {
         rng_state ^= rng_state << 13;
         rng_state ^= rng_state >> 17;
         rng_state ^= rng_state << 5;
@@ -59,7 +60,8 @@ static void test_uuid(void)
     assert(uuid[14] == '4');
     assert(uuid[19] == '8' || uuid[19] == '9' || uuid[19] == 'A' ||
            uuid[19] == 'B');
-    for (size_t i = 0U; i < 36U; ++i) {
+    for (size_t i = 0U; i < 36U; ++i)
+    {
         bool dash = i == 8U || i == 13U || i == 18U || i == 23U;
         bool hex = (uuid[i] >= '0' && uuid[i] <= '9') ||
                    (uuid[i] >= 'A' && uuid[i] <= 'F');
@@ -151,7 +153,7 @@ static void test_generate_and_verify(void)
     assert(mbedtls_mpi_cmp_int(&mbedtls_pk_rsa(root_key)->E, 65537) == 0);
     assert(mbedtls_mpi_cmp_int(&mbedtls_pk_rsa(host_key)->E, 65537) == 0);
     assert(mbedtls_mpi_cmp_mpi(&mbedtls_pk_rsa(root_key)->N,
-                              &mbedtls_pk_rsa(host_key)->N) != 0);
+                               &mbedtls_pk_rsa(host_key)->N) != 0);
 
     /* The device certificate embeds the phone's public key unchanged. */
     static mbedtls_pk_context input;

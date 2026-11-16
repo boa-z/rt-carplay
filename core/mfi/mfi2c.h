@@ -20,16 +20,18 @@
  * Getting that shape right matters: the 2.0C does not answer a repeated-start
  * combined write/read on this board (verified in the PoC).
  */
-struct rtcp_mfi2c_bus {
-    int  (*write)(void *ctx, uint8_t reg, const uint8_t *data, size_t len);
-    int  (*read)(void *ctx, uint8_t reg, uint8_t *data, size_t len,
-                 int retries, int delay_ms);
+struct rtcp_mfi2c_bus
+{
+    int (*write)(void *ctx, uint8_t reg, const uint8_t *data, size_t len);
+    int (*read)(void *ctx, uint8_t reg, uint8_t *data, size_t len,
+                int retries, int delay_ms);
     void (*delay_ms)(void *ctx, unsigned ms);
 };
 
-typedef struct rtcp_mfi2c {
+typedef struct rtcp_mfi2c
+{
     const struct rtcp_mfi2c_bus *bus;
-    void  *ctx;
+    void *ctx;
     uint8_t addr;
 } rtcp_mfi2c_t;
 

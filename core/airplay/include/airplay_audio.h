@@ -24,9 +24,9 @@
 #include "rtcp/os.h"
 #include "../../audio/include/audio_codec.h"
 
-#define AIRPLAY_AUDIO_KEY_BYTES 32U
-#define AIRPLAY_AUDIO_TAG_BYTES 16U
-#define AIRPLAY_AUDIO_NONCE_BYTES 8U
+#define AIRPLAY_AUDIO_KEY_BYTES        32U
+#define AIRPLAY_AUDIO_TAG_BYTES        16U
+#define AIRPLAY_AUDIO_NONCE_BYTES      8U
 #define AIRPLAY_AUDIO_RTP_HEADER_BYTES 12U
 #define AIRPLAY_AUDIO_OVERHEAD_BYTES \
     (AIRPLAY_AUDIO_RTP_HEADER_BYTES + AIRPLAY_AUDIO_TAG_BYTES + AIRPLAY_AUDIO_NONCE_BYTES)
@@ -34,7 +34,7 @@
 
 /* CarPlay SETUP stream types handled by this receiver. */
 #define AIRPLAY_AUDIO_STREAM_MAIN RTCP_AUDIO_STREAM_MAIN
-#define AIRPLAY_AUDIO_STREAM_ALT RTCP_AUDIO_STREAM_ALT
+#define AIRPLAY_AUDIO_STREAM_ALT  RTCP_AUDIO_STREAM_ALT
 #define AIRPLAY_AUDIO_STREAM_HIGH RTCP_AUDIO_STREAM_HIGH
 #define AIRPLAY_AUDIO_MAX_STREAMS RTCP_AUDIO_MAX_STREAMS
 /* Stable slots distinguish same-type streams by negotiated audioType. */
@@ -45,7 +45,8 @@ typedef struct airplay_audio_stream airplay_audio_stream_t;
 
 typedef rtcp_audio_modes_t airplay_audio_modes_t;
 /* Parsed SETUP metadata. Input target is always the authenticated RTSP peer. */
-typedef struct {
+typedef struct
+{
     uint64_t connection_id;
     uint64_t format_bits;
     char audio_type[24];
@@ -61,15 +62,16 @@ typedef rtcp_audio_format_t airplay_audio_format_t;
  * arrival_us is the local monotonic receive time. */
 typedef rtcp_audio_packet_cb_t airplay_audio_pcm_cb_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t output_key[AIRPLAY_AUDIO_KEY_BYTES];
-    uint16_t stream_type; /* AIRPLAY_AUDIO_STREAM_*; echoed to the callback. */
+    uint16_t stream_type;       /* AIRPLAY_AUDIO_STREAM_*; echoed to the callback. */
     uint64_t audio_format_bits; /* SETUP audioFormat field. */
     uint8_t stream_slot;
     bool stream_slot_valid;
     /* UDP socket family: 0/RTCP_AF_INET (default) or RTCP_AF_INET6. */
     uint8_t family;
-    size_t max_datagram_bytes;  /* 0 selects the default. */
+    size_t max_datagram_bytes; /* 0 selects the default. */
     airplay_audio_pcm_cb_t on_pcm;
     void *context;
 } airplay_audio_stream_config_t;
@@ -107,7 +109,7 @@ void airplay_audio_stream_poll(airplay_audio_stream_t *stream,
                                bool control_readable);
 
 void airplay_audio_stream_get_stats(const airplay_audio_stream_t *stream,
-                                     rtcp_audio_stats_t *stats);
+                                    rtcp_audio_stats_t *stats);
 
 uint32_t airplay_audio_stream_datagrams(const airplay_audio_stream_t *stream);
 uint32_t airplay_audio_stream_auth_failures(const airplay_audio_stream_t *stream);

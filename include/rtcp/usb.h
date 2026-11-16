@@ -22,17 +22,17 @@
 #include <stdint.h>
 
 /* bmAttributes transfer types (USB 2.0, 9.3.4). */
-#define RTCP_USB_TRANSFER_CONTROL   0U
+#define RTCP_USB_TRANSFER_CONTROL     0U
 #define RTCP_USB_TRANSFER_ISOCHRONOUS 1U
-#define RTCP_USB_TRANSFER_BULK      2U
-#define RTCP_USB_TRANSFER_INTERRUPT 3U
+#define RTCP_USB_TRANSFER_BULK        2U
+#define RTCP_USB_TRANSFER_INTERRUPT   3U
 
 /* bmRequestType fields.  The low five bits are the recipient. */
-#define RTCP_USB_REQ_DIR_IN        0x80U
-#define RTCP_USB_REQ_DIR_OUT       0x00U
-#define RTCP_USB_REQ_TYPE_STANDARD 0x00U
-#define RTCP_USB_REQ_TYPE_CLASS    0x20U
-#define RTCP_USB_REQ_TYPE_VENDOR   0x40U
+#define RTCP_USB_REQ_DIR_IN              0x80U
+#define RTCP_USB_REQ_DIR_OUT             0x00U
+#define RTCP_USB_REQ_TYPE_STANDARD       0x00U
+#define RTCP_USB_REQ_TYPE_CLASS          0x20U
+#define RTCP_USB_REQ_TYPE_VENDOR         0x40U
 #define RTCP_USB_REQ_RECIPIENT_DEVICE    0x00U
 #define RTCP_USB_REQ_RECIPIENT_INTERFACE 0x01U
 #define RTCP_USB_REQ_RECIPIENT_ENDPOINT  0x02U
@@ -58,7 +58,8 @@
 #define RTCP_USB_MAX_ALTSETTINGS 4U
 #define RTCP_USB_MAX_ENDPOINTS   4U
 
-typedef enum {
+typedef enum
+{
     RTCP_USB_SPEED_UNKNOWN = 0,
     RTCP_USB_SPEED_LOW = 1,
     RTCP_USB_SPEED_FULL = 2,
@@ -66,20 +67,23 @@ typedef enum {
     RTCP_USB_SPEED_SUPER = 4,
 } rtcp_usb_speed_t;
 
-typedef struct {
-    uint8_t address;        /* bEndpointAddress, bit 7 set for IN */
-    uint8_t transfer_type;  /* RTCP_USB_TRANSFER_* */
+typedef struct
+{
+    uint8_t address;       /* bEndpointAddress, bit 7 set for IN */
+    uint8_t transfer_type; /* RTCP_USB_TRANSFER_* */
     uint16_t max_packet_size;
     uint8_t interval;
 } rtcp_usb_endpoint_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t alternate_setting;
     uint8_t endpoint_count;
     rtcp_usb_endpoint_t endpoints[RTCP_USB_MAX_ENDPOINTS];
 } rtcp_usb_altsetting_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t number;
     uint8_t class_code;
     uint8_t subclass;
@@ -88,7 +92,8 @@ typedef struct {
     rtcp_usb_altsetting_t altsettings[RTCP_USB_MAX_ALTSETTINGS];
 } rtcp_usb_interface_t;
 
-typedef struct {
+typedef struct
+{
     bool present;
     uint16_t vendor_id;
     uint16_t product_id;
@@ -97,17 +102,18 @@ typedef struct {
     uint8_t device_class;
     uint8_t device_subclass;
     uint8_t device_protocol;
-    uint8_t speed;                  /* rtcp_usb_speed_t */
+    uint8_t speed; /* rtcp_usb_speed_t */
     uint8_t bus_id;
-    uint8_t address;                /* USB device address */
-    uint8_t configuration_index;    /* index used in GET_DESCRIPTOR */
-    uint8_t configuration_value;    /* bConfigurationValue in that descriptor */
-    uint8_t configuration_count;    /* bNumConfigurations at enumeration */
+    uint8_t address;             /* USB device address */
+    uint8_t configuration_index; /* index used in GET_DESCRIPTOR */
+    uint8_t configuration_value; /* bConfigurationValue in that descriptor */
+    uint8_t configuration_count; /* bNumConfigurations at enumeration */
     uint8_t interface_count;
     rtcp_usb_interface_t interfaces[RTCP_USB_MAX_INTERFACES];
 } rtcp_usb_device_t;
 
-typedef enum {
+typedef enum
+{
     /* The device finished enumeration and its configuration was selected. */
     RTCP_USB_EVENT_ATTACHED = 0,
     /* The device left the bus; the snapshot must no longer be used. */
@@ -137,7 +143,8 @@ typedef void (*rtcp_usb_event_cb_t)(struct rtcp_usb *usb,
  *   get_device        copies the current snapshot; returns RTCP_ESTATE when
  *                     no device is attached.
  */
-typedef struct {
+typedef struct
+{
     int (*open)(void *context, rtcp_usb_event_cb_t callback, void *user);
     void (*close)(void *context);
     int (*get_device)(void *context, rtcp_usb_device_t *device);
@@ -148,7 +155,8 @@ typedef struct {
                          size_t length, uint32_t timeout_ms);
 } rtcp_usb_ops_t;
 
-typedef struct rtcp_usb {
+typedef struct rtcp_usb
+{
     const rtcp_usb_ops_t *ops;
     void *context;
 } rtcp_usb_t;
@@ -177,7 +185,8 @@ bool rtcp_usb_interface_bulk_endpoints(const rtcp_usb_interface_t *interface,
  * what CherryUSB's usbh_cdc_ncm driver can bind to.  Apple Ethernet is the
  * vendor-specific ff/fd/01 function and needs its own host driver.
  */
-typedef struct {
+typedef struct
+{
     bool usbmux;
     bool ncm_control;       /* interface class 02 / subclass 0d */
     bool ncm_data;          /* interface class 0a with a bulk pair */
@@ -194,7 +203,8 @@ void rtcp_usb_classify_configuration(const rtcp_usb_device_t *device,
  * CDC-NCM pair is preferred because the existing host driver can drive it;
  * Apple Ethernet is the fallback; OTHER means the configuration carries no
  * usable wired IP link. */
-typedef enum {
+typedef enum
+{
     RTCP_USB_CONFIG_OTHER = 0,
     RTCP_USB_CONFIG_APPLE_ETHERNET = 1,
     RTCP_USB_CONFIG_NCM = 2,

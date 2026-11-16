@@ -4,13 +4,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define INPUT_BRIDGE_HID_UID_TOUCH 0x2a2a2a2aU
-#define INPUT_BRIDGE_TOUCH_CONTACTS 2U
+#define INPUT_BRIDGE_HID_UID_TOUCH    0x2a2a2a2aU
+#define INPUT_BRIDGE_TOUCH_CONTACTS   2U
 #define INPUT_BRIDGE_HID_REPORT_BYTES 12U
 
 typedef struct input_bridge input_bridge_t;
 
-typedef enum {
+typedef enum
+{
     INPUT_BRIDGE_OK = 0,
     INPUT_BRIDGE_INVALID_ARGUMENT,
     INPUT_BRIDGE_NO_CONTACT_SLOT,
@@ -18,7 +19,8 @@ typedef enum {
     INPUT_BRIDGE_HID_NOT_CONNECTED,
 } input_bridge_result_t;
 
-typedef enum {
+typedef enum
+{
     INPUT_BRIDGE_TOUCH_DOWN,
     INPUT_BRIDGE_TOUCH_MOVE,
     INPUT_BRIDGE_TOUCH_UP,

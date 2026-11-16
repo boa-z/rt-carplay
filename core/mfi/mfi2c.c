@@ -48,29 +48,29 @@
 #define MFI_VENDOR_RETRIES   10
 #define MFI_VENDOR_DELAY_MS  50
 
-#define MFI_REG_RETRIES      3
-#define MFI_REG_DELAY_MS     50
+#define MFI_REG_RETRIES  3
+#define MFI_REG_DELAY_MS 50
 
-#define MFI_ID_2C            0x00000200u
-#define MFI_ID_AUTH3         0x00000300u
+#define MFI_ID_2C    0x00000200u
+#define MFI_ID_AUTH3 0x00000300u
 
-#define MFI_STATUS_SUCCESS   0x10
-#define MFI_STATUS_ERROR     0x80
+#define MFI_STATUS_SUCCESS 0x10
+#define MFI_STATUS_ERROR   0x80
 
 /*
  * Poll pacing.  Every bus read uses the vendor 50 ms select-to-read gap
  * (MFI_VENDOR_DELAY_MS), so one poll costs roughly 110 ms.  18 polls give a
  * deadline just under Apple's 2 s signature timeout.
  */
-#define MFI_STATUS_POLLS     18
-#define MFI_STATUS_POLL_MS   10
+#define MFI_STATUS_POLLS   18
+#define MFI_STATUS_POLL_MS 10
 
 /* A 2.0C is RSA-2048 (256-byte signature).  Anything shorter than this is
  * either the stale challenge window (0x00 0x14 = 20) or a not-yet-ready
  * register, never a real MFi signature. */
-#define MFI_SIG_MIN_LEN      64
+#define MFI_SIG_MIN_LEN 64
 
-#define MFI_SIGN_DELAY_MS    10
+#define MFI_SIGN_DELAY_MS 10
 
 static int mfi_read(rtcp_mfi2c_t *dev, uint8_t reg, uint8_t *buf, size_t len,
                     int retries, int delay_ms)
@@ -126,7 +126,8 @@ int rtcp_mfi2c_probe(rtcp_mfi2c_t *dev, struct rtcp_mfi_info *info)
                  MFI_VENDOR_RETRIES, MFI_VENDOR_DELAY_MS) == RTCP_OK)
         present = 1;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 4; i++)
+    {
         if (mfi_read(dev, (uint8_t)i, &info->version[i], 1,
                      MFI_REG_RETRIES, MFI_REG_DELAY_MS) == RTCP_OK)
             present = 1;
@@ -134,7 +135,8 @@ int rtcp_mfi2c_probe(rtcp_mfi2c_t *dev, struct rtcp_mfi_info *info)
 
     have_id = (mfi_read(dev, MFI_REG_DEVICE_ID, id4, sizeof(id4),
                         MFI_REG_RETRIES, MFI_REG_DELAY_MS) == RTCP_OK);
-    if (have_id) {
+    if (have_id)
+    {
         info->id32 = ((uint32_t)id4[0] << 24) | ((uint32_t)id4[1] << 16) |
                      ((uint32_t)id4[2] << 8) | (uint32_t)id4[3];
         present = 1;
@@ -165,7 +167,8 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
 
     if (dev == NULL || challenge == NULL || sig == NULL || sig_len == NULL)
         return RTCP_EINVAL;
-    if (len != RTCP_MFI_CHALLENGE_LEN) {
+    if (len != RTCP_MFI_CHALLENGE_LEN)
+    {
         RTCP_LOGE(TAG, "sign=challenge_length_unsupported len=%u expected=%u",
                   (unsigned)len, (unsigned)RTCP_MFI_CHALLENGE_LEN);
         return RTCP_EINVAL;
@@ -175,19 +178,22 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
     buf[1] = (uint8_t)RTCP_MFI_CHALLENGE_LEN;
     memcpy(&buf[2], challenge, len);
 
-    if (mfi_write(dev, MFI_REG_CHALLENGE, buf, sizeof(buf)) != RTCP_OK) {
+    if (mfi_write(dev, MFI_REG_CHALLENGE, buf, sizeof(buf)) != RTCP_OK)
+    {
         RTCP_LOGE(TAG, "sign=challenge_write_failed");
         return RTCP_EIO;
     }
 
     mfi_delay(dev, MFI_SIGN_DELAY_MS);
 
-    if (mfi_write(dev, MFI_REG_STATUS, &start, 1) != RTCP_OK) {
+    if (mfi_write(dev, MFI_REG_STATUS, &start, 1) != RTCP_OK)
+    {
         RTCP_LOGE(TAG, "sign=start_write_failed");
         return RTCP_EIO;
     }
 
-    for (i = 0; i < MFI_STATUS_POLLS; i++) {
+    for (i = 0; i < MFI_STATUS_POLLS; i++)
+    {
         mfi_delay(dev, MFI_STATUS_POLL_MS);
 
         /*
@@ -197,7 +203,9 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
          */
         status = 0;
         if (mfi_read(dev, MFI_REG_STATUS, &status, 1, 1,
-                     MFI_VENDOR_DELAY_MS) == RTCP_OK && (status & MFI_STATUS_ERROR)) {
+                     MFI_VENDOR_DELAY_MS) == RTCP_OK &&
+            (status & MFI_STATUS_ERROR))
+        {
             RTCP_LOGE(TAG, "sign=status_error status=0x%02x poll=%d",
                       (unsigned)status, i);
             return RTCP_EIO;
@@ -205,11 +213,14 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
 
         n = 0;
         if (mfi_read(dev, MFI_REG_SIG_LEN, slen, sizeof(slen), 1,
-                     MFI_VENDOR_DELAY_MS) == RTCP_OK) {
+                     MFI_VENDOR_DELAY_MS) == RTCP_OK)
+        {
             n = ((size_t)slen[0] << 8) | slen[1];
-            if (n >= MFI_SIG_MIN_LEN && n <= sig_cap) {
+            if (n >= MFI_SIG_MIN_LEN && n <= sig_cap)
+            {
                 if (mfi_read(dev, MFI_REG_SIG, sig, n, MFI_REG_RETRIES,
-                             MFI_VENDOR_DELAY_MS) == RTCP_OK) {
+                             MFI_VENDOR_DELAY_MS) == RTCP_OK)
+                {
                     *sig_len = n;
                     RTCP_LOGI(TAG, "sign: status=0x%02x siglen=%u polls=%d",
                               (unsigned)status, (unsigned)n, i + 1);
@@ -234,20 +245,23 @@ int rtcp_mfi2c_read_cert(rtcp_mfi2c_t *dev, uint8_t *der, size_t cap,
         return RTCP_EINVAL;
 
     if (mfi_read(dev, MFI_REG_CERT_LEN, clen, sizeof(clen),
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
+                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK)
+    {
         RTCP_LOGE(TAG, "cert=length_read_failed");
         return RTCP_EIO;
     }
 
     n = ((size_t)clen[0] << 8) | clen[1];
-    if (n == 0 || n > cap || n > RTCP_MFI_CERT_MAX) {
+    if (n == 0 || n > cap || n > RTCP_MFI_CERT_MAX)
+    {
         RTCP_LOGE(TAG, "cert=length_invalid len=%u cap=%u max=%u",
                   (unsigned)n, (unsigned)cap, (unsigned)RTCP_MFI_CERT_MAX);
         return RTCP_EIO;
     }
 
     if (mfi_read(dev, MFI_REG_CERT, der, n,
-                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK) {
+                 MFI_REG_RETRIES, MFI_REG_DELAY_MS) != RTCP_OK)
+    {
         RTCP_LOGE(TAG, "cert=body_read_failed len=%u", (unsigned)n);
         return RTCP_EIO;
     }

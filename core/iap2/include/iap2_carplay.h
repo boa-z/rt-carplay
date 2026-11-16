@@ -10,12 +10,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     const char *ssid;
     const char *passphrase;
     uint8_t channel;
     uint8_t security_type; /* 0=None, 1=WEP, 2=WPA/WPA2, 3=WPA3 transition, 4=WPA3 */
-    const char *const *ip_addresses;
+    const char * const *ip_addresses;
     size_t ip_address_count;
     uint32_t airplay_port;
     const char *device_identifier;
@@ -23,7 +24,8 @@ typedef struct {
     const char *source_version;
 } iap2_carplay_start_session_config_t;
 
-typedef struct {
+typedef struct
+{
     const char *ssid;
     const char *passphrase;
     uint8_t channel;

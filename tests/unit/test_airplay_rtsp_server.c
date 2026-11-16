@@ -10,7 +10,7 @@
 #include "rtcp_linux.h"
 
 #define INFO_PLIST_BYTES AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES
-#define WAIT_LIMIT_MS 3000U
+#define WAIT_LIMIT_MS    3000U
 
 static unsigned screen_messages;
 
@@ -82,7 +82,7 @@ static bool test_lookup(const uint8_t *identifier, size_t identifier_len,
 static void fill_pairing(airplay_rtsp_pairing_config_t *pairing)
 {
     static const uint8_t identifier[] = "rtsp-server-test";
-    static const uint8_t public_key[32] = {1U};
+    static const uint8_t public_key[32] = { 1U };
     memset(pairing, 0, sizeof(*pairing));
     pairing->pair_setup.pairing_code = "server-test-code";
     pairing->pair_setup.accessory_identifier = identifier;
@@ -102,7 +102,7 @@ static void fill_pairing(airplay_rtsp_pairing_config_t *pairing)
 
 static size_t build_info_plist(uint8_t *buffer, size_t capacity)
 {
-    airplay_info_plist_config_t info = {0};
+    airplay_info_plist_config_t info = { 0 };
     info.device_id = "AA:BB:CC:DD:EE:FF";
     info.bluetooth_id = "11:22:33:44:55:66";
     info.name = "rt-carplay test";
@@ -113,7 +113,8 @@ static size_t build_info_plist(uint8_t *buffer, size_t capacity)
     return info_len;
 }
 
-typedef struct {
+typedef struct
+{
     int client_fd;
     uint8_t bytes[8192];
     size_t len;
@@ -121,7 +122,7 @@ typedef struct {
 
 static bool client_connect(client_t *client, uint16_t port)
 {
-    rtcp_addr_t address = {0};
+    rtcp_addr_t address = { 0 };
     address.family = RTCP_AF_INET;
     address.addr[0] = 127U;
     address.addr[3] = 1U;
@@ -134,11 +135,13 @@ static bool client_connect(client_t *client, uint16_t port)
 static bool client_send(client_t *client, const void *bytes, size_t len)
 {
     size_t offset = 0U;
-    while (offset < len) {
+    while (offset < len)
+    {
         int sent = rtcp_net_linux.send(client->client_fd,
                                        (const uint8_t *)bytes + offset,
                                        len - offset);
-        if (sent <= 0) return false;
+        if (sent <= 0)
+            return false;
         offset += (size_t)sent;
     }
     return true;
@@ -146,7 +149,7 @@ static bool client_send(client_t *client, const void *bytes, size_t len)
 
 static bool client_has_data(int fd, int timeout_ms)
 {
-    struct rtcp_pollfd pfd = {.fd = fd, .events = RTCP_POLLIN};
+    struct rtcp_pollfd pfd = { .fd = fd, .events = RTCP_POLLIN };
     int ready = rtcp_net_linux.poll(&pfd, 1, timeout_ms);
     return ready > 0 && (pfd.revents & RTCP_POLLIN) != 0;
 }
@@ -156,7 +159,8 @@ static bool client_read(client_t *client)
     int received = rtcp_net_linux.recv(client->client_fd,
                                        client->bytes + client->len,
                                        sizeof(client->bytes) - client->len);
-    if (received <= 0) return false;
+    if (received <= 0)
+        return false;
     client->len += (size_t)received;
     return true;
 }
@@ -164,9 +168,12 @@ static bool client_read(client_t *client)
 static bool contains(const uint8_t *bytes, size_t length, const char *needle)
 {
     size_t needle_len = strlen(needle);
-    if (needle_len > length) return false;
-    for (size_t i = 0U; i <= length - needle_len; ++i) {
-        if (memcmp(bytes + i, needle, needle_len) == 0) return true;
+    if (needle_len > length)
+        return false;
+    for (size_t i = 0U; i <= length - needle_len; ++i)
+    {
+        if (memcmp(bytes + i, needle, needle_len) == 0)
+            return true;
     }
     return false;
 }
@@ -176,10 +183,13 @@ static void expect_response(airplay_rtsp_server_t *server, client_t *client,
                             const char *needle)
 {
     uint64_t start = rtcp_os_linux.now_ms();
-    while (rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS) {
+    while (rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS)
+    {
         airplay_rtsp_server_poll(server, 10);
-        if (contains(client->bytes, client->len, needle)) return;
-        if (client_has_data(client->client_fd, 0) && !client_read(client)) break;
+        if (contains(client->bytes, client->len, needle))
+            return;
+        if (client_has_data(client->client_fd, 0) && !client_read(client))
+            break;
     }
     assert(contains(client->bytes, client->len, needle));
 }
@@ -192,7 +202,8 @@ static void connect_client(airplay_rtsp_server_t *server, client_t *client)
 
     uint64_t start = rtcp_os_linux.now_ms();
     while (rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS &&
-           !airplay_rtsp_server_is_connected(server)) {
+           !airplay_rtsp_server_is_connected(server))
+    {
         airplay_rtsp_server_poll(server, 10);
     }
     assert(airplay_rtsp_server_is_connected(server));
@@ -204,7 +215,7 @@ static void test_plaintext_routing(void)
     uint8_t info_plist[INFO_PLIST_BYTES];
     size_t info_len = build_info_plist(info_plist, sizeof(info_plist));
 
-    airplay_rtsp_server_config_t config = {0};
+    airplay_rtsp_server_config_t config = { 0 };
     config.os = &rtcp_os_linux;
     config.net = &rtcp_net_linux;
     fill_pairing(&config.pairing);
@@ -255,7 +266,8 @@ static void test_plaintext_routing(void)
     rtcp_net_linux.close(client.client_fd);
     uint64_t start = rtcp_os_linux.now_ms();
     while (rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS &&
-           airplay_rtsp_server_is_connected(server)) {
+           airplay_rtsp_server_is_connected(server))
+    {
         airplay_rtsp_server_poll(server, 10);
     }
     assert(!airplay_rtsp_server_is_connected(server));
@@ -273,7 +285,7 @@ static void test_plaintext_routing(void)
 
 static bool client_connect6(client_t *client, uint16_t port)
 {
-    rtcp_addr_t address = {0};
+    rtcp_addr_t address = { 0 };
     address.family = RTCP_AF_INET6;
     address.addr[15] = 1U; /* ::1 */
     address.port = port;
@@ -289,7 +301,7 @@ static void test_ipv6_listener(void)
     uint8_t info_plist[INFO_PLIST_BYTES];
     size_t info_len = build_info_plist(info_plist, sizeof(info_plist));
 
-    airplay_rtsp_server_config_t config = {0};
+    airplay_rtsp_server_config_t config = { 0 };
     config.os = &rtcp_os_linux;
     config.net = &rtcp_net_linux;
     fill_pairing(&config.pairing);
@@ -300,7 +312,8 @@ static void test_ipv6_listener(void)
 
     airplay_rtsp_server_t *server = NULL;
     int result = airplay_rtsp_server_start(&config, &server);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         puts("IPv6 RTSP listener unavailable; skipped");
         return;
     }
@@ -311,12 +324,13 @@ static void test_ipv6_listener(void)
     assert(client_connect6(&client, port));
     uint64_t start = rtcp_os_linux.now_ms();
     while (rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS &&
-           !airplay_rtsp_server_is_connected(server)) {
+           !airplay_rtsp_server_is_connected(server))
+    {
         airplay_rtsp_server_poll(server, 10);
     }
     assert(airplay_rtsp_server_is_connected(server));
 
-    rtcp_addr_t peer = {0};
+    rtcp_addr_t peer = { 0 };
     assert(airplay_rtsp_server_get_peer(server, &peer));
     assert(peer.family == RTCP_AF_INET6);
     assert(peer.addr[15] == 1U);
@@ -335,7 +349,7 @@ static void test_argument_checks(void)
     uint8_t info_plist[INFO_PLIST_BYTES];
     size_t info_len = build_info_plist(info_plist, sizeof(info_plist));
 
-    airplay_rtsp_server_config_t config = {0};
+    airplay_rtsp_server_config_t config = { 0 };
     config.os = &rtcp_os_linux;
     config.net = &rtcp_net_linux;
     fill_pairing(&config.pairing);
@@ -371,7 +385,8 @@ static void test_argument_checks(void)
     airplay_rtsp_server_stop(NULL);
 }
 
-typedef struct {
+typedef struct
+{
     uint8_t bytes[INFO_PLIST_BYTES];
     size_t length;
     unsigned calls;
@@ -384,16 +399,23 @@ static bool refresh_info(const uint8_t **bytes, size_t *length, void *context)
     live_info_t *live = context;
     ++live->calls;
     airplay_info_plist_config_t info = {
-        .device_id = "AA:BB:CC:DD:EE:FF", .bluetooth_id = live->bluetooth_id,
-        .width_pixels = 1024, .height_pixels = 600, .audio_output = true,
+        .device_id = "AA:BB:CC:DD:EE:FF",
+        .bluetooth_id = live->bluetooth_id,
+        .width_pixels = 1024,
+        .height_pixels = 600,
+        .audio_output = true,
     };
     assert(airplay_info_plist_build(&info, live->bytes, sizeof(live->bytes), &live->length));
     *bytes = live->bytes;
     *length = live->length;
-    if (live->failure == 1) return false;
-    if (live->failure == 2) *length = INFO_PLIST_BYTES + 1;
-    if (live->failure == 3) live->bytes[0] = 0;
-    if (live->failure == 4) *bytes = NULL;
+    if (live->failure == 1)
+        return false;
+    if (live->failure == 2)
+        *length = INFO_PLIST_BYTES + 1;
+    if (live->failure == 3)
+        live->bytes[0] = 0;
+    if (live->failure == 4)
+        *bytes = NULL;
     return true;
 }
 
@@ -401,18 +423,22 @@ static void test_live_identity_snapshot(void)
 {
     uint8_t startup[INFO_PLIST_BYTES];
     size_t length = build_info_plist(startup, sizeof(startup));
-    live_info_t live = {.bluetooth_id = "66:55:44:33:22:11"};
+    live_info_t live = { .bluetooth_id = "66:55:44:33:22:11" };
     airplay_rtsp_server_config_t config = {
-        .os = &rtcp_os_linux, .net = &rtcp_net_linux,
-        .info_plist = startup, .info_plist_len = length,
+        .os = &rtcp_os_linux,
+        .net = &rtcp_net_linux,
+        .info_plist = startup,
+        .info_plist_len = length,
         .on_screen_message = capture_screen,
-        .get_info_plist = refresh_info, .info_context = &live,
+        .get_info_plist = refresh_info,
+        .info_context = &live,
     };
     fill_pairing(&config.pairing);
     airplay_rtsp_server_t *server = NULL;
     assert(airplay_rtsp_server_start(&config, &server) == RTCP_OK);
     const char request[] = "GET /info RTSP/1.0\r\nCSeq: 1\r\n\r\n";
-    for (unsigned reconnect = 0; reconnect < 2; ++reconnect) {
+    for (unsigned reconnect = 0; reconnect < 2; ++reconnect)
+    {
         client_t client;
         connect_client(server, &client);
         assert(live.calls == reconnect + 1);
@@ -421,7 +447,8 @@ static void test_live_identity_snapshot(void)
         memset(live.bytes, 0, sizeof(live.bytes));
         const char *expected = live.bluetooth_id;
         live.bluetooth_id = "11:22:33:44:55:77";
-        for (unsigned repeat = 0; repeat < 2; ++repeat) {
+        for (unsigned repeat = 0; repeat < 2; ++repeat)
+        {
             client.len = 0;
             assert(client_send(&client, request, sizeof(request) - 1));
             expect_response(server, &client, expected);
@@ -433,7 +460,8 @@ static void test_live_identity_snapshot(void)
             airplay_rtsp_server_poll(server, 10);
         assert(!airplay_rtsp_server_is_connected(server));
     }
-    for (unsigned failure = 1; failure <= 4; ++failure) {
+    for (unsigned failure = 1; failure <= 4; ++failure)
+    {
         live.failure = failure;
         unsigned previous = live.calls;
         client_t client;

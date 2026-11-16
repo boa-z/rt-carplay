@@ -19,6 +19,14 @@
 #define RTCP_LOGD(tag, fmt, ...) rt_kprintf("D/%s: " fmt "\n", tag, ##__VA_ARGS__)
 #else
 static inline void rtcp_debug_discard(const char *tag, const char *fmt, ...)
-{ (void)tag; (void)fmt; }
-#define RTCP_LOGD(tag, ...) do { if (0) rtcp_debug_discard(tag, __VA_ARGS__); } while (0)
+{
+    (void)tag;
+    (void)fmt;
+}
+#define RTCP_LOGD(tag, ...)                       \
+    do                                            \
+    {                                             \
+        if (0)                                    \
+            rtcp_debug_discard(tag, __VA_ARGS__); \
+    } while (0)
 #endif

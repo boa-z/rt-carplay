@@ -42,15 +42,16 @@
 #include "rtcp/receiver.h"
 #include "rtcp_linux.h"
 
-#define DEFAULT_NAME "rt-carplay"
-#define DEFAULT_MODEL "AppleTV6,2"
-#define DEFAULT_DEVICE_ID "02:00:00:00:00:01"
-#define DEFAULT_PAIR_CODE "3939"
-#define DEFAULT_SEED_FILE "rt-carplay-identity.seed"
+#define DEFAULT_NAME          "rt-carplay"
+#define DEFAULT_MODEL         "AppleTV6,2"
+#define DEFAULT_DEVICE_ID     "02:00:00:00:00:01"
+#define DEFAULT_PAIR_CODE     "3939"
+#define DEFAULT_SEED_FILE     "rt-carplay-identity.seed"
 #define DEFAULT_PAIRING_STORE "rt-carplay-pairings.bin"
-#define DEFAULT_DUMP_FILE "rt-carplay-screen.h264"
+#define DEFAULT_DUMP_FILE     "rt-carplay-screen.h264"
 
-typedef struct {
+typedef struct
+{
     const struct rtcp_os *os;
     airplay_ed25519_keypair_t keypair;
     uint8_t accessory_identifier[64];
@@ -98,7 +99,8 @@ static void usage(const char *program)
 static bool read_exact(const char *path, uint8_t *bytes, size_t len)
 {
     FILE *file = fopen(path, "rb");
-    if (file == NULL) return false;
+    if (file == NULL)
+        return false;
     size_t got = fread(bytes, 1U, len, file);
     bool extra = fgetc(file) != EOF;
     fclose(file);
@@ -108,11 +110,14 @@ static bool read_exact(const char *path, uint8_t *bytes, size_t len)
 static bool write_private(const char *path, const uint8_t *bytes, size_t len)
 {
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd < 0) return false;
+    if (fd < 0)
+        return false;
     size_t offset = 0U;
-    while (offset < len) {
+    while (offset < len)
+    {
         ssize_t written = write(fd, bytes + offset, len - offset);
-        if (written <= 0) {
+        if (written <= 0)
+        {
             close(fd);
             return false;
         }
@@ -126,12 +131,15 @@ static bool load_or_create_seed(const char *path,
                                 const struct rtcp_os *os,
                                 uint8_t seed[AIRPLAY_ED25519_SEED_BYTES])
 {
-    if (read_exact(path, seed, AIRPLAY_ED25519_SEED_BYTES)) return true;
-    if (os->random == NULL || !os->random(seed, AIRPLAY_ED25519_SEED_BYTES)) {
+    if (read_exact(path, seed, AIRPLAY_ED25519_SEED_BYTES))
+        return true;
+    if (os->random == NULL || !os->random(seed, AIRPLAY_ED25519_SEED_BYTES))
+    {
         fprintf(stderr, "no CSPRNG available to create an identity\n");
         return false;
     }
-    if (!write_private(path, seed, AIRPLAY_ED25519_SEED_BYTES)) {
+    if (!write_private(path, seed, AIRPLAY_ED25519_SEED_BYTES))
+    {
         fprintf(stderr, "cannot write identity seed '%s': %s\n", path,
                 strerror(errno));
         return false;
@@ -140,7 +148,8 @@ static bool load_or_create_seed(const char *path,
     return true;
 }
 
-typedef struct {
+typedef struct
+{
     const char *path;
 } store_file_t;
 
@@ -149,11 +158,13 @@ static int store_load(uint8_t *blob, size_t capacity, size_t *len, void *context
     store_file_t *file = context;
     *len = 0U;
     FILE *stream = fopen(file->path, "rb");
-    if (stream == NULL) return errno == ENOENT ? RTCP_OK : RTCP_EIO;
+    if (stream == NULL)
+        return errno == ENOENT ? RTCP_OK : RTCP_EIO;
     size_t got = fread(blob, 1U, capacity, stream);
     bool extra = fgetc(stream) != EOF;
     fclose(stream);
-    if (got == capacity && extra) return RTCP_ENOMEM;
+    if (got == capacity && extra)
+        return RTCP_ENOMEM;
     *len = got;
     return RTCP_OK;
 }
@@ -163,11 +174,14 @@ static int store_save(const uint8_t *blob, size_t len, void *context)
     store_file_t *file = context;
     char temporary[512];
     if (snprintf(temporary, sizeof(temporary), "%s.tmp", file->path) >=
-        (int)sizeof(temporary)) {
+        (int)sizeof(temporary))
+    {
         return RTCP_EINVAL;
     }
-    if (!write_private(temporary, blob, len)) return RTCP_EIO;
-    if (rename(temporary, file->path) != 0) {
+    if (!write_private(temporary, blob, len))
+        return RTCP_EIO;
+    if (rename(temporary, file->path) != 0)
+    {
         unlink(temporary);
         return RTCP_EIO;
     }
@@ -181,7 +195,8 @@ static int store_save(const uint8_t *blob, size_t len, void *context)
 static bool provider_random(uint8_t *output, size_t output_len, void *context)
 {
     sim_t *sim = context;
-    if (sim->os->random == NULL) return false;
+    if (sim->os->random == NULL)
+        return false;
     return sim->os->random(output, output_len);
 }
 
@@ -238,19 +253,25 @@ static int on_screen_message(airplay_screen_message_type_t type,
     (void)sender_time_ns;
     (void)arrival_time_us;
     sim_t *sim = context;
-    if (type == AIRPLAY_SCREEN_MESSAGE_CONFIG_H264) {
+    if (type == AIRPLAY_SCREEN_MESSAGE_CONFIG_H264)
+    {
         fprintf(stderr, "screen: H.264 configuration, %u bytes\n",
                 (unsigned)annex_b_len);
-    } else {
+    }
+    else
+    {
         ++sim->frames;
         sim->video_bytes += (unsigned)annex_b_len;
-        if (sim->frames % 60U == 0U) {
+        if (sim->frames % 60U == 0U)
+        {
             fprintf(stderr, "screen: %u frames, %u bytes\n", sim->frames,
                     sim->video_bytes);
         }
     }
-    if (sim->h264 != NULL) {
-        if (fwrite(annex_b, 1U, annex_b_len, sim->h264) != annex_b_len) {
+    if (sim->h264 != NULL)
+    {
+        if (fwrite(annex_b, 1U, annex_b_len, sim->h264) != annex_b_len)
+        {
             fprintf(stderr, "screen: dump write failed\n");
             fclose(sim->h264);
             sim->h264 = NULL;
@@ -270,8 +291,10 @@ static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
     (void)rtp_timestamp;
     (void)arrival_us;
     sim_t *sim = context;
-    if (format == NULL) return RTCP_EINVAL;
-    if (sim->audio_packets == 0U) {
+    if (format == NULL)
+        return RTCP_EINVAL;
+    if (sim->audio_packets == 0U)
+    {
         fprintf(stderr,
                 "audio: stream %u, %u Hz, %u channel(s), first packet %u "
                 "bytes\n",
@@ -280,7 +303,8 @@ static int on_audio_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
     }
     ++sim->audio_packets;
     sim->audio_bytes += (unsigned)len;
-    if (sim->audio_packets % 500U == 0U) {
+    if (sim->audio_packets % 500U == 0U)
+    {
         fprintf(stderr, "audio: %u packets, %u bytes\n", sim->audio_packets,
                 sim->audio_bytes);
     }
@@ -308,14 +332,17 @@ static void on_event_state(bool connected, void *context)
 static bool lan_ipv4(uint8_t output[4])
 {
     struct ifaddrs *addresses = NULL;
-    if (getifaddrs(&addresses) != 0) return false;
+    if (getifaddrs(&addresses) != 0)
+        return false;
     bool found = false;
     for (struct ifaddrs *entry = addresses; entry != NULL;
-         entry = entry->ifa_next) {
+         entry = entry->ifa_next)
+    {
         if (entry->ifa_addr == NULL ||
             entry->ifa_addr->sa_family != AF_INET ||
             (entry->ifa_flags & IFF_LOOPBACK) != 0 ||
-            (entry->ifa_flags & IFF_UP) == 0) {
+            (entry->ifa_flags & IFF_UP) == 0)
+        {
             continue;
         }
         const struct sockaddr_in *in =
@@ -331,7 +358,8 @@ static bool lan_ipv4(uint8_t output[4])
 static void hex_encode(const uint8_t *bytes, size_t len, char *output)
 {
     static const char digits[] = "0123456789abcdef";
-    for (size_t i = 0U; i < len; ++i) {
+    for (size_t i = 0U; i < len; ++i)
+    {
         output[i * 2U] = digits[bytes[i] >> 4U];
         output[i * 2U + 1U] = digits[bytes[i] & 0x0fU];
     }
@@ -356,53 +384,84 @@ int main(int argc, char **argv)
     bool dump = true;
     bool audio = true;
 
-    for (int i = 1; i < argc; ++i) {
+    for (int i = 1; i < argc; ++i)
+    {
         const char *argument = argv[i];
-        if (strcmp(argument, "--help") == 0 || strcmp(argument, "-h") == 0) {
+        if (strcmp(argument, "--help") == 0 || strcmp(argument, "-h") == 0)
+        {
             usage(argv[0]);
             return 0;
-        } else if (strcmp(argument, "--no-dump") == 0) {
+        }
+        else if (strcmp(argument, "--no-dump") == 0)
+        {
             dump = false;
-        } else if (strcmp(argument, "--no-audio") == 0) {
+        }
+        else if (strcmp(argument, "--no-audio") == 0)
+        {
             audio = false;
-        } else if (strcmp(argument, "--name") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--name") == 0 && i + 1 < argc)
+        {
             name = argv[++i];
-        } else if (strcmp(argument, "--model") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--model") == 0 && i + 1 < argc)
+        {
             model = argv[++i];
-        } else if (strcmp(argument, "--device-id") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--device-id") == 0 && i + 1 < argc)
+        {
             device_id = argv[++i];
-        } else if (strcmp(argument, "--pair-code") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--pair-code") == 0 && i + 1 < argc)
+        {
             pair_code = argv[++i];
-        } else if (strcmp(argument, "--port") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--port") == 0 && i + 1 < argc)
+        {
             port = (unsigned)strtoul(argv[++i], NULL, 10);
-        } else if (strcmp(argument, "--ip") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--ip") == 0 && i + 1 < argc)
+        {
             ip_option = argv[++i];
-        } else if (strcmp(argument, "--seed-file") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--seed-file") == 0 && i + 1 < argc)
+        {
             seed_path = argv[++i];
-        } else if (strcmp(argument, "--pairing-store") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--pairing-store") == 0 && i + 1 < argc)
+        {
             store_path = argv[++i];
-        } else if (strcmp(argument, "--dump-h264") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argument, "--dump-h264") == 0 && i + 1 < argc)
+        {
             dump_path = argv[++i];
-        } else {
+        }
+        else
+        {
             fprintf(stderr, "unknown option: %s\n", argument);
             usage(argv[0]);
             return 2;
         }
     }
-    if (port == 0U || port > 65535U) {
+    if (port == 0U || port > 65535U)
+    {
         fprintf(stderr, "invalid port\n");
         return 2;
     }
 
     uint8_t ipv4[4];
-    if (ip_option != NULL) {
+    if (ip_option != NULL)
+    {
         struct in_addr parsed;
-        if (inet_pton(AF_INET, ip_option, &parsed) != 1) {
+        if (inet_pton(AF_INET, ip_option, &parsed) != 1)
+        {
             fprintf(stderr, "invalid --ip: %s\n", ip_option);
             return 2;
         }
         memcpy(ipv4, &parsed, 4U);
-    } else if (!lan_ipv4(ipv4)) {
+    }
+    else if (!lan_ipv4(ipv4))
+    {
         fprintf(stderr, "warning: no LAN IPv4 address found; using 127.0.0.1\n");
         memset(ipv4, 0, sizeof(ipv4));
         ipv4[0] = 127U;
@@ -412,21 +471,25 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    sim_t sim = {0};
+    sim_t sim = { 0 };
     sim.os = &rtcp_os_linux;
     sim.pairing_code = pair_code;
-    if (sim.os->random == NULL) {
+    if (sim.os->random == NULL)
+    {
         fprintf(stderr, "the host port has no CSPRNG\n");
         return 1;
     }
 
     uint8_t seed[AIRPLAY_ED25519_SEED_BYTES];
-    if (!load_or_create_seed(seed_path, sim.os, seed)) return 1;
-    if (!airplay_ed25519_keypair_from_seed(seed, &sim.keypair)) return 1;
+    if (!load_or_create_seed(seed_path, sim.os, seed))
+        return 1;
+    if (!airplay_ed25519_keypair_from_seed(seed, &sim.keypair))
+        return 1;
     memset(seed, 0, sizeof(seed));
 
     sim.accessory_identifier_len = strlen(device_id);
-    if (sim.accessory_identifier_len > sizeof(sim.accessory_identifier)) {
+    if (sim.accessory_identifier_len > sizeof(sim.accessory_identifier))
+    {
         fprintf(stderr, "device id is too long\n");
         return 1;
     }
@@ -434,15 +497,16 @@ int main(int argc, char **argv)
     airplay_pairing_store_backend_t backend = {
         .load = store_load,
         .save = store_save,
-        .context = &(store_file_t){.path = store_path},
+        .context = &(store_file_t){ .path = store_path },
     };
-    if (airplay_pairing_store_init(&backend) != RTCP_OK) {
+    if (airplay_pairing_store_init(&backend) != RTCP_OK)
+    {
         fprintf(stderr, "cannot load pairing store '%s'\n", store_path);
         return 1;
     }
 
     uint8_t info_plist[AIRPLAY_INFO_PLIST_MAX_BYTES];
-    airplay_info_plist_config_t info = {0};
+    airplay_info_plist_config_t info = { 0 };
     info.device_id = device_id;
     info.name = name;
     info.model = model;
@@ -454,21 +518,24 @@ int main(int argc, char **argv)
     size_t info_len = 0U;
     if (!airplay_info_plist_build(&info, info_plist, sizeof(info_plist),
                                   &info_len) ||
-        info_len > AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES) {
+        info_len > AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES)
+    {
         fprintf(stderr, "cannot build /info plist\n");
         return 1;
     }
 
-    if (dump) {
+    if (dump)
+    {
         sim.h264 = fopen(dump_path, "wb");
-        if (sim.h264 == NULL) {
+        if (sim.h264 == NULL)
+        {
             fprintf(stderr, "cannot open '%s': %s\n", dump_path,
                     strerror(errno));
             return 1;
         }
     }
 
-    rtcp_receiver_config_t receiver_config = {0};
+    rtcp_receiver_config_t receiver_config = { 0 };
     receiver_config.platform.os = sim.os;
     receiver_config.platform.net = &rtcp_net_linux;
     fill_pairing(&sim, &receiver_config.platform.pairing);
@@ -485,11 +552,14 @@ int main(int argc, char **argv)
 
     rtcp_receiver_t *receiver = NULL;
     int result = rtcp_receiver_create(&receiver_config, &receiver);
-    if (result == RTCP_OK) result = rtcp_receiver_start(receiver);
-    if (result != RTCP_OK) {
+    if (result == RTCP_OK)
+        result = rtcp_receiver_start(receiver);
+    if (result != RTCP_OK)
+    {
         fprintf(stderr, "RTSP server failed to start: %d\n", result);
         (void)rtcp_receiver_destroy(receiver);
-        if (sim.h264 != NULL) fclose(sim.h264);
+        if (sim.h264 != NULL)
+            fclose(sim.h264);
         return 1;
     }
 
@@ -497,7 +567,8 @@ int main(int argc, char **argv)
     hex_encode(sim.keypair.public_key, AIRPLAY_ED25519_PUBLIC_KEY_BYTES,
                public_key_hex);
     char feature_words[32];
-    if (!airplay_txt_format_features(airplay_info_plist_features(&info), feature_words, sizeof(feature_words))) return 1;
+    if (!airplay_txt_format_features(airplay_info_plist_features(&info), feature_words, sizeof(feature_words)))
+        return 1;
     airplay_txt_record_t records[AIRPLAY_TXT_MAX_RECORDS];
     airplay_txt_config_t txt_config = {
         .features = feature_words,
@@ -524,14 +595,16 @@ int main(int argc, char **argv)
     mdns_responder_t *mdns = mdns_responder_create(&mdns_config);
     int mdns_result = mdns == NULL ? RTCP_EINVAL
                                    : mdns_responder_open(mdns, &rtcp_net_linux);
-    if (mdns_result != RTCP_OK) {
+    if (mdns_result != RTCP_OK)
+    {
         fprintf(stderr,
                 "mDNS responder failed to start (rc=%d, %u TXT records, %u "
                 "bytes)\n",
                 mdns_result, (unsigned)record_count, (unsigned)txt_len);
         mdns_responder_destroy(mdns);
         (void)rtcp_receiver_destroy(receiver);
-        if (sim.h264 != NULL) fclose(sim.h264);
+        if (sim.h264 != NULL)
+            fclose(sim.h264);
         return 1;
     }
 
@@ -551,7 +624,8 @@ int main(int argc, char **argv)
             pair_code, dump ? dump_path : "(disabled)",
             audio ? "advertised (PCM counted, not played)" : "disabled", name);
 
-    while (!g_stop) {
+    while (!g_stop)
+    {
         /* mDNS waits briefly; the RTSP poll is non-blocking so Screen frames
          * are drained at roughly this cadence. */
         (void)mdns_responder_poll(mdns, &rtcp_net_linux, 10);
@@ -563,7 +637,8 @@ int main(int argc, char **argv)
     mdns_responder_close(mdns, &rtcp_net_linux);
     mdns_responder_destroy(mdns);
     (void)rtcp_receiver_destroy(receiver);
-    if (sim.h264 != NULL) fclose(sim.h264);
+    if (sim.h264 != NULL)
+        fclose(sim.h264);
     airplay_pairing_store_deinit();
     airplay_ed25519_keypair_clear(&sim.keypair);
     return 0;

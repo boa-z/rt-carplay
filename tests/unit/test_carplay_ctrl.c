@@ -7,7 +7,8 @@
 
 #include "rtcp/rtcp.h"
 
-typedef struct {
+typedef struct
+{
     uint8_t request[512];
     size_t request_len;
     rtcp_addr_t peer;
@@ -55,8 +56,10 @@ static int mock_recv(int fd, void *buf, size_t len)
 {
     assert(fd == 42);
     size_t remaining = s_mock.response_len - s_mock.response_used;
-    if (remaining == 0U) return 0;
-    if (len > remaining) len = remaining;
+    if (remaining == 0U)
+        return 0;
+    if (len > remaining)
+        len = remaining;
     memcpy(buf, s_mock.response + s_mock.response_used, len);
     s_mock.response_used += len;
     return (int)len;
@@ -125,7 +128,7 @@ static void test_request_builder(void)
 
 static void test_connect(void)
 {
-    const uint8_t ipv4[4] = {192U, 168U, 43U, 2U};
+    const uint8_t ipv4[4] = { 192U, 168U, 43U, 2U };
     int status = -1;
 
     mock_reset("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");

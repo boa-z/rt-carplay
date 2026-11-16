@@ -8,19 +8,24 @@
 #include <stdint.h>
 #include "rtcp/data_stream.h"
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
-#define RTCP_UI_SYNC_MAX_ID 64U
-#define RTCP_UI_SYNC_MAX_ACTIVE 8U
-#define RTCP_UI_SYNC_MAX_MESSAGE 8192U
-#define RTCP_UI_SYNC_MAX_OUTPUTS 4U
-#define RTCP_UI_SYNC_MAX_LAYOUTS 8U
-#define RTCP_UI_SYNC_MAX_PALETTES 8U
-#define RTCP_UI_SYNC_MAX_COMPONENTS 16U
-#define RTCP_UI_SYNC_MAX_CHOICES 16U
+#define RTCP_UI_SYNC_MAX_ID          64U
+#define RTCP_UI_SYNC_MAX_ACTIVE      8U
+#define RTCP_UI_SYNC_MAX_MESSAGE     8192U
+#define RTCP_UI_SYNC_MAX_OUTPUTS     4U
+#define RTCP_UI_SYNC_MAX_LAYOUTS     8U
+#define RTCP_UI_SYNC_MAX_PALETTES    8U
+#define RTCP_UI_SYNC_MAX_COMPONENTS  16U
+#define RTCP_UI_SYNC_MAX_CHOICES     16U
 #define RTCP_UI_SYNC_DATASTREAM_UUID RTCP_DATA_STREAM_UI_SYNC_UUID
-typedef struct { const char *zone, *component; } rtcp_ui_sync_component_t;
-typedef struct {
+typedef struct
+{
+    const char *zone, *component;
+} rtcp_ui_sync_component_t;
+typedef struct
+{
     const char *id, *palette;
     const rtcp_ui_sync_component_t *active;
     size_t active_count;
@@ -28,21 +33,24 @@ typedef struct {
 /* Host inventory for one actual display/theme. Component pairs are allowed
  * alternatives, not a Cartesian product of all zones and all components.
  * This catalogue contains identifiers only, never Apple theme assets. */
-typedef struct {
+typedef struct
+{
     const char *id;
-    const char *const *palettes;
+    const char * const *palettes;
     size_t palette_count;
     const rtcp_ui_sync_component_t *components;
     size_t component_count;
 } rtcp_ui_sync_inventory_layout_t;
-typedef struct {
+typedef struct
+{
     size_t struct_size;
     const char *theme_id, *panel_uid, *display_uuid;
     uint16_t width_pixels, height_pixels, width_physical_mm, height_physical_mm;
     const rtcp_ui_sync_inventory_layout_t *layouts;
     size_t layout_count;
 } rtcp_ui_sync_inventory_t;
-typedef struct {
+typedef struct
+{
     size_t struct_size;
     const char *display_uuid;
     bool initial_dark, allow_layout_change;
@@ -54,28 +62,43 @@ typedef struct {
      * snapshot-only behavior and allocates no choice-queue workspace. */
     bool queue_phone_choices;
 } rtcp_ui_sync_config_t;
-typedef enum { RTCP_UI_SYNC_IDLE, RTCP_UI_SYNC_RESETTING, RTCP_UI_SYNC_READY } rtcp_ui_sync_state_t;
-typedef enum { RTCP_UI_SYNC_AUTOMATIC, RTCP_UI_SYNC_LIGHT, RTCP_UI_SYNC_DARK } rtcp_ui_sync_appearance_t;
-typedef enum {
-    RTCP_UI_SYNC_CHOICE_LAYOUT, RTCP_UI_SYNC_CHOICE_PALETTE, RTCP_UI_SYNC_CHOICE_APPEARANCE
+typedef enum
+{
+    RTCP_UI_SYNC_IDLE,
+    RTCP_UI_SYNC_RESETTING,
+    RTCP_UI_SYNC_READY
+} rtcp_ui_sync_state_t;
+typedef enum
+{
+    RTCP_UI_SYNC_AUTOMATIC,
+    RTCP_UI_SYNC_LIGHT,
+    RTCP_UI_SYNC_DARK
+} rtcp_ui_sync_appearance_t;
+typedef enum
+{
+    RTCP_UI_SYNC_CHOICE_LAYOUT,
+    RTCP_UI_SYNC_CHOICE_PALETTE,
+    RTCP_UI_SYNC_CHOICE_APPEARANCE
 } rtcp_ui_sync_choice_kind_t;
-typedef struct {
+typedef struct
+{
     rtcp_ui_sync_choice_kind_t kind;
     /* Local generation distinguishes reset/reopened channels that reuse the
      * same wire session/psn. It is not a timestamp or presentation clock. */
     uint64_t generation, session, sequence;
-    char layout_id[RTCP_UI_SYNC_MAX_ID+1], palette_id[RTCP_UI_SYNC_MAX_ID+1];
+    char layout_id[RTCP_UI_SYNC_MAX_ID + 1], palette_id[RTCP_UI_SYNC_MAX_ID + 1];
     rtcp_ui_sync_appearance_t appearance; /* Valid only for APPEARANCE. */
 } rtcp_ui_sync_choice_t;
-typedef struct {
+typedef struct
+{
     rtcp_ui_sync_state_t state;
     unsigned version;
     uint64_t session, next_tx, last_rx, peer_ack;
     size_t pending_outputs;
     bool requested_dark;
-    char requested_layout[RTCP_UI_SYNC_MAX_ID+1], requested_palette[RTCP_UI_SYNC_MAX_ID+1];
-    char phone_layout[RTCP_UI_SYNC_MAX_ID+1], phone_palette_layout[RTCP_UI_SYNC_MAX_ID+1];
-    char phone_palette[RTCP_UI_SYNC_MAX_ID+1];
+    char requested_layout[RTCP_UI_SYNC_MAX_ID + 1], requested_palette[RTCP_UI_SYNC_MAX_ID + 1];
+    char phone_layout[RTCP_UI_SYNC_MAX_ID + 1], phone_palette_layout[RTCP_UI_SYNC_MAX_ID + 1];
+    char phone_palette[RTCP_UI_SYNC_MAX_ID + 1];
     rtcp_ui_sync_appearance_t phone_appearance;
     uint64_t received, rejected, stale, duplicates, ignored, phone_choices;
     uint64_t generated_messages, consumed_messages, abandoned_messages;
@@ -85,7 +108,8 @@ typedef struct {
     uint64_t choice_generation, consumed_choices, abandoned_choices;
 } rtcp_ui_sync_status_t;
 typedef struct rtcp_ui_sync rtcp_ui_sync_t;
-typedef struct {
+typedef struct
+{
     bool attached;
     uint64_t queued_messages, queue_retries, rejected_requests;
     int last_error;

@@ -16,7 +16,8 @@
 
 #define IAP2_STREAM_RX_BYTES 1024U
 
-typedef struct {
+typedef struct
+{
     rtcp_stream_t stream;
     uint8_t buffer[IAP2_STREAM_RX_BYTES];
 } iap2_stream_rx_t;

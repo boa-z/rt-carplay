@@ -10,7 +10,8 @@
 
 static void make_keys(uint8_t read_key[32], uint8_t write_key[32])
 {
-    for (size_t i = 0U; i < 32U; ++i) {
+    for (size_t i = 0U; i < 32U; ++i)
+    {
         read_key[i] = (uint8_t)(0x10U + i);
         write_key[i] = (uint8_t)(0x80U + i);
     }
@@ -96,7 +97,8 @@ static void test_fragmented_input(void)
 
     uint8_t plaintext[256];
     size_t produced = 0U;
-    for (size_t i = 0U; i < total; ++i) {
+    for (size_t i = 0U; i < total; ++i)
+    {
         size_t consumed = 0U;
         size_t plaintext_len = 0U;
         airplay_control_cipher_result_t result =
@@ -181,7 +183,7 @@ static void test_tampering_poisons(void)
     assert(plaintext_len == 0U);
 
     /* A poisoned session must not resume, even for its own outgoing frames. */
-    static const uint8_t probe[] = {'x'};
+    static const uint8_t probe[] = { 'x' };
     assert(airplay_control_cipher_encrypt(receiver, probe, sizeof(probe),
                                           plaintext, sizeof(plaintext),
                                           &plaintext_len) ==
@@ -245,7 +247,7 @@ static void test_limits(void)
            AIRPLAY_CONTROL_CIPHER_OUTPUT_TOO_SMALL);
 
     /* An impossible 16-bit length is rejected before any large allocation. */
-    uint8_t poison[2] = {0xffU, 0xffU};
+    uint8_t poison[2] = { 0xffU, 0xffU };
     uint8_t plaintext[32];
     size_t consumed = 0U;
     size_t plaintext_len = 0U;
@@ -281,7 +283,8 @@ static void test_chunked_message(void)
      * its head) must become a 1024-byte frame and a 142-byte frame, exactly
      * like Apple's kMaxMessageWriteSize transport. */
     static uint8_t message[1166];
-    for (size_t i = 0U; i < sizeof(message); ++i) {
+    for (size_t i = 0U; i < sizeof(message); ++i)
+    {
         message[i] = (uint8_t)i;
     }
     const size_t frames =
@@ -335,7 +338,8 @@ static void test_single_frame_message(void)
     /* The A/B alternative for the same 1166-byte auth-setup reply: one
      * frame, so the wire length is plaintext + one 18-byte overhead. */
     static uint8_t message[1166];
-    for (size_t i = 0U; i < sizeof(message); ++i) {
+    for (size_t i = 0U; i < sizeof(message); ++i)
+    {
         message[i] = (uint8_t)(i * 3U);
     }
     uint8_t encrypted[sizeof(message) + AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES];
@@ -372,7 +376,7 @@ static void test_single_frame_message(void)
 
 static void test_argument_checks(void)
 {
-    uint8_t key[32] = {0};
+    uint8_t key[32] = { 0 };
     airplay_control_cipher_t *cipher = NULL;
     assert(airplay_control_cipher_create(NULL, key, &cipher) ==
            AIRPLAY_CONTROL_CIPHER_INVALID_ARGUMENT);

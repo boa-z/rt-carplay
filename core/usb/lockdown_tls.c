@@ -13,7 +13,8 @@
  * transport cannot spin forever. */
 #define TLS_WANT_RETRIES 16
 
-struct rtcp_lockdown_tls {
+struct rtcp_lockdown_tls
+{
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config config;
     mbedtls_x509_crt certificate;
@@ -39,7 +40,8 @@ static int tls_send(void *context, const unsigned char *buffer, size_t length)
     int ret;
 
     ret = tls->transport.ops->write(tls->transport.context, buffer, length);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
     return (int)length;
@@ -52,10 +54,12 @@ static int tls_recv(void *context, unsigned char *buffer, size_t length)
 
     ret = tls->transport.ops->read(tls->transport.context, buffer, length,
                                    tls->timeout_ms);
-    if (ret == RTCP_ETIMEDOUT) {
+    if (ret == RTCP_ETIMEDOUT)
+    {
         return MBEDTLS_ERR_SSL_TIMEOUT;
     }
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
     /* 0 is EOF, which mbedTLS handles as a closed peer. */
@@ -64,7 +68,8 @@ static int tls_recv(void *context, unsigned char *buffer, size_t length)
 
 static int tls_map_error(int ret)
 {
-    switch (ret) {
+    switch (ret)
+    {
     case MBEDTLS_ERR_SSL_TIMEOUT:
         return RTCP_ETIMEDOUT;
     case MBEDTLS_ERR_SSL_ALLOC_FAILED:
@@ -80,28 +85,36 @@ static int tls_stream_read(void *context, void *buffer, size_t length,
     rtcp_lockdown_tls_t *tls = context;
     int retries = 0;
 
-    if (length == 0U) {
+    if (length == 0U)
+    {
         return 0;
     }
-    if (timeout_ms != 0U) {
+    if (timeout_ms != 0U)
+    {
         tls->timeout_ms = timeout_ms;
     }
 
-    for (;;) {
+    for (;;)
+    {
         int ret = mbedtls_ssl_read(&tls->ssl, buffer, length);
 
-        if (ret > 0) {
+        if (ret > 0)
+        {
             return ret;
         }
-        if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+        if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+        {
             return 0;
         }
-        if (ret == MBEDTLS_ERR_SSL_TIMEOUT) {
+        if (ret == MBEDTLS_ERR_SSL_TIMEOUT)
+        {
             return RTCP_ETIMEDOUT;
         }
         if (ret == MBEDTLS_ERR_SSL_WANT_READ ||
-            ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            if (++retries <= TLS_WANT_RETRIES) {
+            ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+        {
+            if (++retries <= TLS_WANT_RETRIES)
+            {
                 continue;
             }
             return RTCP_ETIMEDOUT;
@@ -117,18 +130,22 @@ static int tls_stream_write(void *context, const void *data, size_t length)
     size_t written = 0U;
     int retries = 0;
 
-    while (written < length) {
+    while (written < length)
+    {
         int ret = mbedtls_ssl_write(&tls->ssl, cursor + written,
                                     length - written);
 
-        if (ret > 0) {
+        if (ret > 0)
+        {
             written += (size_t)ret;
             retries = 0;
             continue;
         }
         if (ret == MBEDTLS_ERR_SSL_WANT_READ ||
-            ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            if (++retries <= TLS_WANT_RETRIES) {
+            ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+        {
+            if (++retries <= TLS_WANT_RETRIES)
+            {
                 continue;
             }
             return RTCP_ETIMEDOUT;
@@ -156,8 +173,10 @@ int rtcp_lockdown_tls_open(rtcp_lockdown_tls_t **tls,
         transport->ops->read == NULL || transport->ops->write == NULL ||
         record == NULL || rng == NULL ||
         record->root_certificate_length == 0U ||
-        record->root_private_key_length == 0U) {
-        if (tls != NULL) {
+        record->root_private_key_length == 0U)
+    {
+        if (tls != NULL)
+        {
             *tls = NULL;
         }
         return RTCP_EINVAL;
@@ -165,7 +184,8 @@ int rtcp_lockdown_tls_open(rtcp_lockdown_tls_t **tls,
     *tls = NULL;
 
     session = calloc(1U, sizeof(*session));
-    if (session == NULL) {
+    if (session == NULL)
+    {
         return RTCP_ENOMEM;
     }
     mbedtls_ssl_init(&session->ssl);
@@ -182,20 +202,23 @@ int rtcp_lockdown_tls_open(rtcp_lockdown_tls_t **tls,
     ret = mbedtls_x509_crt_parse(&session->certificate,
                                  record->root_certificate,
                                  record->root_certificate_length + 1U);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         goto fail;
     }
     ret = mbedtls_pk_parse_key(&session->key, record->root_private_key,
                                record->root_private_key_length + 1U, NULL,
                                0U);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         goto fail;
     }
 
     ret = mbedtls_ssl_config_defaults(&session->config, MBEDTLS_SSL_IS_CLIENT,
                                       MBEDTLS_SSL_TRANSPORT_STREAM,
                                       MBEDTLS_SSL_PRESET_DEFAULT);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         goto fail;
     }
     /* Pairing, not a CA chain, establishes who the peer is. */
@@ -208,18 +231,21 @@ int rtcp_lockdown_tls_open(rtcp_lockdown_tls_t **tls,
                                  MBEDTLS_SSL_MINOR_VERSION_3);
     ret = mbedtls_ssl_conf_own_cert(&session->config, &session->certificate,
                                     &session->key);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         goto fail;
     }
 
     ret = mbedtls_ssl_setup(&session->ssl, &session->config);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         goto fail;
     }
     mbedtls_ssl_set_bio(&session->ssl, session, tls_send, tls_recv, NULL);
 
     ret = mbedtls_ssl_handshake(&session->ssl);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         goto fail_handshake;
     }
 
@@ -241,7 +267,8 @@ rtcp_stream_t rtcp_lockdown_tls_stream(rtcp_lockdown_tls_t *tls)
 {
     rtcp_stream_t stream = { NULL, NULL };
 
-    if (tls != NULL && tls->session_ready) {
+    if (tls != NULL && tls->session_ready)
+    {
         stream.ops = &tls_stream_ops;
         stream.context = tls;
     }
@@ -250,10 +277,12 @@ rtcp_stream_t rtcp_lockdown_tls_stream(rtcp_lockdown_tls_t *tls)
 
 void rtcp_lockdown_tls_close(rtcp_lockdown_tls_t *tls)
 {
-    if (tls == NULL) {
+    if (tls == NULL)
+    {
         return;
     }
-    if (tls->session_ready) {
+    if (tls->session_ready)
+    {
         (void)mbedtls_ssl_close_notify(&tls->ssl);
         tls->session_ready = 0;
     }

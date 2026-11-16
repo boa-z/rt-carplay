@@ -10,14 +10,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIRPLAY_SRP6A_SALT_BYTES 16U
-#define AIRPLAY_SRP6A_PUBLIC_BYTES 384U
-#define AIRPLAY_SRP6A_PROOF_BYTES 64U
+#define AIRPLAY_SRP6A_SALT_BYTES        16U
+#define AIRPLAY_SRP6A_PUBLIC_BYTES      384U
+#define AIRPLAY_SRP6A_PROOF_BYTES       64U
 #define AIRPLAY_SRP6A_SESSION_KEY_BYTES 64U
 
 typedef struct airplay_srp6a_server airplay_srp6a_server_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_SRP6A_OK = 0,
     AIRPLAY_SRP6A_INVALID_ARGUMENT,
     AIRPLAY_SRP6A_NO_MEMORY,

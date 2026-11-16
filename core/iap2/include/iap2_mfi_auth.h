@@ -3,7 +3,8 @@
 
 #include <stdbool.h>
 
-typedef enum {
+typedef enum
+{
     IAP2_MFI_AUTH_IDLE = 0,
     IAP2_MFI_AUTH_CHALLENGE_RESPONSE_PENDING,
     IAP2_MFI_AUTH_CHALLENGE_RESPONSE_ACKED,
@@ -11,7 +12,8 @@ typedef enum {
     IAP2_MFI_AUTH_FAILED,
 } iap2_mfi_auth_stage_t;
 
-typedef struct {
+typedef struct
+{
     iap2_mfi_auth_stage_t stage;
 } iap2_mfi_auth_t;
 

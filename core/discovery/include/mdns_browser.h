@@ -32,7 +32,8 @@
 /* A browse result: the SRV target/port plus the A record address.  The
  * service instance name is stored in full (`<instance>.<service>`), matching
  * the PTR/SRV owner names on the wire. */
-typedef struct {
+typedef struct
+{
     char instance[MDNS_MAX_NAME];
     char target[MDNS_MAX_NAME];
     uint8_t ipv4[4];
@@ -42,9 +43,9 @@ typedef struct {
     uint32_t last_seen_ms;
 } mdns_browser_endpoint_t;
 
-#define MDNS_BROWSER_MAX_ENDPOINTS 4
-#define MDNS_BROWSER_MAX_HOSTS 8
-#define MDNS_BROWSER_QUERY_INTERVAL_MS 2000U
+#define MDNS_BROWSER_MAX_ENDPOINTS       4
+#define MDNS_BROWSER_MAX_HOSTS           8
+#define MDNS_BROWSER_QUERY_INTERVAL_MS   2000U
 #define MDNS_BROWSER_ENDPOINT_MAX_AGE_MS 60000U
 
 typedef struct mdns_browser mdns_browser_t;

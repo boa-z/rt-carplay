@@ -8,12 +8,13 @@
 #include "rtcp/mfi.h"
 
 #define AIRPLAY_MFI_SAP_MAX_CERTIFICATE_BYTES 1536U
-#define AIRPLAY_MFI_SAP_MAX_SIGNATURE_BYTES 256U
-#define AIRPLAY_MFI_SAP_MAX_RESPONSE_BYTES \
+#define AIRPLAY_MFI_SAP_MAX_SIGNATURE_BYTES   256U
+#define AIRPLAY_MFI_SAP_MAX_RESPONSE_BYTES                   \
     (32U + 4U + AIRPLAY_MFI_SAP_MAX_CERTIFICATE_BYTES + 4U + \
      AIRPLAY_MFI_SAP_MAX_SIGNATURE_BYTES)
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_MFI_SAP_OK = 0,
     AIRPLAY_MFI_SAP_INVALID_ARGUMENT,
     AIRPLAY_MFI_SAP_UNAVAILABLE,
@@ -29,7 +30,8 @@ typedef enum {
  * digest), 3 = Auth 3.0 (SHA-256 digest).  random may be NULL only for host
  * tests that provide deterministic bytes through the coprocessor itself.
  */
-typedef struct {
+typedef struct
+{
     const struct rtcp_mfi *mfi;
     uint8_t protocol_major;
     int (*random)(uint8_t *output, size_t len, void *context);

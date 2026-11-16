@@ -31,7 +31,7 @@
  * frames) before the owning thread gets to call connection_recv().  A
  * 4 KiB ring dropped the stream exactly when it carried a full record. */
 #define RTCP_USBMUX_CONN_RX_CAPACITY RTCP_USBMUX_MAX_PAYLOAD
-#define RTCP_USBMUX_REASSEMBLY_CAPACITY \
+#define RTCP_USBMUX_REASSEMBLY_CAPACITY                      \
     (RTCP_USBMUX_MAX_PAYLOAD + RTCP_USBMUX_TCP_HEADER_SIZE + \
      RTCP_USBMUX_HEADER_SIZE)
 
@@ -44,7 +44,8 @@ typedef int (*rtcp_usbmux_send_fn)(void *user, const uint8_t *data,
 typedef int (*rtcp_usbmux_recv_fn)(void *user, uint8_t *data, size_t capacity,
                                    uint32_t timeout_ms);
 
-typedef struct {
+typedef struct
+{
     bool used;
     bool syn_sent;
     bool established;
@@ -60,13 +61,15 @@ typedef struct {
     size_t rx_count;
 } rtcp_usbmux_connection_t;
 
-typedef struct {
+typedef struct
+{
     rtcp_usbmux_send_fn send;
     rtcp_usbmux_recv_fn recv;
     void *user;
 } rtcp_usbmux_transport_t;
 
-typedef struct {
+typedef struct
+{
     rtcp_usbmux_transport_t transport;
     uint16_t next_local_port;
     uint16_t tx_index;
@@ -134,10 +137,10 @@ int rtcp_usbmux_connection_recv(rtcp_usbmux_host_t *host,
 /* Blocking stream read: unrelated/ACK-only frames do not end the wait.
  * clock_ms is a monotonic modulo-2^32 millisecond clock. */
 int rtcp_usbmux_connection_read_wait(rtcp_usbmux_host_t *host,
-                                    rtcp_usbmux_connection_t *connection,
-                                    void *data, size_t capacity,
-                                    uint32_t timeout_ms,
-                                    uint32_t (*clock_ms)(void *), void *clock_user);
+                                     rtcp_usbmux_connection_t *connection,
+                                     void *data, size_t capacity,
+                                     uint32_t timeout_ms,
+                                     uint32_t (*clock_ms)(void *), void *clock_user);
 
 /* Send FIN and release the slot. */
 void rtcp_usbmux_connection_close(rtcp_usbmux_host_t *host,

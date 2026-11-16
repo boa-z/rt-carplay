@@ -13,11 +13,11 @@
 
 #define GROUP_BYTES AIRPLAY_SRP6A_PUBLIC_BYTES
 
-
 static bool deterministic_random(uint8_t *output, size_t output_len, void *context)
 {
     uint8_t *counter = context;
-    if (output == NULL || counter == NULL) return false;
+    if (output == NULL || counter == NULL)
+        return false;
     for (size_t i = 0; i < output_len; ++i) output[i] = (*counter)++;
     return true;
 }
@@ -29,7 +29,6 @@ static bool failing_random(uint8_t *output, size_t output_len, void *context)
     (void)context;
     return false;
 }
-
 
 int main(void)
 {
@@ -67,7 +66,7 @@ int main(void)
     assert(airplay_srp6a_server_verify(server, public_a, sizeof(public_a),
                                        proof_m1, sizeof(proof_m1),
                                        session_key, proof_m2) == AIRPLAY_SRP6A_AUTH_FAILED);
-    uint8_t zero[64] = {0};
+    uint8_t zero[64] = { 0 };
     assert(memcmp(session_key, zero, sizeof(session_key)) == 0);
     assert(memcmp(proof_m2, zero, sizeof(proof_m2)) == 0);
     assert(airplay_srp6a_server_verify(server, public_a, sizeof(public_a),

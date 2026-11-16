@@ -10,36 +10,45 @@
 
 static void capability_consistency(void)
 {
-    airplay_info_plist_config_t info={.device_id="AA:BB:CC:DD:EE:FF",.width_pixels=1024,.height_pixels=600};
-    for(unsigned mode=0;mode<3;++mode) {
-        info.audio_output=mode!=0;info.audio_compressed=true;
-        info.features=mode==2 ? UINT64_C(0x800000015653aee2) : 0;
-        char words[32];uint64_t features=airplay_info_plist_features(&info);
-        assert(airplay_txt_format_features(features,words,sizeof(words)));
-        unsigned low,high;assert(sscanf(words,"0x%x,0x%x",&low,&high)==2);
-        uint64_t discovered=((uint64_t)high<<32)|low;
-        uint8_t plist[AIRPLAY_INFO_PLIST_MAX_BYTES];size_t length;
-        assert(airplay_info_plist_build(&info,plist,sizeof(plist),&length));
-        airplay_bplist_doc_t doc;airplay_bplist_object_t root,value;uint64_t served;
-        assert(airplay_bplist_open(plist,length,&doc)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_root(&doc,&root)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_dict_get(&doc,root,"features",&value)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_get_uint(&doc,value,&served)==AIRPLAY_BPLIST_OK);
-        assert(served==discovered && served==features);
-        if(mode==1) {
+    airplay_info_plist_config_t info = { .device_id = "AA:BB:CC:DD:EE:FF", .width_pixels = 1024, .height_pixels = 600 };
+    for (unsigned mode = 0; mode < 3; ++mode)
+    {
+        info.audio_output = mode != 0;
+        info.audio_compressed = true;
+        info.features = mode == 2 ? UINT64_C(0x800000015653aee2) : 0;
+        char words[32];
+        uint64_t features = airplay_info_plist_features(&info);
+        assert(airplay_txt_format_features(features, words, sizeof(words)));
+        unsigned low, high;
+        assert(sscanf(words, "0x%x,0x%x", &low, &high) == 2);
+        uint64_t discovered = ((uint64_t)high << 32) | low;
+        uint8_t plist[AIRPLAY_INFO_PLIST_MAX_BYTES];
+        size_t length;
+        assert(airplay_info_plist_build(&info, plist, sizeof(plist), &length));
+        airplay_bplist_doc_t doc;
+        airplay_bplist_object_t root, value;
+        uint64_t served;
+        assert(airplay_bplist_open(plist, length, &doc) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc, root, "features", &value) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_uint(&doc, value, &served) == AIRPLAY_BPLIST_OK);
+        assert(served == discovered && served == features);
+        if (mode == 1)
+        {
             assert(served & (UINT64_C(1) << 18)); /* actual PCM capability */
 #ifdef RTCP_AUDIO_CODECS
-            assert(!strcmp(words,"0x5657aee2,0x61"));
+            assert(!strcmp(words, "0x5657aee2,0x61"));
 #else
-            assert(!strcmp(words,"0x5647aee2,0x61"));
+            assert(!strcmp(words, "0x5647aee2,0x61"));
 #endif
         }
-        if(!mode)assert(!strcmp(words,AIRPLAY_TXT_DEFAULT_FEATURES));
+        if (!mode)
+            assert(!strcmp(words, AIRPLAY_TXT_DEFAULT_FEATURES));
     }
-    char tiny[2]={'x','x'};
-    assert(!airplay_txt_format_features(UINT64_MAX,tiny,sizeof(tiny)) && !tiny[0]);
-    assert(!airplay_txt_format_features(1,NULL,0));
-    assert(airplay_info_plist_features(NULL)==AIRPLAY_INFO_DEFAULT_FEATURES);
+    char tiny[2] = { 'x', 'x' };
+    assert(!airplay_txt_format_features(UINT64_MAX, tiny, sizeof(tiny)) && !tiny[0]);
+    assert(!airplay_txt_format_features(1, NULL, 0));
+    assert(airplay_info_plist_features(NULL) == AIRPLAY_INFO_DEFAULT_FEATURES);
 }
 
 int main(void)
@@ -48,7 +57,16 @@ int main(void)
     size_t ie_len = 0U;
     const uint8_t *ie = airplay_vendor_ie(&ie_len);
     static const uint8_t expected_ie[] = {
-        0xDD, 0x08, 0x00, 0xA0, 0x40, 0x00, 0x00, 0x02, 0x00, 0x22,
+        0xDD,
+        0x08,
+        0x00,
+        0xA0,
+        0x40,
+        0x00,
+        0x00,
+        0x02,
+        0x00,
+        0x22,
     };
     assert(ie_len == sizeof(expected_ie));
     assert(memcmp(ie, expected_ie, sizeof(expected_ie)) == 0);
@@ -91,13 +109,13 @@ int main(void)
     size_t wire_len = airplay_txt_encode(records, count, wire, sizeof(wire));
     assert(wire_len > 0U);
     assert(wire_len == 1U + strlen("deviceid") + 1U + strlen(config.device_id) +
-                            1U + strlen("features") + 1U + strlen("0x1") +
-                            1U + strlen("flags") + 1U + strlen("0x0") +
-                            1U + strlen("model") + 1U + strlen(config.model) +
-                            1U + strlen("srcvers") + 1U + strlen(config.source_version) +
-                            1U + strlen("protovers") + 1U + strlen(config.protocol_version) +
-                            1U + strlen("pi") + 1U + strlen(config.pairing_id) +
-                            1U + strlen("pk") + 1U + strlen(config.public_key));
+                           1U + strlen("features") + 1U + strlen("0x1") +
+                           1U + strlen("flags") + 1U + strlen("0x0") +
+                           1U + strlen("model") + 1U + strlen(config.model) +
+                           1U + strlen("srcvers") + 1U + strlen(config.source_version) +
+                           1U + strlen("protovers") + 1U + strlen(config.protocol_version) +
+                           1U + strlen("pi") + 1U + strlen(config.pairing_id) +
+                           1U + strlen("pk") + 1U + strlen(config.public_key));
     assert(wire[0] == strlen("deviceid") + 1U + strlen(config.device_id));
     assert(memcmp(wire + 1, "deviceid=", 9) == 0);
 

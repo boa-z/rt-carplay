@@ -9,10 +9,11 @@
 #include "rtcp/rtcp.h"
 #include "rtcp_linux.h"
 
-#define WAIT_MS 500
+#define WAIT_MS        500
 #define TEST_KEY_BYTES AIRPLAY_AUDIO_KEY_BYTES
 
-typedef struct {
+typedef struct
+{
     unsigned calls;
     uint16_t stream_type;
     uint8_t data[256];
@@ -41,7 +42,7 @@ static int capture_pcm(uint16_t stream_type, const uint8_t *data, size_t len,
 
 static rtcp_addr_t loopback(uint16_t port)
 {
-    rtcp_addr_t address = {0};
+    rtcp_addr_t address = { 0 };
     address.family = RTCP_AF_INET;
     address.addr[0] = 127U;
     address.addr[3] = 1U;
@@ -51,7 +52,7 @@ static rtcp_addr_t loopback(uint16_t port)
 
 static int wait_readable(const struct rtcp_net *net, int fd)
 {
-    struct rtcp_pollfd pfd = {.fd = fd, .events = RTCP_POLLIN};
+    struct rtcp_pollfd pfd = { .fd = fd, .events = RTCP_POLLIN };
     int ready = net->poll(&pfd, 1, WAIT_MS);
     return ready > 0 && (pfd.revents & RTCP_POLLIN);
 }
@@ -73,7 +74,8 @@ static size_t build_datagram(const uint8_t key[TEST_KEY_BYTES], uint16_t seq,
                              size_t capacity)
 {
     const size_t total = AIRPLAY_AUDIO_OVERHEAD_BYTES + pcm_len;
-    if (capacity < total) return 0U;
+    if (capacity < total)
+        return 0U;
     out[0] = 0x80U; /* RTP v2 */
     out[1] = 0x60U; /* payload type 96 */
     out[2] = (uint8_t)(seq >> 8U);
@@ -83,7 +85,8 @@ static size_t build_datagram(const uint8_t key[TEST_KEY_BYTES], uint16_t seq,
 
     uint8_t nonce[12];
     memset(nonce, 0, 4U);
-    for (size_t i = 0U; i < 8U; ++i) {
+    for (size_t i = 0U; i < 8U; ++i)
+    {
         nonce[4U + i] = (uint8_t)(nonce_counter >> (8U * i));
     }
 
@@ -137,7 +140,7 @@ static void test_start_validation(void)
 {
     uint8_t key[TEST_KEY_BYTES];
     memset(key, 0x11, sizeof(key));
-    pcm_capture_t capture = {0};
+    pcm_capture_t capture = { 0 };
     airplay_audio_stream_config_t config = {
         .stream_type = AIRPLAY_AUDIO_STREAM_MAIN,
         .audio_format_bits = 0x800U,
@@ -161,7 +164,7 @@ static void test_decrypts_and_rejects(void)
 {
     uint8_t key[TEST_KEY_BYTES];
     for (size_t i = 0U; i < sizeof(key); ++i) key[i] = (uint8_t)(0x20U + i);
-    pcm_capture_t capture = {0};
+    pcm_capture_t capture = { 0 };
     airplay_audio_stream_config_t config = {
         .stream_type = AIRPLAY_AUDIO_STREAM_MAIN,
         .audio_format_bits = 0x800U,
@@ -186,7 +189,14 @@ static void test_decrypts_and_rejects(void)
     rtcp_addr_t data_addr = loopback(airplay_audio_stream_get_data_port(stream));
 
     static const uint8_t pcm[] = {
-        0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00,
+        0x01,
+        0x00,
+        0x02,
+        0x00,
+        0x03,
+        0x00,
+        0x04,
+        0x00,
     };
     uint8_t wire[256];
     size_t wire_len = build_datagram(key, 1U, 1234U, 0x11223344U, pcm,
@@ -200,7 +210,8 @@ static void test_decrypts_and_rejects(void)
     assert(capture.calls == 1U);
     assert(capture.stream_type == AIRPLAY_AUDIO_STREAM_MAIN);
     assert(capture.len == sizeof(pcm));
-    for (size_t i = 0; i < sizeof(pcm); i += 2) {
+    for (size_t i = 0; i < sizeof(pcm); i += 2)
+    {
         assert(capture.data[i] == pcm[i + 1]);
         assert(capture.data[i + 1] == pcm[i]);
     }
@@ -227,7 +238,7 @@ static void test_decrypts_and_rejects(void)
     assert(airplay_audio_stream_auth_failures(stream) == 1U);
 
     /* Short datagrams are counted and dropped. */
-    uint8_t short_wire[8] = {0x80U, 0x60U};
+    uint8_t short_wire[8] = { 0x80U, 0x60U };
     assert(rtcp_net_linux.udp_sendto(client, &data_addr, short_wire,
                                      sizeof(short_wire)) ==
            (int)sizeof(short_wire));
@@ -240,7 +251,7 @@ static void test_decrypts_and_rejects(void)
     /* The control port is bound and drained without touching the decoder. */
     rtcp_addr_t control_addr =
         loopback(airplay_audio_stream_get_control_port(stream));
-    uint8_t control[16] = {0x80U, 0xc9U};
+    uint8_t control[16] = { 0x80U, 0xc9U };
     assert(rtcp_net_linux.udp_sendto(client, &control_addr, control,
                                      sizeof(control)) == (int)sizeof(control));
     assert(wait_readable(&rtcp_net_linux,
@@ -257,7 +268,7 @@ static void test_alt_stream_type(void)
 {
     uint8_t key[TEST_KEY_BYTES];
     memset(key, 0x5a, sizeof(key));
-    pcm_capture_t capture = {0};
+    pcm_capture_t capture = { 0 };
     airplay_audio_stream_config_t config = {
         .stream_type = AIRPLAY_AUDIO_STREAM_ALT,
         .audio_format_bits = 0x400U, /* 44.1 kHz mono */
@@ -271,7 +282,7 @@ static void test_alt_stream_type(void)
     int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0U, false);
     assert(client >= 0);
     rtcp_addr_t data_addr = loopback(airplay_audio_stream_get_data_port(stream));
-    static const uint8_t pcm[4] = {0xaa, 0xbb, 0xcc, 0xdd};
+    static const uint8_t pcm[4] = { 0xaa, 0xbb, 0xcc, 0xdd };
     uint8_t wire[128];
     size_t wire_len = build_datagram(key, 9U, 99U, 1U, pcm, sizeof(pcm), 0U,
                                      wire, sizeof(wire));
@@ -289,59 +300,65 @@ static void test_alt_stream_type(void)
 
 static void test_bounded_burst(void)
 {
-    uint8_t key[TEST_KEY_BYTES] = {0}, pcm[32] = {0}, wire[128];
-    pcm_capture_t capture = {0};
+    uint8_t key[TEST_KEY_BYTES] = { 0 }, pcm[32] = { 0 }, wire[128];
+    pcm_capture_t capture = { 0 };
     airplay_audio_stream_config_t config = {
         .stream_type = AIRPLAY_AUDIO_STREAM_MAIN,
         .audio_format_bits = 0x800U,
-        .on_pcm = capture_pcm, .context = &capture,
+        .on_pcm = capture_pcm,
+        .context = &capture,
     };
-    memcpy(config.output_key,key,sizeof(key));
+    memcpy(config.output_key, key, sizeof(key));
     airplay_audio_stream_t *stream = NULL;
-    assert(airplay_audio_stream_start(&rtcp_os_linux,&rtcp_net_linux,&config,&stream)==RTCP_OK);
-    int client=rtcp_net_linux.udp_open(RTCP_AF_INET,0,false);assert(client>=0);
-    rtcp_addr_t address=loopback(airplay_audio_stream_get_data_port(stream));
-    for(unsigned i=0;i<40;++i) {
-        size_t n=build_datagram(key,(uint16_t)i,i*160,1,pcm,sizeof(pcm),i+1,wire,sizeof(wire));
-        assert(n && rtcp_net_linux.udp_sendto(client,&address,wire,n)==(int)n);
+    assert(airplay_audio_stream_start(&rtcp_os_linux, &rtcp_net_linux, &config, &stream) == RTCP_OK);
+    int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0, false);
+    assert(client >= 0);
+    rtcp_addr_t address = loopback(airplay_audio_stream_get_data_port(stream));
+    for (unsigned i = 0; i < 40; ++i)
+    {
+        size_t n = build_datagram(key, (uint16_t)i, i * 160, 1, pcm, sizeof(pcm), i + 1, wire, sizeof(wire));
+        assert(n && rtcp_net_linux.udp_sendto(client, &address, wire, n) == (int)n);
     }
-    assert(wait_readable(&rtcp_net_linux,airplay_audio_stream_get_data_fd(stream)));
-    airplay_audio_stream_poll(stream,true,false);
-    assert(capture.calls==32 && capture.timestamp==31*160);
-    airplay_audio_stream_poll(stream,true,false);
-    assert(capture.calls==40 && capture.timestamp==39*160);
-    airplay_audio_stream_stop(stream,&rtcp_net_linux);rtcp_net_linux.close(client);
+    assert(wait_readable(&rtcp_net_linux, airplay_audio_stream_get_data_fd(stream)));
+    airplay_audio_stream_poll(stream, true, false);
+    assert(capture.calls == 32 && capture.timestamp == 31 * 160);
+    airplay_audio_stream_poll(stream, true, false);
+    assert(capture.calls == 40 && capture.timestamp == 39 * 160);
+    airplay_audio_stream_stop(stream, &rtcp_net_linux);
+    rtcp_net_linux.close(client);
 }
 
 static void test_loss_stage_counters(void)
 {
-    uint8_t key[TEST_KEY_BYTES]={0}, payload[4]={0}, wire[128];
-    pcm_capture_t capture={0};
-    airplay_audio_stream_config_t config={.stream_type=100,.audio_format_bits=0x800U,
-        .on_pcm=capture_pcm,.context=&capture};
-    airplay_audio_stream_t *stream=NULL;
-    assert(airplay_audio_stream_start(&rtcp_os_linux,&rtcp_net_linux,&config,&stream)==RTCP_OK);
-    const uint16_t sequences[]={65534,65535,1,0,2};
-    size_t n=0;
-    for(unsigned i=0;i<5;++i) {
-        if(i==4)capture.result=RTCP_ENOMEM;
-        n=build_datagram(key,sequences[i],i*1024,1,payload,sizeof(payload),i+1,wire,sizeof(wire));
-        assert(airplay_audio_stream_process_datagram(stream,wire,n,i)==capture.result);
+    uint8_t key[TEST_KEY_BYTES] = { 0 }, payload[4] = { 0 }, wire[128];
+    pcm_capture_t capture = { 0 };
+    airplay_audio_stream_config_t config = { .stream_type = 100, .audio_format_bits = 0x800U, .on_pcm = capture_pcm, .context = &capture };
+    airplay_audio_stream_t *stream = NULL;
+    assert(airplay_audio_stream_start(&rtcp_os_linux, &rtcp_net_linux, &config, &stream) == RTCP_OK);
+    const uint16_t sequences[] = { 65534, 65535, 1, 0, 2 };
+    size_t n = 0;
+    for (unsigned i = 0; i < 5; ++i)
+    {
+        if (i == 4)
+            capture.result = RTCP_ENOMEM;
+        n = build_datagram(key, sequences[i], i * 1024, 1, payload, sizeof(payload), i + 1, wire, sizeof(wire));
+        assert(airplay_audio_stream_process_datagram(stream, wire, n, i) == capture.result);
     }
     /* Duplicate is authenticated but rejected before the sink. Bad headers
      * and authentication failures must not be counted as callback failures. */
-    assert(airplay_audio_stream_process_datagram(stream,wire,n,10)==RTCP_EINVAL);
-    wire[0]=0x90;
-    assert(airplay_audio_stream_process_datagram(stream,wire,n,11)==RTCP_EINVAL);
-    wire[0]=0x80;wire[12]^=1;
-    assert(airplay_audio_stream_process_datagram(stream,wire,n,12)==RTCP_EIO);
+    assert(airplay_audio_stream_process_datagram(stream, wire, n, 10) == RTCP_EINVAL);
+    wire[0] = 0x90;
+    assert(airplay_audio_stream_process_datagram(stream, wire, n, 11) == RTCP_EINVAL);
+    wire[0] = 0x80;
+    wire[12] ^= 1;
+    assert(airplay_audio_stream_process_datagram(stream, wire, n, 12) == RTCP_EIO);
     rtcp_audio_stats_t stats;
-    airplay_audio_stream_get_stats(stream,&stats);
-    assert(stats.active_streams==1 && stats.datagrams==8);
-    assert(stats.delivered==4 && stats.sink_rejected==1 && stats.auth_failures==1);
-    assert(stats.replay_drops==1 && stats.malformed==1);
-    assert(stats.sequence_missing==1 && stats.sequence_reordered==2);
-    airplay_audio_stream_stop(stream,&rtcp_net_linux);
+    airplay_audio_stream_get_stats(stream, &stats);
+    assert(stats.active_streams == 1 && stats.datagrams == 8);
+    assert(stats.delivered == 4 && stats.sink_rejected == 1 && stats.auth_failures == 1);
+    assert(stats.replay_drops == 1 && stats.malformed == 1);
+    assert(stats.sequence_missing == 1 && stats.sequence_reordered == 2);
+    airplay_audio_stream_stop(stream, &rtcp_net_linux);
 }
 
 int main(void)

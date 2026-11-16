@@ -23,7 +23,7 @@
 
 /* Maximum framed XML message accepted on either side.  StartService replies
  * are small; Pair replies carry certificates and an escrow bag. */
-#define RTCP_LOCKDOWN_FRAME_MAX (64U * 1024U)
+#define RTCP_LOCKDOWN_FRAME_MAX   (64U * 1024U)
 #define RTCP_LOCKDOWN_REQUEST_MAX 1024U
 
 /* Send `request` as one framed message and read one framed reply.  The reply

@@ -15,7 +15,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     /* Return the number of bytes read (possibly fewer than requested), 0 when
      * the peer closed the stream, or a negative RTCP_* error.  RTCP_ETIMEDOUT
      * means nothing arrived before the timeout; the stream stays usable. */
@@ -26,7 +27,8 @@ typedef struct {
     int (*write)(void *context, const void *data, size_t length);
 } rtcp_stream_ops_t;
 
-typedef struct {
+typedef struct
+{
     const rtcp_stream_ops_t *ops;
     void *context;
 } rtcp_stream_t;

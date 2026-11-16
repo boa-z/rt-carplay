@@ -36,10 +36,30 @@ static inline void rtcp_log_discard(const char *tag, const char *fmt, ...)
     (void)fmt;
 }
 
-#define RTCP_LOGE(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
-#define RTCP_LOGW(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
-#define RTCP_LOGI(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
-#define RTCP_LOGD(tag, ...) do { if (0) rtcp_log_discard(tag, __VA_ARGS__); } while (0)
+#define RTCP_LOGE(tag, ...)                     \
+    do                                          \
+    {                                           \
+        if (0)                                  \
+            rtcp_log_discard(tag, __VA_ARGS__); \
+    } while (0)
+#define RTCP_LOGW(tag, ...)                     \
+    do                                          \
+    {                                           \
+        if (0)                                  \
+            rtcp_log_discard(tag, __VA_ARGS__); \
+    } while (0)
+#define RTCP_LOGI(tag, ...)                     \
+    do                                          \
+    {                                           \
+        if (0)                                  \
+            rtcp_log_discard(tag, __VA_ARGS__); \
+    } while (0)
+#define RTCP_LOGD(tag, ...)                     \
+    do                                          \
+    {                                           \
+        if (0)                                  \
+            rtcp_log_discard(tag, __VA_ARGS__); \
+    } while (0)
 
 #endif
 

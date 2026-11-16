@@ -21,11 +21,15 @@ static bool find_parameter(const uint8_t *body, size_t body_len, uint16_t id,
                            const uint8_t **payload, size_t *payload_len)
 {
     size_t offset = 0;
-    while (offset < body_len) {
-        if (body_len - offset < 4U) return false;
+    while (offset < body_len)
+    {
+        if (body_len - offset < 4U)
+            return false;
         uint16_t length = read_be16(body + offset);
-        if (length < 4U || length > body_len - offset) return false;
-        if (read_be16(body + offset + 2U) == id) {
+        if (length < 4U || length > body_len - offset)
+            return false;
+        if (read_be16(body + offset + 2U) == id)
+        {
             *payload = body + offset + 4U;
             *payload_len = length - 4U;
             return true;
@@ -37,8 +41,8 @@ static bool find_parameter(const uint8_t *body, size_t body_len, uint16_t id,
 
 int main(void)
 {
-    const char *ips[] = {"192.168.4.1"};
-    const uint8_t bssid[] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const char *ips[] = { "192.168.4.1" };
+    const uint8_t bssid[] = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 };
     iap2_carplay_start_session_config_t config = {
         .ssid = "relay-test",
         .passphrase = "test-passphrase",
@@ -127,7 +131,7 @@ int main(void)
     /* Wired StartSession: wired_attributes (group 0) carry the NCM-side
      * addresses, no Wi-Fi parameters are present and the SSID/passphrase are
      * not required. */
-    const char *wired_ips[] = {"fe80::1c2d:3e4f:5a6b:7c8d", "fd00::1"};
+    const char *wired_ips[] = { "fe80::1c2d:3e4f:5a6b:7c8d", "fd00::1" };
     config.ssid = NULL;
     config.passphrase = NULL;
     config.channel = 0;
@@ -140,7 +144,7 @@ int main(void)
     size_t wired_len = 0;
     assert(find_parameter(body, body_len, 0, &wired, &wired_len));
     assert(wired_len == 4U + sizeof("fe80::1c2d:3e4f:5a6b:7c8d") +
-                       4U + sizeof("fd00::1"));
+                            4U + sizeof("fd00::1"));
     assert(find_parameter(wired, wired_len, 0, &field, &field_len));
     assert(field_len == sizeof("fe80::1c2d:3e4f:5a6b:7c8d"));
     assert(memcmp(field, "fe80::1c2d:3e4f:5a6b:7c8d", field_len) == 0);

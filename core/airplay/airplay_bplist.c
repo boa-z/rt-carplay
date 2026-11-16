@@ -10,11 +10,12 @@
 #include <string.h>
 #include <math.h>
 
-#define BPLIST_HEADER_BYTES 8U
-#define BPLIST_TRAILER_BYTES 32U
+#define BPLIST_HEADER_BYTES       8U
+#define BPLIST_TRAILER_BYTES      32U
 #define BPLIST_WRITER_MAX_OBJECTS 128U
 
-typedef struct {
+typedef struct
+{
     uint8_t marker;
     uint8_t type;
     uint64_t count;
@@ -31,9 +32,11 @@ static bool read_be(const uint8_t *bytes, size_t available,
                     size_t offset, uint8_t width, uint64_t *value)
 {
     if (bytes == NULL || value == NULL || !supported_width(width) ||
-        offset > available || width > available - offset) return false;
+        offset > available || width > available - offset)
+        return false;
     uint64_t result = 0U;
-    for (uint8_t i = 0U; i < width; ++i) {
+    for (uint8_t i = 0U; i < width; ++i)
+    {
         result = (result << 8U) | bytes[offset + i];
     }
     *value = result;
@@ -46,14 +49,16 @@ static airplay_bplist_result_t resolve_object(
     bplist_object_info_t *info)
 {
     if (doc == NULL || info == NULL || !doc->valid ||
-        object.id >= doc->object_count) {
+        object.id >= doc->object_count)
+    {
         return AIRPLAY_BPLIST_INVALID_OBJECT;
     }
     uint64_t offset64 = 0U;
     if (!read_be(doc->bytes, doc->trailer_offset,
                  doc->offset_table_offset + (size_t)object.id * doc->offset_size,
                  doc->offset_size, &offset64) ||
-        offset64 < BPLIST_HEADER_BYTES || offset64 >= doc->offset_table_offset) {
+        offset64 < BPLIST_HEADER_BYTES || offset64 >= doc->offset_table_offset)
+    {
         return AIRPLAY_BPLIST_INVALID_OBJECT;
     }
     size_t offset = (size_t)offset64;
@@ -63,8 +68,10 @@ static airplay_bplist_result_t resolve_object(
     size_t cursor = offset + 1U;
     uint64_t count = nibble;
 
-    if (type == 0U) {
-        if (nibble != 0x00U && nibble != 0x08U && nibble != 0x09U) {
+    if (type == 0U)
+    {
+        if (nibble != 0x00U && nibble != 0x08U && nibble != 0x09U)
+        {
             return AIRPLAY_BPLIST_INVALID_OBJECT;
         }
         info->marker = marker;
@@ -76,11 +83,14 @@ static airplay_bplist_result_t resolve_object(
         info->payload_bytes = 0U;
         return AIRPLAY_BPLIST_OK;
     }
-    if (type == 0x01U || type == 0x02U) {
-        if (nibble > 3U) return AIRPLAY_BPLIST_INVALID_OBJECT;
+    if (type == 0x01U || type == 0x02U)
+    {
+        if (nibble > 3U)
+            return AIRPLAY_BPLIST_INVALID_OBJECT;
         size_t width = (size_t)1U << nibble;
         if (cursor > doc->offset_table_offset ||
-            width > doc->offset_table_offset - cursor) {
+            width > doc->offset_table_offset - cursor)
+        {
             return AIRPLAY_BPLIST_INVALID_OBJECT;
         }
         info->marker = marker;
@@ -91,39 +101,57 @@ static airplay_bplist_result_t resolve_object(
         return AIRPLAY_BPLIST_OK;
     }
 
-    if (nibble == 0x0fU) {
-        if (cursor >= doc->offset_table_offset) return AIRPLAY_BPLIST_INVALID_OBJECT;
+    if (nibble == 0x0fU)
+    {
+        if (cursor >= doc->offset_table_offset)
+            return AIRPLAY_BPLIST_INVALID_OBJECT;
         uint8_t length_marker = doc->bytes[cursor++];
         if ((length_marker >> 4U) != 0x01U ||
-            (length_marker & 0x0fU) > 3U) {
+            (length_marker & 0x0fU) > 3U)
+        {
             return AIRPLAY_BPLIST_INVALID_OBJECT;
         }
         uint8_t int_width = (uint8_t)(1U << (length_marker & 0x0fU));
         if (!read_be(doc->bytes, doc->offset_table_offset, cursor,
-                     int_width, &count)) {
+                     int_width, &count))
+        {
             return AIRPLAY_BPLIST_INVALID_OBJECT;
         }
         cursor += int_width;
     }
 
     size_t payload_bytes = 0U;
-    if (type == 0x04U || type == 0x05U) {
-        if (count > SIZE_MAX) return AIRPLAY_BPLIST_TOO_LARGE;
+    if (type == 0x04U || type == 0x05U)
+    {
+        if (count > SIZE_MAX)
+            return AIRPLAY_BPLIST_TOO_LARGE;
         payload_bytes = (size_t)count;
-    } else if (type == 0x06U) {
-        if (count > SIZE_MAX / 2U) return AIRPLAY_BPLIST_TOO_LARGE;
+    }
+    else if (type == 0x06U)
+    {
+        if (count > SIZE_MAX / 2U)
+            return AIRPLAY_BPLIST_TOO_LARGE;
         payload_bytes = (size_t)count * 2U;
-    } else if (type == 0x0aU || type == 0x0cU) {
-        if (count > SIZE_MAX / doc->reference_size) return AIRPLAY_BPLIST_TOO_LARGE;
+    }
+    else if (type == 0x0aU || type == 0x0cU)
+    {
+        if (count > SIZE_MAX / doc->reference_size)
+            return AIRPLAY_BPLIST_TOO_LARGE;
         payload_bytes = (size_t)count * doc->reference_size;
-    } else if (type == 0x0dU) {
-        if (count > SIZE_MAX / (2U * doc->reference_size)) return AIRPLAY_BPLIST_TOO_LARGE;
+    }
+    else if (type == 0x0dU)
+    {
+        if (count > SIZE_MAX / (2U * doc->reference_size))
+            return AIRPLAY_BPLIST_TOO_LARGE;
         payload_bytes = (size_t)count * 2U * doc->reference_size;
-    } else {
+    }
+    else
+    {
         return AIRPLAY_BPLIST_INVALID_OBJECT;
     }
     if (cursor > doc->offset_table_offset ||
-        payload_bytes > doc->offset_table_offset - cursor) {
+        payload_bytes > doc->offset_table_offset - cursor)
+    {
         return AIRPLAY_BPLIST_INVALID_OBJECT;
     }
     info->marker = marker;
@@ -143,7 +171,8 @@ static airplay_bplist_result_t read_reference(
     if (object == NULL ||
         !read_be(doc->bytes, doc->offset_table_offset, offset,
                  doc->reference_size, &reference) ||
-        reference >= doc->object_count) {
+        reference >= doc->object_count)
+    {
         return AIRPLAY_BPLIST_INVALID_OBJECT;
     }
     object->id = reference;
@@ -156,15 +185,20 @@ static bool key_equals(const airplay_bplist_doc_t *doc,
 {
     bplist_object_info_t info;
     if (resolve_object(doc, key_object, &info) != AIRPLAY_BPLIST_OK ||
-        (info.type != 0x05U && info.type != 0x06U)) return false;
+        (info.type != 0x05U && info.type != 0x06U))
+        return false;
     size_t key_len = strlen(key);
-    if (info.count != key_len) return false;
-    if (info.type == 0x05U) {
+    if (info.count != key_len)
+        return false;
+    if (info.type == 0x05U)
+    {
         return memcmp(doc->bytes + info.payload_offset, key, key_len) == 0;
     }
-    for (size_t i = 0U; i < key_len; ++i) {
+    for (size_t i = 0U; i < key_len; ++i)
+    {
         if (doc->bytes[info.payload_offset + 2U * i] != 0U ||
-            doc->bytes[info.payload_offset + 2U * i + 1U] != (uint8_t)key[i]) {
+            doc->bytes[info.payload_offset + 2U * i + 1U] != (uint8_t)key[i])
+        {
             return false;
         }
     }
@@ -176,12 +210,21 @@ airplay_bplist_result_t airplay_bplist_open(const uint8_t *bytes,
                                             airplay_bplist_doc_t *doc)
 {
     static const uint8_t magic[BPLIST_HEADER_BYTES] = {
-        'b', 'p', 'l', 'i', 's', 't', '0', '0',
+        'b',
+        'p',
+        'l',
+        'i',
+        's',
+        't',
+        '0',
+        '0',
     };
-    if (doc == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (doc == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     memset(doc, 0, sizeof(*doc));
     if (bytes == NULL || length < BPLIST_HEADER_BYTES + BPLIST_TRAILER_BYTES ||
-        memcmp(bytes, magic, sizeof(magic)) != 0) {
+        memcmp(bytes, magic, sizeof(magic)) != 0)
+    {
         return AIRPLAY_BPLIST_INVALID_DOCUMENT;
     }
     size_t trailer = length - BPLIST_TRAILER_BYTES;
@@ -193,14 +236,16 @@ airplay_bplist_result_t airplay_bplist_open(const uint8_t *bytes,
     if (!supported_width(offset_size) || !supported_width(reference_size) ||
         !read_be(bytes, length, trailer + 8U, 8U, &object_count) ||
         !read_be(bytes, length, trailer + 16U, 8U, &top_object) ||
-        !read_be(bytes, length, trailer + 24U, 8U, &table_offset)) {
+        !read_be(bytes, length, trailer + 24U, 8U, &table_offset))
+    {
         return AIRPLAY_BPLIST_INVALID_DOCUMENT;
     }
     if (object_count == 0U || object_count > AIRPLAY_BPLIST_MAX_OBJECTS ||
         top_object >= object_count || table_offset > trailer ||
         table_offset < BPLIST_HEADER_BYTES ||
         object_count > SIZE_MAX / offset_size ||
-        (size_t)object_count * offset_size != trailer - (size_t)table_offset) {
+        (size_t)object_count * offset_size != trailer - (size_t)table_offset)
+    {
         return AIRPLAY_BPLIST_TOO_LARGE;
     }
     doc->bytes = bytes;
@@ -218,7 +263,8 @@ airplay_bplist_result_t airplay_bplist_open(const uint8_t *bytes,
 airplay_bplist_result_t airplay_bplist_root(const airplay_bplist_doc_t *doc,
                                             airplay_bplist_object_t *object)
 {
-    if (doc == NULL || object == NULL || !doc->valid) {
+    if (doc == NULL || object == NULL || !doc->valid)
+    {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
     object->id = doc->top_object;
@@ -231,24 +277,49 @@ airplay_bplist_result_t airplay_bplist_get_type(
     airplay_bplist_type_t *type,
     uint64_t *item_count)
 {
-    if (type == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (type == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
     airplay_bplist_result_t result = resolve_object(doc, object, &info);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    switch (info.type) {
-    case 0x00U: *type = (info.marker == 0x08U || info.marker == 0x09U)
-                            ? AIRPLAY_BPLIST_BOOL : AIRPLAY_BPLIST_NULL; break;
-    case 0x01U: *type = (info.marker >> 4U) == 0U
-                              ? AIRPLAY_BPLIST_BOOL : AIRPLAY_BPLIST_INTEGER; break;
-    case 0x02U: *type = AIRPLAY_BPLIST_REAL; break;
-    case 0x04U: *type = AIRPLAY_BPLIST_DATA; break;
-    case 0x05U: *type = AIRPLAY_BPLIST_ASCII_STRING; break;
-    case 0x06U: *type = AIRPLAY_BPLIST_UNICODE_STRING; break;
-    case 0x0aU: case 0x0cU: *type = AIRPLAY_BPLIST_ARRAY; break;
-    case 0x0dU: *type = AIRPLAY_BPLIST_DICTIONARY; break;
-    default: *type = AIRPLAY_BPLIST_OTHER; break;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    switch (info.type)
+    {
+    case 0x00U:
+        *type = (info.marker == 0x08U || info.marker == 0x09U)
+                    ? AIRPLAY_BPLIST_BOOL
+                    : AIRPLAY_BPLIST_NULL;
+        break;
+    case 0x01U:
+        *type = (info.marker >> 4U) == 0U
+                    ? AIRPLAY_BPLIST_BOOL
+                    : AIRPLAY_BPLIST_INTEGER;
+        break;
+    case 0x02U:
+        *type = AIRPLAY_BPLIST_REAL;
+        break;
+    case 0x04U:
+        *type = AIRPLAY_BPLIST_DATA;
+        break;
+    case 0x05U:
+        *type = AIRPLAY_BPLIST_ASCII_STRING;
+        break;
+    case 0x06U:
+        *type = AIRPLAY_BPLIST_UNICODE_STRING;
+        break;
+    case 0x0aU:
+    case 0x0cU:
+        *type = AIRPLAY_BPLIST_ARRAY;
+        break;
+    case 0x0dU:
+        *type = AIRPLAY_BPLIST_DICTIONARY;
+        break;
+    default:
+        *type = AIRPLAY_BPLIST_OTHER;
+        break;
     }
-    if (item_count != NULL) *item_count = info.count;
+    if (item_count != NULL)
+        *item_count = info.count;
     return AIRPLAY_BPLIST_OK;
 }
 
@@ -258,12 +329,16 @@ airplay_bplist_result_t airplay_bplist_array_get(
     uint64_t index,
     airplay_bplist_object_t *value)
 {
-    if (value == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (value == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
     airplay_bplist_result_t result = resolve_object(doc, array, &info);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (info.type != 0x0aU && info.type != 0x0cU) return AIRPLAY_BPLIST_WRONG_TYPE;
-    if (index >= info.count) return AIRPLAY_BPLIST_NOT_FOUND;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (info.type != 0x0aU && info.type != 0x0cU)
+        return AIRPLAY_BPLIST_WRONG_TYPE;
+    if (index >= info.count)
+        return AIRPLAY_BPLIST_NOT_FOUND;
     return read_reference(doc, info.payload_offset + (size_t)index * doc->reference_size,
                           value);
 }
@@ -274,21 +349,26 @@ airplay_bplist_result_t airplay_bplist_dict_get(
     const char *key,
     airplay_bplist_object_t *value)
 {
-    if (key == NULL || value == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (key == NULL || value == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
     airplay_bplist_result_t result = resolve_object(doc, dictionary, &info);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (info.type != 0x0dU) return AIRPLAY_BPLIST_WRONG_TYPE;
-    for (uint64_t i = 0U; i < info.count; ++i) {
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (info.type != 0x0dU)
+        return AIRPLAY_BPLIST_WRONG_TYPE;
+    for (uint64_t i = 0U; i < info.count; ++i)
+    {
         airplay_bplist_object_t key_object;
         result = read_reference(doc,
                                 info.payload_offset + (size_t)i * doc->reference_size,
                                 &key_object);
-        if (result != AIRPLAY_BPLIST_OK) return result;
-        if (key_equals(doc, key_object, key)) {
+        if (result != AIRPLAY_BPLIST_OK)
+            return result;
+        if (key_equals(doc, key_object, key))
+        {
             return read_reference(
-                doc, info.payload_offset +
-                         ((size_t)info.count + (size_t)i) * doc->reference_size,
+                doc, info.payload_offset + ((size_t)info.count + (size_t)i) * doc->reference_size,
                 value);
         }
     }
@@ -299,52 +379,72 @@ airplay_bplist_result_t airplay_bplist_dict_get_unique(
     const airplay_bplist_doc_t *doc, airplay_bplist_object_t dictionary,
     const char *key, airplay_bplist_object_t *value)
 {
-    if (!key || !value) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (!key || !value)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
     airplay_bplist_result_t rc = resolve_object(doc, dictionary, &info);
-    if (rc != AIRPLAY_BPLIST_OK) return rc;
-    if (info.type != 0x0dU) return AIRPLAY_BPLIST_WRONG_TYPE;
+    if (rc != AIRPLAY_BPLIST_OK)
+        return rc;
+    if (info.type != 0x0dU)
+        return AIRPLAY_BPLIST_WRONG_TYPE;
     bool found = false;
-    for (uint64_t i = 0; i < info.count; ++i) {
+    for (uint64_t i = 0; i < info.count; ++i)
+    {
         airplay_bplist_object_t k;
         rc = read_reference(doc, info.payload_offset + (size_t)i * doc->reference_size, &k);
-        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        if (rc != AIRPLAY_BPLIST_OK)
+            return rc;
         bplist_object_info_t ki;
         rc = resolve_object(doc, k, &ki);
-        if (rc != AIRPLAY_BPLIST_OK) return rc;
-        if (ki.type != 5 && ki.type != 6) return AIRPLAY_BPLIST_WRONG_TYPE;
-        if (!key_equals(doc, k, key)) continue;
-        if (found) return AIRPLAY_BPLIST_INVALID_OBJECT;
-        rc = read_reference(doc, info.payload_offset + ((size_t)info.count + (size_t)i) *
-            doc->reference_size, value);
-        if (rc != AIRPLAY_BPLIST_OK) return rc;
+        if (rc != AIRPLAY_BPLIST_OK)
+            return rc;
+        if (ki.type != 5 && ki.type != 6)
+            return AIRPLAY_BPLIST_WRONG_TYPE;
+        if (!key_equals(doc, k, key))
+            continue;
+        if (found)
+            return AIRPLAY_BPLIST_INVALID_OBJECT;
+        rc = read_reference(doc, info.payload_offset + ((size_t)info.count + (size_t)i) * doc->reference_size, value);
+        if (rc != AIRPLAY_BPLIST_OK)
+            return rc;
         found = true;
     }
     return found ? AIRPLAY_BPLIST_OK : AIRPLAY_BPLIST_NOT_FOUND;
 }
 
 airplay_bplist_result_t airplay_bplist_dict_get_utf8_unique(const airplay_bplist_doc_t *doc,
-    airplay_bplist_object_t dictionary, const uint8_t *key, size_t key_length,
-    airplay_bplist_object_t *value)
+                                                            airplay_bplist_object_t dictionary, const uint8_t *key, size_t key_length,
+                                                            airplay_bplist_object_t *value)
 {
-    if ((!key && key_length) || !value) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if ((!key && key_length) || !value)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
-    airplay_bplist_result_t rc=resolve_object(doc,dictionary,&info);
-    if (rc != AIRPLAY_BPLIST_OK) return rc;
-    if (info.type != 0x0dU) return AIRPLAY_BPLIST_WRONG_TYPE;
-    bool found=false;
-    for (uint64_t i=0;i<info.count;++i) {
-        airplay_bplist_object_t k; bplist_object_info_t ki;
-        rc=read_reference(doc,info.payload_offset+(size_t)i*doc->reference_size,&k);
-        if (rc != AIRPLAY_BPLIST_OK) return rc;
-        rc=resolve_object(doc,k,&ki);
-        if (rc != AIRPLAY_BPLIST_OK) return rc;
-        if (ki.type != 5U && ki.type != 6U) return AIRPLAY_BPLIST_WRONG_TYPE;
-        if (!airplay_bplist_string_equals_utf8(doc,k,key,key_length)) continue;
-        if (found) return AIRPLAY_BPLIST_INVALID_OBJECT;
-        rc=read_reference(doc,info.payload_offset+((size_t)info.count+(size_t)i)*doc->reference_size,value);
-        if (rc != AIRPLAY_BPLIST_OK) return rc;
-        found=true;
+    airplay_bplist_result_t rc = resolve_object(doc, dictionary, &info);
+    if (rc != AIRPLAY_BPLIST_OK)
+        return rc;
+    if (info.type != 0x0dU)
+        return AIRPLAY_BPLIST_WRONG_TYPE;
+    bool found = false;
+    for (uint64_t i = 0; i < info.count; ++i)
+    {
+        airplay_bplist_object_t k;
+        bplist_object_info_t ki;
+        rc = read_reference(doc, info.payload_offset + (size_t)i * doc->reference_size, &k);
+        if (rc != AIRPLAY_BPLIST_OK)
+            return rc;
+        rc = resolve_object(doc, k, &ki);
+        if (rc != AIRPLAY_BPLIST_OK)
+            return rc;
+        if (ki.type != 5U && ki.type != 6U)
+            return AIRPLAY_BPLIST_WRONG_TYPE;
+        if (!airplay_bplist_string_equals_utf8(doc, k, key, key_length))
+            continue;
+        if (found)
+            return AIRPLAY_BPLIST_INVALID_OBJECT;
+        rc = read_reference(doc, info.payload_offset + ((size_t)info.count + (size_t)i) * doc->reference_size, value);
+        if (rc != AIRPLAY_BPLIST_OK)
+            return rc;
+        found = true;
     }
     return found ? AIRPLAY_BPLIST_OK : AIRPLAY_BPLIST_NOT_FOUND;
 }
@@ -354,7 +454,8 @@ airplay_bplist_result_t airplay_bplist_get_main_display_size(
     uint16_t *width_pixels,
     uint16_t *height_pixels)
 {
-    if (doc == NULL || width_pixels == NULL || height_pixels == NULL) {
+    if (doc == NULL || width_pixels == NULL || height_pixels == NULL)
+    {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
     *width_pixels = 0U;
@@ -370,24 +471,35 @@ airplay_bplist_result_t airplay_bplist_get_main_display_size(
     uint64_t width = 0U;
     uint64_t height = 0U;
     airplay_bplist_result_t result = airplay_bplist_root(doc, &root);
-    if (result != AIRPLAY_BPLIST_OK) return result;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
     result = airplay_bplist_dict_get(doc, root, "displays", &displays);
-    if (result != AIRPLAY_BPLIST_OK) return result;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
     result = airplay_bplist_get_type(doc, displays, &type, &display_count);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (type != AIRPLAY_BPLIST_ARRAY) return AIRPLAY_BPLIST_WRONG_TYPE;
-    if (display_count == 0U) return AIRPLAY_BPLIST_NOT_FOUND;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (type != AIRPLAY_BPLIST_ARRAY)
+        return AIRPLAY_BPLIST_WRONG_TYPE;
+    if (display_count == 0U)
+        return AIRPLAY_BPLIST_NOT_FOUND;
     result = airplay_bplist_array_get(doc, displays, 0U, &main_display);
-    if (result != AIRPLAY_BPLIST_OK) return result;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
     result = airplay_bplist_dict_get(doc, main_display, "widthPixels", &width_object);
-    if (result != AIRPLAY_BPLIST_OK) return result;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
     result = airplay_bplist_dict_get(doc, main_display, "heightPixels", &height_object);
-    if (result != AIRPLAY_BPLIST_OK) return result;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
     result = airplay_bplist_get_uint(doc, width_object, &width);
-    if (result != AIRPLAY_BPLIST_OK) return result;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
     result = airplay_bplist_get_uint(doc, height_object, &height);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (width == 0U || height == 0U || width > UINT16_MAX || height > UINT16_MAX) {
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (width == 0U || height == 0U || width > UINT16_MAX || height > UINT16_MAX)
+    {
         return AIRPLAY_BPLIST_TOO_LARGE;
     }
     *width_pixels = (uint16_t)width;
@@ -400,16 +512,20 @@ airplay_bplist_result_t airplay_bplist_get_uint(
     airplay_bplist_object_t object,
     uint64_t *value)
 {
-    if (value == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (value == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
     airplay_bplist_result_t result = resolve_object(doc, object, &info);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (info.type != 0x01U || info.marker >> 4U != 0x01U) {
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (info.type != 0x01U || info.marker >> 4U != 0x01U)
+    {
         return AIRPLAY_BPLIST_WRONG_TYPE;
     }
     return read_be(doc->bytes, doc->offset_table_offset, info.payload_offset,
                    (uint8_t)info.payload_bytes, value)
-               ? AIRPLAY_BPLIST_OK : AIRPLAY_BPLIST_INVALID_OBJECT;
+               ? AIRPLAY_BPLIST_OK
+               : AIRPLAY_BPLIST_INVALID_OBJECT;
 }
 
 airplay_bplist_result_t airplay_bplist_get_bool(
@@ -417,11 +533,14 @@ airplay_bplist_result_t airplay_bplist_get_bool(
     airplay_bplist_object_t object,
     bool *value)
 {
-    if (value == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (value == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
     airplay_bplist_result_t result = resolve_object(doc, object, &info);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (info.type != 0U || (info.marker != 0x08U && info.marker != 0x09U)) {
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (info.type != 0U || (info.marker != 0x08U && info.marker != 0x09U))
+    {
         return AIRPLAY_BPLIST_WRONG_TYPE;
     }
     *value = info.marker == 0x09U;
@@ -435,24 +554,33 @@ airplay_bplist_result_t airplay_bplist_get_string(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (output_len != NULL) *output_len = 0U;
-    if (output == NULL || output_capacity == 0U || output_len == NULL) {
+    if (output_len != NULL)
+        *output_len = 0U;
+    if (output == NULL || output_capacity == 0U || output_len == NULL)
+    {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
     bplist_object_info_t info;
     airplay_bplist_result_t result = resolve_object(doc, object, &info);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (info.type != 0x05U && info.type != 0x06U) return AIRPLAY_BPLIST_WRONG_TYPE;
-    if (info.count >= output_capacity) return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
-    for (size_t i = 0U; i < (size_t)info.count; ++i) {
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (info.type != 0x05U && info.type != 0x06U)
+        return AIRPLAY_BPLIST_WRONG_TYPE;
+    if (info.count >= output_capacity)
+        return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
+    for (size_t i = 0U; i < (size_t)info.count; ++i)
+    {
         uint8_t value = doc->bytes[info.payload_offset + i];
-        if (info.type == 0x06U) {
-            if (doc->bytes[info.payload_offset + 2U * i] != 0U) {
+        if (info.type == 0x06U)
+        {
+            if (doc->bytes[info.payload_offset + 2U * i] != 0U)
+            {
                 return AIRPLAY_BPLIST_WRONG_TYPE;
             }
             value = doc->bytes[info.payload_offset + 2U * i + 1U];
         }
-        if (value > 0x7fU || value == 0U) return AIRPLAY_BPLIST_WRONG_TYPE;
+        if (value > 0x7fU || value == 0U)
+            return AIRPLAY_BPLIST_WRONG_TYPE;
         output[i] = (char)value;
     }
     output[info.count] = '\0';
@@ -461,32 +589,66 @@ airplay_bplist_result_t airplay_bplist_get_string(
 }
 
 bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *doc,
-    airplay_bplist_object_t object, const uint8_t *text, size_t length)
+                                       airplay_bplist_object_t object, const uint8_t *text, size_t length)
 {
     bplist_object_info_t info;
-    if ((!text && length) || resolve_object(doc,object,&info) != AIRPLAY_BPLIST_OK ||
-        (info.type != 5U && info.type != 6U)) return false;
-    size_t pos=0;
-    for (uint64_t i=0;i<info.count;++i) {
-        uint32_t cp=doc->bytes[info.payload_offset+i];
-        if (info.type == 6U) {
-            cp=((uint32_t)doc->bytes[info.payload_offset+2*i]<<8) |
-                doc->bytes[info.payload_offset+2*i+1];
-            if (cp >= 0xd800U && cp <= 0xdbffU) {
-                if (++i >= info.count) return false;
-                uint32_t low=((uint32_t)doc->bytes[info.payload_offset+2*i]<<8) |
-                    doc->bytes[info.payload_offset+2*i+1];
-                if (low < 0xdc00U || low > 0xdfffU) return false;
-                cp=0x10000U+((cp-0xd800U)<<10)+(low-0xdc00U);
-            } else if (cp >= 0xdc00U && cp <= 0xdfffU) return false;
-        } else if (cp > 0x7fU) return false;
-        uint8_t encoded[4]; size_t n;
-        if (cp < 0x80U) { encoded[0]=(uint8_t)cp; n=1; }
-        else if (cp < 0x800U) { encoded[0]=(uint8_t)(0xc0U|(cp>>6)); encoded[1]=(uint8_t)(0x80U|(cp&63)); n=2; }
-        else if (cp < 0x10000U) { encoded[0]=(uint8_t)(0xe0U|(cp>>12)); encoded[1]=(uint8_t)(0x80U|((cp>>6)&63)); encoded[2]=(uint8_t)(0x80U|(cp&63)); n=3; }
-        else { encoded[0]=(uint8_t)(0xf0U|(cp>>18)); encoded[1]=(uint8_t)(0x80U|((cp>>12)&63)); encoded[2]=(uint8_t)(0x80U|((cp>>6)&63)); encoded[3]=(uint8_t)(0x80U|(cp&63)); n=4; }
-        if (n > length-pos || memcmp(text+pos,encoded,n)) return false;
-        pos+=n;
+    if ((!text && length) || resolve_object(doc, object, &info) != AIRPLAY_BPLIST_OK ||
+        (info.type != 5U && info.type != 6U))
+        return false;
+    size_t pos = 0;
+    for (uint64_t i = 0; i < info.count; ++i)
+    {
+        uint32_t cp = doc->bytes[info.payload_offset + i];
+        if (info.type == 6U)
+        {
+            cp = ((uint32_t)doc->bytes[info.payload_offset + 2 * i] << 8) |
+                 doc->bytes[info.payload_offset + 2 * i + 1];
+            if (cp >= 0xd800U && cp <= 0xdbffU)
+            {
+                if (++i >= info.count)
+                    return false;
+                uint32_t low = ((uint32_t)doc->bytes[info.payload_offset + 2 * i] << 8) |
+                               doc->bytes[info.payload_offset + 2 * i + 1];
+                if (low < 0xdc00U || low > 0xdfffU)
+                    return false;
+                cp = 0x10000U + ((cp - 0xd800U) << 10) + (low - 0xdc00U);
+            }
+            else if (cp >= 0xdc00U && cp <= 0xdfffU)
+                return false;
+        }
+        else if (cp > 0x7fU)
+            return false;
+        uint8_t encoded[4];
+        size_t n;
+        if (cp < 0x80U)
+        {
+            encoded[0] = (uint8_t)cp;
+            n = 1;
+        }
+        else if (cp < 0x800U)
+        {
+            encoded[0] = (uint8_t)(0xc0U | (cp >> 6));
+            encoded[1] = (uint8_t)(0x80U | (cp & 63));
+            n = 2;
+        }
+        else if (cp < 0x10000U)
+        {
+            encoded[0] = (uint8_t)(0xe0U | (cp >> 12));
+            encoded[1] = (uint8_t)(0x80U | ((cp >> 6) & 63));
+            encoded[2] = (uint8_t)(0x80U | (cp & 63));
+            n = 3;
+        }
+        else
+        {
+            encoded[0] = (uint8_t)(0xf0U | (cp >> 18));
+            encoded[1] = (uint8_t)(0x80U | ((cp >> 12) & 63));
+            encoded[2] = (uint8_t)(0x80U | ((cp >> 6) & 63));
+            encoded[3] = (uint8_t)(0x80U | (cp & 63));
+            n = 4;
+        }
+        if (n > length - pos || memcmp(text + pos, encoded, n))
+            return false;
+        pos += n;
     }
     return pos == length;
 }
@@ -497,35 +659,51 @@ airplay_bplist_result_t airplay_bplist_get_data(
     const uint8_t **bytes,
     size_t *length)
 {
-    if (bytes == NULL || length == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (bytes == NULL || length == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     *bytes = NULL;
     *length = 0U;
     bplist_object_info_t info;
     airplay_bplist_result_t result = resolve_object(doc, object, &info);
-    if (result != AIRPLAY_BPLIST_OK) return result;
-    if (info.type != 0x04U) return AIRPLAY_BPLIST_WRONG_TYPE;
+    if (result != AIRPLAY_BPLIST_OK)
+        return result;
+    if (info.type != 0x04U)
+        return AIRPLAY_BPLIST_WRONG_TYPE;
     *bytes = doc->bytes + info.payload_offset;
     *length = info.payload_bytes;
     return AIRPLAY_BPLIST_OK;
 }
 
 airplay_bplist_result_t airplay_bplist_get_number(const airplay_bplist_doc_t *doc,
-                                                airplay_bplist_object_t object, double *value)
+                                                  airplay_bplist_object_t object, double *value)
 {
-    if(!value)return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (!value)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_object_info_t info;
-    airplay_bplist_result_t rc=resolve_object(doc,object,&info);if(rc!=AIRPLAY_BPLIST_OK)return rc;
+    airplay_bplist_result_t rc = resolve_object(doc, object, &info);
+    if (rc != AIRPLAY_BPLIST_OK)
+        return rc;
     uint64_t bits;
-    if(!read_be(doc->bytes,doc->offset_table_offset,info.payload_offset,(uint8_t)info.payload_bytes,&bits))
+    if (!read_be(doc->bytes, doc->offset_table_offset, info.payload_offset, (uint8_t)info.payload_bytes, &bits))
         return AIRPLAY_BPLIST_WRONG_TYPE;
-    if(info.type==1) *value=info.payload_bytes==8 ? (double)(int64_t)bits : (double)bits;
-    else if(info.type==2 && info.payload_bytes==4) {uint32_t raw=(uint32_t)bits;float f;memcpy(&f,&raw,4);*value=f;}
-    else if(info.type==2 && info.payload_bytes==8) memcpy(value,&bits,8);
-    else return AIRPLAY_BPLIST_WRONG_TYPE;
-    return isfinite(*value)?AIRPLAY_BPLIST_OK:AIRPLAY_BPLIST_INVALID_OBJECT;
+    if (info.type == 1)
+        *value = info.payload_bytes == 8 ? (double)(int64_t)bits : (double)bits;
+    else if (info.type == 2 && info.payload_bytes == 4)
+    {
+        uint32_t raw = (uint32_t)bits;
+        float f;
+        memcpy(&f, &raw, 4);
+        *value = f;
+    }
+    else if (info.type == 2 && info.payload_bytes == 8)
+        memcpy(value, &bits, 8);
+    else
+        return AIRPLAY_BPLIST_WRONG_TYPE;
+    return isfinite(*value) ? AIRPLAY_BPLIST_OK : AIRPLAY_BPLIST_INVALID_OBJECT;
 }
 
-typedef enum {
+typedef enum
+{
     BPLIST_WRITE_DATA,
     BPLIST_WRITE_STRING,
     BPLIST_WRITE_INTEGER,
@@ -533,7 +711,8 @@ typedef enum {
     BPLIST_WRITE_DICTIONARY,
 } bplist_write_kind_t;
 
-typedef struct {
+typedef struct
+{
     bplist_write_kind_t kind;
     const char *text;
     const uint8_t *data;
@@ -545,9 +724,12 @@ typedef struct {
 
 static uint8_t integer_width(uint64_t value)
 {
-    if (value <= UINT8_MAX) return 1U;
-    if (value <= UINT16_MAX) return 2U;
-    if (value <= UINT32_MAX) return 4U;
+    if (value <= UINT8_MAX)
+        return 1U;
+    if (value <= UINT16_MAX)
+        return 2U;
+    if (value <= UINT32_MAX)
+        return 4U;
     return 8U;
 }
 
@@ -555,8 +737,10 @@ static bool write_be(uint8_t *output, size_t capacity, size_t *offset,
                      uint64_t value, uint8_t width)
 {
     if (output == NULL || offset == NULL || !supported_width(width) ||
-        *offset > capacity || width > capacity - *offset) return false;
-    for (uint8_t i = 0U; i < width; ++i) {
+        *offset > capacity || width > capacity - *offset)
+        return false;
+    for (uint8_t i = 0U; i < width; ++i)
+    {
         uint8_t shift = (uint8_t)((width - i - 1U) * 8U);
         output[*offset + i] = (uint8_t)(value >> shift);
     }
@@ -570,48 +754,67 @@ static bool emit_write_object(const bplist_write_object_t *object,
                               size_t capacity,
                               size_t *offset)
 {
-    if (object == NULL || output == NULL || offset == NULL) return false;
-    switch (object->kind) {
+    if (object == NULL || output == NULL || offset == NULL)
+        return false;
+    switch (object->kind)
+    {
     case BPLIST_WRITE_DATA:
-    case BPLIST_WRITE_STRING: {
+    case BPLIST_WRITE_STRING:
+    {
         bool data = object->kind == BPLIST_WRITE_DATA;
         uint8_t marker = data ? 0x40U : 0x50U;
         size_t length = data ? object->data_len : strlen(object->text);
-        if (*offset >= capacity) return false;
-        if (length < 15U) {
+        if (*offset >= capacity)
+            return false;
+        if (length < 15U)
+        {
             output[(*offset)++] = (uint8_t)(marker | (uint8_t)length);
-        } else {
+        }
+        else
+        {
             /* Binary plist uses a following integer object when the count nibble is 0xf. */
             output[(*offset)++] = marker | 0x0fU;
             uint8_t width = integer_width((uint64_t)length);
-            uint8_t power = width == 1U ? 0U : width == 2U ? 1U : width == 4U ? 2U : 3U;
-            if (*offset >= capacity) return false;
+            uint8_t power = width == 1U ? 0U : width == 2U ? 1U
+                                           : width == 4U   ? 2U
+                                                           : 3U;
+            if (*offset >= capacity)
+                return false;
             output[(*offset)++] = (uint8_t)(0x10U | power);
-            if (!write_be(output, capacity, offset, (uint64_t)length, width)) return false;
+            if (!write_be(output, capacity, offset, (uint64_t)length, width))
+                return false;
         }
-        if (length > capacity - *offset) return false;
+        if (length > capacity - *offset)
+            return false;
         memcpy(output + *offset, data ? (const void *)object->data : (const void *)object->text, length);
         *offset += length;
         return true;
     }
-    case BPLIST_WRITE_INTEGER: {
+    case BPLIST_WRITE_INTEGER:
+    {
         uint8_t width = integer_width(object->number);
-        uint8_t power = width == 1U ? 0U : width == 2U ? 1U : width == 4U ? 2U : 3U;
-        if (*offset >= capacity) return false;
+        uint8_t power = width == 1U ? 0U : width == 2U ? 1U
+                                       : width == 4U   ? 2U
+                                                       : 3U;
+        if (*offset >= capacity)
+            return false;
         output[(*offset)++] = (uint8_t)(0x10U | power);
         return write_be(output, capacity, offset, object->number, width);
     }
     case BPLIST_WRITE_ARRAY:
-    case BPLIST_WRITE_DICTIONARY: {
+    case BPLIST_WRITE_DICTIONARY:
+    {
         uint8_t nibble = object->kind == BPLIST_WRITE_DICTIONARY
                              ? (uint8_t)(object->reference_count / 2U)
                              : object->reference_count;
-        if (nibble >= 15U || *offset >= capacity) return false;
-        output[(*offset)++] = (uint8_t)(
-            (object->kind == BPLIST_WRITE_DICTIONARY ? 0xd0U : 0xa0U) | nibble);
-        for (uint8_t i = 0U; i < object->reference_count; ++i) {
+        if (nibble >= 15U || *offset >= capacity)
+            return false;
+        output[(*offset)++] = (uint8_t)((object->kind == BPLIST_WRITE_DICTIONARY ? 0xd0U : 0xa0U) | nibble);
+        for (uint8_t i = 0U; i < object->reference_count; ++i)
+        {
             if (!write_be(output, capacity, offset, object->references[i],
-                          reference_width)) return false;
+                          reference_width))
+                return false;
         }
         return true;
     }
@@ -627,38 +830,56 @@ static airplay_bplist_result_t build_setup_response(
     size_t *output_len)
 {
     static const uint8_t magic[BPLIST_HEADER_BYTES] = {
-        'b', 'p', 'l', 'i', 's', 't', '0', '0',
+        'b',
+        'p',
+        'l',
+        'i',
+        's',
+        't',
+        '0',
+        '0',
     };
-    if (output_len != NULL) *output_len = 0U;
+    if (output_len != NULL)
+        *output_len = 0U;
     if (objects == NULL || object_count == 0U || output == NULL ||
-        output_len == NULL) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
-    if (output_capacity < BPLIST_HEADER_BYTES + BPLIST_TRAILER_BYTES) {
+        output_len == NULL)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (output_capacity < BPLIST_HEADER_BYTES + BPLIST_TRAILER_BYTES)
+    {
         return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
     }
     size_t offset = 0U;
     memcpy(output, magic, sizeof(magic));
     offset += sizeof(magic);
-    if (object_count > BPLIST_WRITER_MAX_OBJECTS) return AIRPLAY_BPLIST_TOO_LARGE;
+    if (object_count > BPLIST_WRITER_MAX_OBJECTS)
+        return AIRPLAY_BPLIST_TOO_LARGE;
     uint16_t object_offsets[BPLIST_WRITER_MAX_OBJECTS];
-    for (uint8_t i = 0U; i < object_count; ++i) {
-        if (offset > UINT16_MAX) return AIRPLAY_BPLIST_TOO_LARGE;
+    for (uint8_t i = 0U; i < object_count; ++i)
+    {
+        if (offset > UINT16_MAX)
+            return AIRPLAY_BPLIST_TOO_LARGE;
         object_offsets[i] = (uint16_t)offset;
-        if (!emit_write_object(&objects[i], 1U, output, output_capacity, &offset)) {
+        if (!emit_write_object(&objects[i], 1U, output, output_capacity, &offset))
+        {
             return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
         }
     }
-    if (offset > UINT16_MAX) return AIRPLAY_BPLIST_TOO_LARGE;
+    if (offset > UINT16_MAX)
+        return AIRPLAY_BPLIST_TOO_LARGE;
     size_t table_offset = offset;
     /* A multi-stream SETUP response can exceed 255 bytes of objects; widen
      * the offset table entries only when the document needs it. */
     uint8_t offset_width = offset > UINT8_MAX ? 2U : 1U;
-    for (uint8_t i = 0U; i < object_count; ++i) {
+    for (uint8_t i = 0U; i < object_count; ++i)
+    {
         if (!write_be(output, output_capacity, &offset, object_offsets[i],
-                      offset_width)) {
+                      offset_width))
+        {
             return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
         }
     }
-    if (output_capacity - offset < BPLIST_TRAILER_BYTES) {
+    if (output_capacity - offset < BPLIST_TRAILER_BYTES)
+    {
         return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
     }
     memset(output + offset, 0, BPLIST_TRAILER_BYTES);
@@ -668,7 +889,8 @@ static airplay_bplist_result_t build_setup_response(
     offset += BPLIST_TRAILER_BYTES;
     if (!write_be(output, output_capacity, &trailer_offset, object_count, 8U) ||
         !write_be(output, output_capacity, &trailer_offset, 0U, 8U) ||
-        !write_be(output, output_capacity, &trailer_offset, table_offset, 8U)) {
+        !write_be(output, output_capacity, &trailer_offset, table_offset, 8U))
+    {
         return AIRPLAY_BPLIST_OUTPUT_TOO_SMALL;
     }
     *output_len = offset;
@@ -684,32 +906,35 @@ airplay_bplist_result_t airplay_bplist_build_initial_setup_response_features(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (timing_port == 0U || event_port == 0U) {
+    if (timing_port == 0U || event_port == 0U)
+    {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
     bplist_write_object_t objects[11] = {
-        {.kind = BPLIST_WRITE_DICTIONARY,
-         /* Binary-plist dictionaries store all key references before values. */
-         .references = {1U, 3U, 5U, 2U, 4U, 6U},
-         .reference_count = 6U},
-        {.kind = BPLIST_WRITE_STRING, .text = "timingPort"},
-        {.kind = BPLIST_WRITE_INTEGER, .number = timing_port},
-        {.kind = BPLIST_WRITE_STRING, .text = "eventPort"},
-        {.kind = BPLIST_WRITE_INTEGER, .number = event_port},
-        {.kind = BPLIST_WRITE_STRING, .text = "enabledFeatures"},
-        {.kind = BPLIST_WRITE_ARRAY, .references = {7U, 8U},
-         .reference_count = 2U},
-        {.kind = BPLIST_WRITE_STRING, .text = "iAPChannel"},
-        {.kind = BPLIST_WRITE_STRING, .text = "viewAreas"},
+        { .kind = BPLIST_WRITE_DICTIONARY,
+          /* Binary-plist dictionaries store all key references before values. */
+          .references = { 1U, 3U, 5U, 2U, 4U, 6U },
+          .reference_count = 6U },
+        { .kind = BPLIST_WRITE_STRING, .text = "timingPort" },
+        { .kind = BPLIST_WRITE_INTEGER, .number = timing_port },
+        { .kind = BPLIST_WRITE_STRING, .text = "eventPort" },
+        { .kind = BPLIST_WRITE_INTEGER, .number = event_port },
+        { .kind = BPLIST_WRITE_STRING, .text = "enabledFeatures" },
+        { .kind = BPLIST_WRITE_ARRAY, .references = { 7U, 8U }, .reference_count = 2U },
+        { .kind = BPLIST_WRITE_STRING, .text = "iAPChannel" },
+        { .kind = BPLIST_WRITE_STRING, .text = "viewAreas" },
     };
-    if (vehicle) {
-        objects[6].references[2]=9U; objects[6].reference_count=3U;
-        objects[9]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="vehicleStateProtocol"};
+    if (vehicle)
+    {
+        objects[6].references[2] = 9U;
+        objects[6].reference_count = 3U;
+        objects[9] = (bplist_write_object_t){ .kind = BPLIST_WRITE_STRING, .text = "vehicleStateProtocol" };
     }
-    size_t count=vehicle ? 10U : 9U;
-    if (ui_sync) {
-        objects[6].references[objects[6].reference_count++]=(uint8_t)count;
-        objects[count++]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="uiSync"};
+    size_t count = vehicle ? 10U : 9U;
+    if (ui_sync)
+    {
+        objects[6].references[objects[6].reference_count++] = (uint8_t)count;
+        objects[count++] = (bplist_write_object_t){ .kind = BPLIST_WRITE_STRING, .text = "uiSync" };
     }
     return build_setup_response(objects, count, output, output_capacity, output_len);
 }
@@ -718,16 +943,16 @@ airplay_bplist_result_t airplay_bplist_build_initial_setup_response_vehicle(
     uint16_t timing_port, uint16_t event_port, bool vehicle, uint8_t *output,
     size_t output_capacity, size_t *output_len)
 {
-    return airplay_bplist_build_initial_setup_response_features(timing_port,event_port,vehicle,false,
-        output,output_capacity,output_len);
+    return airplay_bplist_build_initial_setup_response_features(timing_port, event_port, vehicle, false,
+                                                                output, output_capacity, output_len);
 }
 
 airplay_bplist_result_t airplay_bplist_build_initial_setup_response(
     uint16_t timing_port, uint16_t event_port, uint8_t *output,
     size_t output_capacity, size_t *output_len)
 {
-    return airplay_bplist_build_initial_setup_response_vehicle(timing_port,event_port,false,
-        output,output_capacity,output_len);
+    return airplay_bplist_build_initial_setup_response_vehicle(timing_port, event_port, false,
+                                                               output, output_capacity, output_len);
 }
 
 airplay_bplist_result_t airplay_bplist_build_screen_setup_response(
@@ -737,20 +962,21 @@ airplay_bplist_result_t airplay_bplist_build_screen_setup_response(
     size_t output_capacity,
     size_t *output_len)
 {
-    if (stream_type > UINT32_MAX || data_port == 0U) {
+    if (stream_type > UINT32_MAX || data_port == 0U)
+    {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
     bplist_write_object_t objects[8] = {
-        {.kind = BPLIST_WRITE_DICTIONARY, .references = {1U, 2U},
-         .reference_count = 2U},
-        {.kind = BPLIST_WRITE_STRING, .text = "streams"},
-        {.kind = BPLIST_WRITE_ARRAY, .references = {3U}, .reference_count = 1U},
-        {.kind = BPLIST_WRITE_DICTIONARY,
-         .references = {4U, 5U, 6U, 7U}, .reference_count = 4U},
-        {.kind = BPLIST_WRITE_STRING, .text = "type"},
-        {.kind = BPLIST_WRITE_STRING, .text = "dataPort"},
-        {.kind = BPLIST_WRITE_INTEGER, .number = stream_type},
-        {.kind = BPLIST_WRITE_INTEGER, .number = data_port},
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 1U, 2U }, .reference_count = 2U },
+        { .kind = BPLIST_WRITE_STRING, .text = "streams" },
+        { .kind = BPLIST_WRITE_ARRAY, .references = { 3U }, .reference_count = 1U },
+        { .kind = BPLIST_WRITE_DICTIONARY,
+          .references = { 4U, 5U, 6U, 7U },
+          .reference_count = 4U },
+        { .kind = BPLIST_WRITE_STRING, .text = "type" },
+        { .kind = BPLIST_WRITE_STRING, .text = "dataPort" },
+        { .kind = BPLIST_WRITE_INTEGER, .number = stream_type },
+        { .kind = BPLIST_WRITE_INTEGER, .number = data_port },
     };
     return build_setup_response(objects, 8U, output, output_capacity, output_len);
 }
@@ -761,10 +987,9 @@ airplay_bplist_result_t airplay_bplist_build_empty_stream_setup_response(
     size_t *output_len)
 {
     bplist_write_object_t objects[3] = {
-        {.kind = BPLIST_WRITE_DICTIONARY, .references = {1U, 2U},
-         .reference_count = 2U},
-        {.kind = BPLIST_WRITE_STRING, .text = "streams"},
-        {.kind = BPLIST_WRITE_ARRAY, .reference_count = 0U},
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 1U, 2U }, .reference_count = 2U },
+        { .kind = BPLIST_WRITE_STRING, .text = "streams" },
+        { .kind = BPLIST_WRITE_ARRAY, .reference_count = 0U },
     };
     return build_setup_response(objects, 3U, output, output_capacity, output_len);
 }
@@ -777,7 +1002,8 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
     size_t *output_len)
 {
     if (entries == NULL || entry_count == 0U ||
-        entry_count > AIRPLAY_BPLIST_MAX_SETUP_STREAMS) {
+        entry_count > AIRPLAY_BPLIST_MAX_SETUP_STREAMS)
+    {
         return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     }
 
@@ -793,14 +1019,20 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
     objects[2].reference_count = (uint8_t)entry_count;
 
     uint8_t count = 3U;
-    for (size_t i = 0U; i < entry_count; ++i) {
+    for (size_t i = 0U; i < entry_count; ++i)
+    {
         const airplay_bplist_stream_entry_t *entry = &entries[i];
-        if (entry->data_port == 0U) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+        if (entry->data_port == 0U)
+            return AIRPLAY_BPLIST_INVALID_ARGUMENT;
         uint8_t pairs = 2U; /* type, dataPort */
-        if (entry->control_port != 0U) ++pairs;
-        if (entry->stream_id != 0U) ++pairs;
-        if (entry->has_connection_id) ++pairs;
-        if ((size_t)count + 1U + (size_t)pairs * 2U > BPLIST_WRITER_MAX_OBJECTS) {
+        if (entry->control_port != 0U)
+            ++pairs;
+        if (entry->stream_id != 0U)
+            ++pairs;
+        if (entry->has_connection_id)
+            ++pairs;
+        if ((size_t)count + 1U + (size_t)pairs * 2U > BPLIST_WRITER_MAX_OBJECTS)
+        {
             return AIRPLAY_BPLIST_TOO_LARGE;
         }
 
@@ -810,7 +1042,8 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
         objects[dict_id].reference_count = (uint8_t)(pairs * 2U);
         const uint8_t key_id = (uint8_t)(dict_id + 1U);
         const uint8_t value_id = (uint8_t)(dict_id + 1U + pairs);
-        for (uint8_t p = 0U; p < pairs; ++p) {
+        for (uint8_t p = 0U; p < pairs; ++p)
+        {
             objects[dict_id].references[p] = (uint8_t)(key_id + p);
             objects[dict_id].references[pairs + p] = (uint8_t)(value_id + p);
         }
@@ -826,21 +1059,24 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
         objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
         objects[value_id + p].number = entry->data_port;
         ++p;
-        if (entry->control_port != 0U) {
+        if (entry->control_port != 0U)
+        {
             objects[key_id + p].kind = BPLIST_WRITE_STRING;
             objects[key_id + p].text = "controlPort";
             objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
             objects[value_id + p].number = entry->control_port;
             ++p;
         }
-        if (entry->has_connection_id) {
+        if (entry->has_connection_id)
+        {
             objects[key_id + p].kind = BPLIST_WRITE_STRING;
             objects[key_id + p].text = "streamConnectionID";
             objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
             objects[value_id + p].number = entry->stream_connection_id;
             ++p;
         }
-        if (entry->stream_id != 0U) {
+        if (entry->stream_id != 0U)
+        {
             objects[key_id + p].kind = BPLIST_WRITE_STRING;
             objects[key_id + p].text = "streamID";
             objects[value_id + p].kind = BPLIST_WRITE_INTEGER;
@@ -856,50 +1092,62 @@ airplay_bplist_result_t airplay_bplist_build_streams_setup_response(
 airplay_bplist_result_t airplay_bplist_build_iap_command(
     const uint8_t *data, size_t len, uint8_t *out, size_t capacity, size_t *written)
 {
-    if (!data || !len || len > 2048U) return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    if (!data || !len || len > 2048U)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
     bplist_write_object_t objects[] = {
-        {.kind=BPLIST_WRITE_DICTIONARY, .references={1,2,3,4}, .reference_count=4},
-        {.kind=BPLIST_WRITE_STRING, .text="type"},
-        {.kind=BPLIST_WRITE_STRING, .text="params"},
-        {.kind=BPLIST_WRITE_STRING, .text="iAPSendMessage"},
-        {.kind=BPLIST_WRITE_DICTIONARY, .references={5,6}, .reference_count=2},
-        {.kind=BPLIST_WRITE_STRING, .text="data"},
-        {.kind=BPLIST_WRITE_DATA, .data=data, .data_len=len},
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 1, 2, 3, 4 }, .reference_count = 4 },
+        { .kind = BPLIST_WRITE_STRING, .text = "type" },
+        { .kind = BPLIST_WRITE_STRING, .text = "params" },
+        { .kind = BPLIST_WRITE_STRING, .text = "iAPSendMessage" },
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 5, 6 }, .reference_count = 2 },
+        { .kind = BPLIST_WRITE_STRING, .text = "data" },
+        { .kind = BPLIST_WRITE_DATA, .data = data, .data_len = len },
     };
     return build_setup_response(objects, 7, out, capacity, written);
 }
 
-airplay_bplist_result_t airplay_bplist_build_audio_feedback(const airplay_audio_feedback_t *entries,size_t n,
-                                                           uint8_t *out,size_t capacity,size_t *written)
+airplay_bplist_result_t airplay_bplist_build_audio_feedback(const airplay_audio_feedback_t *entries, size_t n,
+                                                            uint8_t *out, size_t capacity, size_t *written)
 {
-    if(n>8 || (!entries && n))return AIRPLAY_BPLIST_INVALID_ARGUMENT;
-    bplist_write_object_t o[59]={0};
-    o[0]=(bplist_write_object_t){.kind=BPLIST_WRITE_DICTIONARY,.references={1,2},.reference_count=2};
-    o[1]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text="streams"};
-    o[2].kind=BPLIST_WRITE_ARRAY;o[2].reference_count=(uint8_t)n;
-    uint8_t next=3;
-    for(size_t i=0;i<n;++i) {
-        uint8_t d=next;next+=7;
-        o[2].references[i]=d;o[d].kind=BPLIST_WRITE_DICTIONARY;o[d].reference_count=6;
-        const char *keys[]={"type","sampleRate","streamConnectionID"};
-        uint64_t values[]={entries[i].type,entries[i].sample_rate,entries[i].connection_id};
-        for(unsigned j=0;j<3;++j) {
-            o[d].references[j]=(uint8_t)(d+1+j);o[d].references[j+3]=(uint8_t)(d+4+j);
-            o[d+1+j]=(bplist_write_object_t){.kind=BPLIST_WRITE_STRING,.text=keys[j]};
-            o[d+4+j]=(bplist_write_object_t){.kind=BPLIST_WRITE_INTEGER,.number=values[j]};
+    if (n > 8 || (!entries && n))
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_write_object_t o[59] = { 0 };
+    o[0] = (bplist_write_object_t){ .kind = BPLIST_WRITE_DICTIONARY, .references = { 1, 2 }, .reference_count = 2 };
+    o[1] = (bplist_write_object_t){ .kind = BPLIST_WRITE_STRING, .text = "streams" };
+    o[2].kind = BPLIST_WRITE_ARRAY;
+    o[2].reference_count = (uint8_t)n;
+    uint8_t next = 3;
+    for (size_t i = 0; i < n; ++i)
+    {
+        uint8_t d = next;
+        next += 7;
+        o[2].references[i] = d;
+        o[d].kind = BPLIST_WRITE_DICTIONARY;
+        o[d].reference_count = 6;
+        const char *keys[] = { "type", "sampleRate", "streamConnectionID" };
+        uint64_t values[] = { entries[i].type, entries[i].sample_rate, entries[i].connection_id };
+        for (unsigned j = 0; j < 3; ++j)
+        {
+            o[d].references[j] = (uint8_t)(d + 1 + j);
+            o[d].references[j + 3] = (uint8_t)(d + 4 + j);
+            o[d + 1 + j] = (bplist_write_object_t){ .kind = BPLIST_WRITE_STRING, .text = keys[j] };
+            o[d + 4 + j] = (bplist_write_object_t){ .kind = BPLIST_WRITE_INTEGER, .number = values[j] };
         }
     }
-    return build_setup_response(o,next,out,capacity,written);
+    return build_setup_response(o, next, out, capacity, written);
 }
-airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action,uint8_t *out,size_t capacity,size_t *written)
+airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action, uint8_t *out, size_t capacity, size_t *written)
 {
-    if(action!=2 && action!=3)return AIRPLAY_BPLIST_INVALID_ARGUMENT;
-    bplist_write_object_t o[]={
-        {.kind=BPLIST_WRITE_DICTIONARY,.references={1,2,3,4},.reference_count=4},
-        {.kind=BPLIST_WRITE_STRING,.text="type"},{.kind=BPLIST_WRITE_STRING,.text="params"},
-        {.kind=BPLIST_WRITE_STRING,.text="requestSiri"},
-        {.kind=BPLIST_WRITE_DICTIONARY,.references={5,6},.reference_count=2},
-        {.kind=BPLIST_WRITE_STRING,.text="siriAction"},{.kind=BPLIST_WRITE_INTEGER,.number=action}
+    if (action != 2 && action != 3)
+        return AIRPLAY_BPLIST_INVALID_ARGUMENT;
+    bplist_write_object_t o[] = {
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 1, 2, 3, 4 }, .reference_count = 4 },
+        { .kind = BPLIST_WRITE_STRING, .text = "type" },
+        { .kind = BPLIST_WRITE_STRING, .text = "params" },
+        { .kind = BPLIST_WRITE_STRING, .text = "requestSiri" },
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 5, 6 }, .reference_count = 2 },
+        { .kind = BPLIST_WRITE_STRING, .text = "siriAction" },
+        { .kind = BPLIST_WRITE_INTEGER, .number = action }
     };
-    return build_setup_response(o,7,out,capacity,written);
+    return build_setup_response(o, 7, out, capacity, written);
 }

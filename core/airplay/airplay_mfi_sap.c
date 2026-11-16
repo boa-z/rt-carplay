@@ -24,7 +24,8 @@ bool airplay_mfi_sap_set_provider(const airplay_mfi_sap_provider_t *provider)
 {
     if (provider == NULL || provider->mfi == NULL ||
         provider->mfi->read_cert == NULL || provider->mfi->sign == NULL ||
-        (provider->protocol_major != 2U && provider->protocol_major != 3U)) {
+        (provider->protocol_major != 2U && provider->protocol_major != 3U))
+    {
         return false;
     }
     s_provider = *provider;
@@ -38,9 +39,9 @@ void airplay_mfi_sap_clear_provider(void)
     s_provider_set = false;
 }
 
-#define MFI_SAP_VERSION 1U
-#define MFI_SAP_PUBLIC_KEY_BYTES 32U
-#define MFI_SAP_SIGNATURE_MAX_BYTES AIRPLAY_MFI_SAP_MAX_SIGNATURE_BYTES
+#define MFI_SAP_VERSION              1U
+#define MFI_SAP_PUBLIC_KEY_BYTES     32U
+#define MFI_SAP_SIGNATURE_MAX_BYTES  AIRPLAY_MFI_SAP_MAX_SIGNATURE_BYTES
 #define MFI_SAP_CERTIFICATE_CAPACITY AIRPLAY_MFI_SAP_MAX_CERTIFICATE_BYTES
 
 #define TAG "mfi_sap"
@@ -48,8 +49,10 @@ void airplay_mfi_sap_clear_provider(void)
 static int mfi_sap_rng(void *context, unsigned char *output, size_t output_len)
 {
     (void)context;
-    if (output == NULL && output_len != 0U) return -1;
-    if (s_provider.random == NULL) return -1;
+    if (output == NULL && output_len != 0U)
+        return -1;
+    if (s_provider.random == NULL)
+        return -1;
     return s_provider.random(output, output_len, s_provider.context);
 }
 
@@ -63,14 +66,16 @@ static bool bytes_are_zero(const uint8_t *bytes, size_t length)
 static int sha1(const uint8_t *input, size_t input_len, uint8_t output[20])
 {
     const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA1);
-    if (info == NULL) return -1;
+    if (info == NULL)
+        return -1;
     return mbedtls_md(info, input, input_len, output);
 }
 
 static int sha256(const uint8_t *input, size_t input_len, uint8_t output[32])
 {
     const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (info == NULL) return -1;
+    if (info == NULL)
+        return -1;
     return mbedtls_md(info, input, input_len, output);
 }
 
@@ -114,7 +119,8 @@ static airplay_mfi_sap_result_t mfi_sap_exchange(
                                     mfi_sap_rng, NULL) != 0 ||
         mbedtls_mpi_write_binary_le(&shared, shared_secret,
                                     MFI_SAP_PUBLIC_KEY_BYTES) != 0 ||
-        bytes_are_zero(shared_secret, MFI_SAP_PUBLIC_KEY_BYTES)) {
+        bytes_are_zero(shared_secret, MFI_SAP_PUBLIC_KEY_BYTES))
+    {
         goto cleanup;
     }
     result = AIRPLAY_MFI_SAP_OK;
@@ -135,12 +141,14 @@ static int derive_aes_material(const uint8_t shared_secret[MFI_SAP_PUBLIC_KEY_BY
     uint8_t digest[20];
     memcpy(input, "AES-KEY", 7U);
     memcpy(input + 7U, shared_secret, MFI_SAP_PUBLIC_KEY_BYTES);
-    if (sha1(input, sizeof(input), digest) != 0) goto failed;
+    if (sha1(input, sizeof(input), digest) != 0)
+        goto failed;
     memcpy(key, digest, 16U);
 
     memcpy(input, "AES-IV", 6U);
     memcpy(input + 6U, shared_secret, MFI_SAP_PUBLIC_KEY_BYTES);
-    if (sha1(input, 6U + MFI_SAP_PUBLIC_KEY_BYTES, digest) != 0) goto failed;
+    if (sha1(input, 6U + MFI_SAP_PUBLIC_KEY_BYTES, digest) != 0)
+        goto failed;
     memcpy(iv, digest, 16U);
     mbedtls_platform_zeroize(input, sizeof(input));
     mbedtls_platform_zeroize(digest, sizeof(digest));
@@ -177,14 +185,17 @@ static int mfi_verify_signature(const uint8_t *certificate,
 
     mbedtls_pk_init(&pk);
     for (size_t offset = 0U;
-         offset + 8U < certificate_len && verified == 0; ++offset) {
-        if (certificate[offset] != 0x30U) continue;
+         offset + 8U < certificate_len && verified == 0; ++offset)
+    {
+        if (certificate[offset] != 0x30U)
+            continue;
         unsigned char *cursor = (unsigned char *)(certificate + offset);
         const unsigned char *end = certificate + certificate_len;
         if (mbedtls_pk_parse_subpubkey(&cursor, end, &pk) == 0 &&
             mbedtls_pk_get_type(&pk) == MBEDTLS_PK_RSA &&
             mbedtls_pk_verify(&pk, md_alg, digest, digest_len, signature,
-                              signature_len) == 0) {
+                              signature_len) == 0)
+        {
             verified = 1;
         }
         mbedtls_pk_free(&pk);
@@ -197,7 +208,8 @@ static int mfi_verify_signature(const uint8_t *certificate,
 static uint32_t mfi_sap_fnv1a32(const uint8_t *data, size_t len)
 {
     uint32_t hash = 2166136261u;
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; ++i)
+    {
         hash ^= data[i];
         hash *= 16777619u;
     }
@@ -209,12 +221,14 @@ static void format_hex(char *out, size_t out_size, const uint8_t *bytes,
 {
     static const char digits[] = "0123456789ABCDEF";
     size_t pos = 0U;
-    for (size_t i = 0; i < len && pos + 3U <= out_size; ++i) {
+    for (size_t i = 0; i < len && pos + 3U <= out_size; ++i)
+    {
         out[pos++] = digits[bytes[i] >> 4];
         out[pos++] = digits[bytes[i] & 0x0fU];
         out[pos++] = ' ';
     }
-    if (pos != 0U) pos -= 1U;
+    if (pos != 0U)
+        pos -= 1U;
     out[pos] = '\0';
 }
 
@@ -224,12 +238,13 @@ static int encrypt_signature(const uint8_t key[16], const uint8_t iv[16],
 {
     mbedtls_aes_context aes;
     uint8_t nonce_counter[16];
-    uint8_t stream_block[16] = {0};
+    uint8_t stream_block[16] = { 0 };
     size_t offset = 0U;
     memcpy(nonce_counter, iv, sizeof(nonce_counter));
     mbedtls_aes_init(&aes);
     int rc = mbedtls_aes_setkey_enc(&aes, key, 128U);
-    if (rc == 0) {
+    if (rc == 0)
+    {
         rc = mbedtls_aes_crypt_ctr(&aes, signature_len, &offset,
                                    nonce_counter, stream_block, signature,
                                    encrypted);
@@ -246,20 +261,20 @@ static int encrypt_signature(const uint8_t key[16], const uint8_t iv[16],
 static bool aes_ctr_known_answer(void)
 {
     static const uint8_t key[16] = {
-        0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,
-        0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
     };
     static const uint8_t iv[16] = {
-        0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,
-        0xf8,0xf9,0xfa,0xfb,0xfc,0xfd,0xfe,0xff
+        0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7,
+        0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
     };
     static const uint8_t plain[16] = {
-        0x6b,0xc1,0xbe,0xe2,0x2e,0x40,0x9f,0x96,
-        0xe9,0x3d,0x7e,0x11,0x73,0x93,0x17,0x2a
+        0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96,
+        0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a
     };
     static const uint8_t expected[16] = {
-        0x87,0x4d,0x61,0x91,0xb6,0x20,0xe3,0x26,
-        0x1b,0xef,0x68,0x64,0x99,0x0d,0xb6,0xce
+        0x87, 0x4d, 0x61, 0x91, 0xb6, 0x20, 0xe3, 0x26,
+        0x1b, 0xef, 0x68, 0x64, 0x99, 0x0d, 0xb6, 0xce
     };
     uint8_t output[16];
     bool valid = encrypt_signature(key, iv, plain, sizeof(plain), output) == 0 &&
@@ -275,56 +290,64 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     size_t response_capacity,
     size_t *response_len)
 {
-    if (response_len != NULL) *response_len = 0U;
+    if (response_len != NULL)
+        *response_len = 0U;
     if (request == NULL || request_len != 1U + MFI_SAP_PUBLIC_KEY_BYTES ||
-        request[0] != MFI_SAP_VERSION || response == NULL || response_len == NULL) {
+        request[0] != MFI_SAP_VERSION || response == NULL || response_len == NULL)
+    {
         return AIRPLAY_MFI_SAP_INVALID_ARGUMENT;
     }
-    if (!s_provider_set) return AIRPLAY_MFI_SAP_UNAVAILABLE;
+    if (!s_provider_set)
+        return AIRPLAY_MFI_SAP_UNAVAILABLE;
 
     const uint8_t protocol_major = s_provider.protocol_major;
-    if (protocol_major != 2U && protocol_major != 3U) {
+    if (protocol_major != 2U && protocol_major != 3U)
+    {
         return AIRPLAY_MFI_SAP_UNSUPPORTED_PROTOCOL;
     }
 
     uint8_t certificate[MFI_SAP_CERTIFICATE_CAPACITY];
     size_t certificate_len = sizeof(certificate);
     int err = s_provider.mfi->read_cert(certificate, sizeof(certificate),
-                                       &certificate_len);
+                                        &certificate_len);
     if (err != RTCP_OK || certificate_len == 0U ||
-        certificate_len > sizeof(certificate)) {
+        certificate_len > sizeof(certificate))
+    {
         RTCP_LOGE(TAG, "auth_setup=certificate_unavailable error=%d", err);
         mbedtls_platform_zeroize(certificate, sizeof(certificate));
         return AIRPLAY_MFI_SAP_UNAVAILABLE;
     }
     size_t required = MFI_SAP_PUBLIC_KEY_BYTES + 4U + certificate_len +
                       4U + MFI_SAP_SIGNATURE_MAX_BYTES;
-    if (required > response_capacity) {
+    if (required > response_capacity)
+    {
         mbedtls_platform_zeroize(certificate, sizeof(certificate));
         return AIRPLAY_MFI_SAP_BUFFER_TOO_SMALL;
     }
 
     bool aes_valid = aes_ctr_known_answer();
     RTCP_LOGI(TAG, "auth_setup=aes_ctr_check verified=%u", (unsigned)aes_valid);
-    if (!aes_valid) {
+    if (!aes_valid)
+    {
         mbedtls_platform_zeroize(certificate, sizeof(certificate));
         return AIRPLAY_MFI_SAP_CRYPTO_FAILED;
     }
 
-    uint8_t accessory_public_key[MFI_SAP_PUBLIC_KEY_BYTES] = {0};
-    uint8_t shared_secret[MFI_SAP_PUBLIC_KEY_BYTES] = {0};
-    uint8_t derivation_key[16] = {0};
-    uint8_t derivation_iv[16] = {0};
+    uint8_t accessory_public_key[MFI_SAP_PUBLIC_KEY_BYTES] = { 0 };
+    uint8_t shared_secret[MFI_SAP_PUBLIC_KEY_BYTES] = { 0 };
+    uint8_t derivation_key[16] = { 0 };
+    uint8_t derivation_iv[16] = { 0 };
     uint8_t signature_input[MFI_SAP_PUBLIC_KEY_BYTES * 2U];
-    uint8_t digest[32] = {0};
-    uint8_t signature[MFI_SAP_SIGNATURE_MAX_BYTES] = {0};
-    uint8_t encrypted_signature[MFI_SAP_SIGNATURE_MAX_BYTES] = {0};
+    uint8_t digest[32] = { 0 };
+    uint8_t signature[MFI_SAP_SIGNATURE_MAX_BYTES] = { 0 };
+    uint8_t encrypted_signature[MFI_SAP_SIGNATURE_MAX_BYTES] = { 0 };
     size_t signature_len = sizeof(signature);
 
     airplay_mfi_sap_result_t result = mfi_sap_exchange(
         request + 1U, accessory_public_key, shared_secret);
     if (result != AIRPLAY_MFI_SAP_OK ||
-        derive_aes_material(shared_secret, derivation_key, derivation_iv) != 0) {
+        derive_aes_material(shared_secret, derivation_key, derivation_iv) != 0)
+    {
         result = AIRPLAY_MFI_SAP_CRYPTO_FAILED;
         goto cleanup;
     }
@@ -336,14 +359,16 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     int hash_result = protocol_major == 2U
                           ? sha1(signature_input, sizeof(signature_input), digest)
                           : sha256(signature_input, sizeof(signature_input), digest);
-    if (hash_result != 0) {
+    if (hash_result != 0)
+    {
         result = AIRPLAY_MFI_SAP_CRYPTO_FAILED;
         goto cleanup;
     }
     err = s_provider.mfi->sign(digest, digest_len, signature, sizeof(signature),
                                &signature_len);
     if (err != RTCP_OK || signature_len == 0U ||
-        signature_len > MFI_SAP_SIGNATURE_MAX_BYTES) {
+        signature_len > MFI_SAP_SIGNATURE_MAX_BYTES)
+    {
         RTCP_LOGE(TAG, "auth_setup=sign_failed protocol_major=%u error=%d signature_bytes=%u",
                   (unsigned)protocol_major, err, (unsigned)signature_len);
         result = AIRPLAY_MFI_SAP_SIGN_FAILED;
@@ -360,7 +385,8 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
                   verified, digest_hex);
     }
     if (encrypt_signature(derivation_key, derivation_iv, signature,
-                          signature_len, encrypted_signature) != 0) {
+                          signature_len, encrypted_signature) != 0)
+    {
         result = AIRPLAY_MFI_SAP_CRYPTO_FAILED;
         goto cleanup;
     }
@@ -378,7 +404,8 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     offset += signature_len;
     *response_len = offset;
     RTCP_LOGI(TAG, "auth_setup=completed protocol_major=%u certificate_bytes=%u "
-              "response_bytes=%u checksum=%08X", (unsigned)protocol_major,
+                   "response_bytes=%u checksum=%08X",
+              (unsigned)protocol_major,
               (unsigned)certificate_len, (unsigned)offset,
               (unsigned)mfi_sap_fnv1a32(response, offset));
     result = AIRPLAY_MFI_SAP_OK;

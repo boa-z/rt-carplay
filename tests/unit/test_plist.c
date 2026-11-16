@@ -43,7 +43,7 @@ static void test_writer_roundtrip(void)
     assert(strcmp(key, "ProductVersion") == 0);
     assert(rtcp_plist_get_string(document, length, "Missing", label,
                                  sizeof(label)) == RTCP_ENOENT);
-    assert(rtcp_plist_get_integer(document, length, "Label", &(int64_t){0}) ==
+    assert(rtcp_plist_get_integer(document, length, "Label", &(int64_t){ 0 }) ==
            RTCP_EINVAL);
 }
 
@@ -107,9 +107,10 @@ static void test_writer_escaping(void)
 
 static void test_data_roundtrip(void)
 {
-    static const uint8_t sample[] = {0x00, 0x01, 0x02, 0xfe, 0xff};
-    static const size_t sizes[] = {0U, 1U, 2U, 3U, 4U, 5U};
-    for (size_t s = 0U; s < sizeof(sizes) / sizeof(sizes[0]); ++s) {
+    static const uint8_t sample[] = { 0x00, 0x01, 0x02, 0xfe, 0xff };
+    static const size_t sizes[] = { 0U, 1U, 2U, 3U, 4U, 5U };
+    for (size_t s = 0U; s < sizeof(sizes) / sizeof(sizes[0]); ++s)
+    {
         uint8_t document[1024];
         rtcp_plist_writer_t writer;
         rtcp_plist_writer_init(&writer, document, sizeof(document));

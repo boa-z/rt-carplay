@@ -6,7 +6,8 @@
 
 #include "input_bridge.h"
 
-typedef struct {
+typedef struct
+{
     uint8_t report[INPUT_BRIDGE_HID_REPORT_BYTES];
     uint32_t uid;
     unsigned sends;
@@ -31,9 +32,9 @@ static void verify_rotation(uint16_t rotation,
                             uint16_t expected_x,
                             uint16_t expected_y)
 {
-    harness_t h = {0};
+    harness_t h = { 0 };
     input_bridge_t *bridge = input_bridge_create(320, 240, rotation,
-                                                  capture_report, &h);
+                                                 capture_report, &h);
     assert(bridge != NULL);
     assert(input_bridge_touch(bridge, INPUT_BRIDGE_TOUCH_DOWN, 1,
                               0.2, 0.3, 0) == INPUT_BRIDGE_OK);
@@ -44,7 +45,7 @@ static void verify_rotation(uint16_t rotation,
 
 int main(void)
 {
-    harness_t h = {0};
+    harness_t h = { 0 };
     input_bridge_t *bridge = input_bridge_create(320, 240, 0, capture_report, &h);
     assert(bridge != NULL);
 

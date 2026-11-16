@@ -7,7 +7,8 @@
 
 #define AIRPLAY_SCREEN_HEADER_BYTES 128U
 
-typedef struct {
+typedef struct
+{
     uint32_t body_bytes;
     uint8_t opcode;
     uint64_t sender_time_ns;

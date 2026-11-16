@@ -10,7 +10,8 @@
 
 typedef struct airplay_rtsp_pairing airplay_rtsp_pairing_t;
 
-typedef enum {
+typedef enum
+{
     AIRPLAY_RTSP_PAIRING_HANDLED = 0,
     AIRPLAY_RTSP_PAIRING_NOT_HANDLED,
     AIRPLAY_RTSP_PAIRING_INVALID_ARGUMENT,

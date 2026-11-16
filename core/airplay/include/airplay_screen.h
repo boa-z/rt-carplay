@@ -15,15 +15,15 @@
 #include "rtcp/rtcp.h"
 #include "rtcp/media.h"
 
-#define AIRPLAY_SCREEN_KEY_BYTES 32U
-#define AIRPLAY_SCREEN_TAG_BYTES 16U
+#define AIRPLAY_SCREEN_KEY_BYTES    32U
+#define AIRPLAY_SCREEN_TAG_BYTES    16U
 #define AIRPLAY_SCREEN_CONFIG_BYTES 4096U
 
 typedef struct airplay_screen_stream airplay_screen_stream_t;
 
 typedef rtcp_video_message_type_t airplay_screen_message_type_t;
 #define AIRPLAY_SCREEN_MESSAGE_CONFIG_H264 RTCP_VIDEO_CONFIG_H264
-#define AIRPLAY_SCREEN_MESSAGE_FRAME_H264 RTCP_VIDEO_FRAME_H264
+#define AIRPLAY_SCREEN_MESSAGE_FRAME_H264  RTCP_VIDEO_FRAME_H264
 typedef rtcp_video_packet_cb_t airplay_screen_message_cb_t;
 
 /* max_body_bytes includes the 16-byte AEAD tag for encrypted video frames. */

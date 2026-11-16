@@ -5,12 +5,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIRPLAY_PAIRING_STORE_MAX_CONTROLLERS 8U
+#define AIRPLAY_PAIRING_STORE_MAX_CONTROLLERS      8U
 #define AIRPLAY_PAIRING_STORE_MAX_IDENTIFIER_BYTES 64U
-#define AIRPLAY_PAIRING_STORE_PUBLIC_KEY_BYTES 32U
+#define AIRPLAY_PAIRING_STORE_PUBLIC_KEY_BYTES     32U
 
 /* Whole-blob persistence backend (NVS, file, flash partition, ...). */
-typedef struct {
+typedef struct
+{
     /* Must return RTCP_OK and set *len to 0 when the key does not exist. */
     int (*load)(uint8_t *blob, size_t capacity, size_t *len, void *context);
     int (*save)(const uint8_t *blob, size_t len, void *context);

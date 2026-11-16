@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct rtcp_receiver {
+struct rtcp_receiver
+{
     airplay_rtsp_server_config_t airplay;
     uint8_t info[AIRPLAY_RTSP_SESSION_INFO_MAX_BYTES];
     airplay_rtsp_server_t *server;
@@ -26,23 +27,35 @@ struct rtcp_receiver {
 
 static bool receiver_info(const uint8_t **bytes, size_t *length, void *context)
 {
-    rtcp_receiver_t *r=context;
-    if (r->host_info) {
-        if (!r->host_info(bytes,length,r->host_info_context)) return false;
-    } else { *bytes=r->info; *length=r->airplay.info_plist_len; }
-    return (!r->airplay.negotiate_vehicle || airplay_info_plist_matches_vehicle(*bytes,*length,r->vehicle_model)) &&
-        (!r->airplay.negotiate_ui_sync || airplay_info_plist_matches_ui_sync(*bytes,*length,r->ui_sync));
+    rtcp_receiver_t *r = context;
+    if (r->host_info)
+    {
+        if (!r->host_info(bytes, length, r->host_info_context))
+            return false;
+    }
+    else
+    {
+        *bytes = r->info;
+        *length = r->airplay.info_plist_len;
+    }
+    return (!r->airplay.negotiate_vehicle || airplay_info_plist_matches_vehicle(*bytes, *length, r->vehicle_model)) &&
+           (!r->airplay.negotiate_ui_sync || airplay_info_plist_matches_ui_sync(*bytes, *length, r->ui_sync));
 }
 
 static int ui_flush(rtcp_receiver_t *r)
 {
-    if (!r->ui_sync) return RTCP_OK;
-    const uint8_t *body; size_t length;
-    while (rtcp_ui_sync_peek(r->ui_sync,&body,&length) == RTCP_OK) {
-        int rc=airplay_rtsp_server_send_data_stream(r->server,RTCP_DATA_STREAM_UI_SYNC,body,length);
-        if (rc) {
-            r->ui_delivery.last_error=rc;
-            if (rc == RTCP_ENOMEM) ++r->ui_delivery.queue_retries;
+    if (!r->ui_sync)
+        return RTCP_OK;
+    const uint8_t *body;
+    size_t length;
+    while (rtcp_ui_sync_peek(r->ui_sync, &body, &length) == RTCP_OK)
+    {
+        int rc = airplay_rtsp_server_send_data_stream(r->server, RTCP_DATA_STREAM_UI_SYNC, body, length);
+        if (rc)
+        {
+            r->ui_delivery.last_error = rc;
+            if (rc == RTCP_ENOMEM)
+                ++r->ui_delivery.queue_retries;
             return rc;
         }
         ++r->ui_delivery.queued_messages;
@@ -52,38 +65,43 @@ static int ui_flush(rtcp_receiver_t *r)
 }
 
 static int vehicle_send(void *context, rtcp_data_stream_kind_t kind,
-    const uint8_t *body, size_t length)
+                        const uint8_t *body, size_t length)
 {
     rtcp_receiver_t *r = context;
     return airplay_rtsp_server_send_data_stream(r->server, kind, body, length);
 }
 static bool receiver_data_body(rtcp_data_stream_kind_t kind,
-    const uint8_t *body, size_t length, void *context)
+                               const uint8_t *body, size_t length, void *context)
 {
     rtcp_receiver_t *r = context;
     if (r->vehicle && (RTCP_RECEIVER_VEHICLE_MASK & RTCP_DATA_STREAM_MASK(kind)))
         return receiver_vehicle_body(r->vehicle, kind, body, length);
-    if (r->ui_sync && kind == RTCP_DATA_STREAM_UI_SYNC) {
-        int rc=ui_flush(r);
-        if (!rc) rc=rtcp_ui_sync_handle(r->ui_sync,body,length);
-        if (rc) {
+    if (r->ui_sync && kind == RTCP_DATA_STREAM_UI_SYNC)
+    {
+        int rc = ui_flush(r);
+        if (!rc)
+            rc = rtcp_ui_sync_handle(r->ui_sync, body, length);
+        if (rc)
+        {
             ++r->ui_delivery.rejected_requests;
-            r->ui_delivery.last_error=r->ui_delivery.last_rejection=rc;
+            r->ui_delivery.last_error = r->ui_delivery.last_rejection = rc;
             return false;
         }
-        rc=ui_flush(r);
+        rc = ui_flush(r);
         return rc == RTCP_OK || rc == RTCP_ENOMEM;
     }
     return r->raw_data_stream.on_body && r->raw_data_stream.on_body(kind, body, length,
-        r->raw_data_stream.context);
+                                                                    r->raw_data_stream.context);
 }
 static void receiver_data_closed(rtcp_data_stream_kind_t kind, int error, void *context)
 {
     rtcp_receiver_t *r = context;
     if (r->vehicle && (RTCP_RECEIVER_VEHICLE_MASK & RTCP_DATA_STREAM_MASK(kind)))
         receiver_vehicle_closed(r->vehicle, kind, error);
-    else if (r->ui_sync && kind == RTCP_DATA_STREAM_UI_SYNC) {
-        rtcp_ui_sync_reset_session(r->ui_sync); r->ui_delivery.last_error=error;
+    else if (r->ui_sync && kind == RTCP_DATA_STREAM_UI_SYNC)
+    {
+        rtcp_ui_sync_reset_session(r->ui_sync);
+        r->ui_delivery.last_error = error;
     }
     else if (r->raw_data_stream.on_closed)
         r->raw_data_stream.on_closed(kind, error, r->raw_data_stream.context);
@@ -91,41 +109,49 @@ static void receiver_data_closed(rtcp_data_stream_kind_t kind, int error, void *
 
 /* An intentional Null Sink lets a headless host exercise the full protocol. */
 static int discard_screen(airplay_screen_message_type_t type, uint8_t *bytes,
-                           size_t length, size_t prefix, uint64_t sender_ns,
-                           uint64_t arrival_us, void *context)
+                          size_t length, size_t prefix, uint64_t sender_ns,
+                          uint64_t arrival_us, void *context)
 {
-    (void)type; (void)bytes; (void)length; (void)prefix;
-    (void)sender_ns; (void)arrival_us; (void)context;
+    (void)type;
+    (void)bytes;
+    (void)length;
+    (void)prefix;
+    (void)sender_ns;
+    (void)arrival_us;
+    (void)context;
     return RTCP_OK;
 }
 
 static void refresh(rtcp_receiver_t *r, int error)
 {
-    rtcp_receiver_state_t next = {0};
+    rtcp_receiver_state_t next = { 0 };
     next.generation = r->state.generation;
     next.last_error = error;
     next.running = r->server != NULL;
     airplay_rtsp_server_get_receiver_state(r->server, &next);
-    if (r->state.authenticated && !next.authenticated) {
+    if (r->state.authenticated && !next.authenticated)
+    {
         receiver_vehicle_reset(r->vehicle);
         rtcp_ui_sync_reset_session(r->ui_sync);
     }
     bool changed = next.running != r->state.running ||
-        next.transport_connected != r->state.transport_connected ||
-        next.authenticated != r->state.authenticated ||
-        next.session_established != r->state.session_established ||
-        next.video_ready != r->state.video_ready ||
-        next.audio_ready != r->state.audio_ready ||
-        next.input_ready != r->state.input_ready ||
-        next.last_error != r->state.last_error;
+                   next.transport_connected != r->state.transport_connected ||
+                   next.authenticated != r->state.authenticated ||
+                   next.session_established != r->state.session_established ||
+                   next.video_ready != r->state.video_ready ||
+                   next.audio_ready != r->state.audio_ready ||
+                   next.input_ready != r->state.input_ready ||
+                   next.last_error != r->state.last_error;
     r->state = next;
-    if (changed && r->on_state != NULL) r->on_state(&r->state, r->context);
+    if (changed && r->on_state != NULL)
+        r->on_state(&r->state, r->context);
 }
 
 int rtcp_receiver_config_from_airplay(const struct airplay_rtsp_server_config *a,
                                       rtcp_receiver_config_t *config)
 {
-    if (a == NULL || config == NULL) return RTCP_EINVAL;
+    if (a == NULL || config == NULL)
+        return RTCP_EINVAL;
     memset(config, 0, sizeof(*config));
     config->platform.os = a->os;
     config->platform.net = a->net;
@@ -166,11 +192,13 @@ int rtcp_receiver_config_from_airplay(const struct airplay_rtsp_server_config *a
 }
 
 int rtcp_receiver_create(const rtcp_receiver_config_t *config,
-                          rtcp_receiver_t **out)
+                         rtcp_receiver_t **out)
 {
-    if (out == NULL) return RTCP_EINVAL;
+    if (out == NULL)
+        return RTCP_EINVAL;
     *out = NULL;
-    if (config == NULL) return RTCP_EINVAL;
+    if (config == NULL)
+        return RTCP_EINVAL;
     const rtcp_platform_t *platform = &config->platform;
     if (platform->os == NULL || platform->net == NULL ||
         platform->info_plist == NULL || platform->info_plist_len == 0 ||
@@ -183,19 +211,26 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         (config->ui_sync && (config->data_stream.channel_mask & RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC))))
         return RTCP_EINVAL;
     if (config->negotiate_vehicle && (!config->vehicle ||
-        !airplay_info_plist_matches_vehicle(platform->info_plist,platform->info_plist_len,config->vehicle)))
+                                      !airplay_info_plist_matches_vehicle(platform->info_plist, platform->info_plist_len, config->vehicle)))
         return RTCP_EINVAL;
     if (config->negotiate_ui_sync && (!config->ui_sync ||
-        !airplay_info_plist_matches_ui_sync(platform->info_plist,platform->info_plist_len,config->ui_sync)))
+                                      !airplay_info_plist_matches_ui_sync(platform->info_plist, platform->info_plist_len, config->ui_sync)))
         return RTCP_EINVAL;
     rtcp_receiver_t *r = calloc(1, sizeof(*r));
-    if (r == NULL) return RTCP_ENOMEM;
-    if (config->vehicle) {
+    if (r == NULL)
+        return RTCP_ENOMEM;
+    if (config->vehicle)
+    {
         r->vehicle = receiver_vehicle_create(config->vehicle, vehicle_send, r);
-        if (!r->vehicle) { free(r); return RTCP_ENOMEM; }
+        if (!r->vehicle)
+        {
+            free(r);
+            return RTCP_ENOMEM;
+        }
     }
     r->raw_data_stream = config->data_stream;
-    r->ui_sync=config->ui_sync; r->ui_delivery.attached=config->ui_sync != NULL;
+    r->ui_sync = config->ui_sync;
+    r->ui_delivery.attached = config->ui_sync != NULL;
     r->airplay = (airplay_rtsp_server_config_t){
         .os = config->platform.os,
         .net = config->platform.net,
@@ -235,14 +270,20 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .on_alt_screen_message = config->media.on_alt_video,
         .alt_screen_message_context = config->media.alt_video_context,
     };
-    if (config->negotiate_vehicle || config->negotiate_ui_sync) {
-        r->vehicle_model=config->vehicle;
-        r->host_info=platform->get_info_plist; r->host_info_context=platform->info_context;
-        r->airplay.get_info_plist=receiver_info; r->airplay.info_context=r;
+    if (config->negotiate_vehicle || config->negotiate_ui_sync)
+    {
+        r->vehicle_model = config->vehicle;
+        r->host_info = platform->get_info_plist;
+        r->host_info_context = platform->info_context;
+        r->airplay.get_info_plist = receiver_info;
+        r->airplay.info_context = r;
     }
-    if (r->vehicle || r->ui_sync) {
-        if (r->vehicle) r->airplay.data_stream.channel_mask |= RTCP_RECEIVER_VEHICLE_MASK;
-        if (r->ui_sync) r->airplay.data_stream.channel_mask |= RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
+    if (r->vehicle || r->ui_sync)
+    {
+        if (r->vehicle)
+            r->airplay.data_stream.channel_mask |= RTCP_RECEIVER_VEHICLE_MASK;
+        if (r->ui_sync)
+            r->airplay.data_stream.channel_mask |= RTCP_DATA_STREAM_MASK(RTCP_DATA_STREAM_UI_SYNC);
         r->airplay.data_stream.on_body = receiver_data_body;
         r->airplay.data_stream.on_closed = receiver_data_closed;
         r->airplay.data_stream.context = r;
@@ -261,14 +302,18 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
 
 int rtcp_receiver_start(rtcp_receiver_t *r)
 {
-    if (r == NULL) return RTCP_EINVAL;
-    if (r->busy) return RTCP_ESTATE;
-    if (r->server != NULL) return RTCP_OK;
+    if (r == NULL)
+        return RTCP_EINVAL;
+    if (r->busy)
+        return RTCP_ESTATE;
+    if (r->server != NULL)
+        return RTCP_OK;
     r->busy = true;
     receiver_vehicle_reset(r->vehicle);
     rtcp_ui_sync_reset_session(r->ui_sync);
     int result = airplay_rtsp_server_start(&r->airplay, &r->server);
-    if (result == RTCP_OK) ++r->state.generation;
+    if (result == RTCP_OK)
+        ++r->state.generation;
     refresh(r, result);
     r->busy = false;
     return result;
@@ -276,21 +321,33 @@ int rtcp_receiver_start(rtcp_receiver_t *r)
 
 int rtcp_receiver_poll(rtcp_receiver_t *r, int timeout_ms)
 {
-    if (r == NULL || timeout_ms < 0) return RTCP_EINVAL;
-    if (r->busy || r->server == NULL) return RTCP_ESTATE;
+    if (r == NULL || timeout_ms < 0)
+        return RTCP_EINVAL;
+    if (r->busy || r->server == NULL)
+        return RTCP_ESTATE;
     r->busy = true;
-    if (r->state.authenticated) { receiver_vehicle_tick(r->vehicle); (void)ui_flush(r); }
+    if (r->state.authenticated)
+    {
+        receiver_vehicle_tick(r->vehicle);
+        (void)ui_flush(r);
+    }
     int result = airplay_rtsp_server_poll(r->server, timeout_ms);
     refresh(r, result);
-    if (r->state.authenticated) { receiver_vehicle_tick(r->vehicle); (void)ui_flush(r); }
+    if (r->state.authenticated)
+    {
+        receiver_vehicle_tick(r->vehicle);
+        (void)ui_flush(r);
+    }
     r->busy = false;
     return result;
 }
 
 int rtcp_receiver_stop(rtcp_receiver_t *r)
 {
-    if (r == NULL) return RTCP_EINVAL;
-    if (r->busy) return RTCP_ESTATE;
+    if (r == NULL)
+        return RTCP_EINVAL;
+    if (r->busy)
+        return RTCP_ESTATE;
     r->busy = true;
     airplay_rtsp_server_stop(r->server);
     r->server = NULL;
@@ -303,10 +360,13 @@ int rtcp_receiver_stop(rtcp_receiver_t *r)
 
 int rtcp_receiver_destroy(rtcp_receiver_t *r)
 {
-    if (r == NULL) return RTCP_OK;
-    if (r->busy) return RTCP_ESTATE;
+    if (r == NULL)
+        return RTCP_OK;
+    if (r->busy)
+        return RTCP_ESTATE;
     int result = rtcp_receiver_stop(r);
-    if (result != RTCP_OK) return result;
+    if (result != RTCP_OK)
+        return result;
     receiver_vehicle_destroy(r->vehicle);
     memset(r, 0, sizeof(*r));
     free(r);
@@ -315,7 +375,8 @@ int rtcp_receiver_destroy(rtcp_receiver_t *r)
 
 int rtcp_receiver_get_state(const rtcp_receiver_t *r, rtcp_receiver_state_t *state)
 {
-    if (r == NULL || state == NULL) return RTCP_EINVAL;
+    if (r == NULL || state == NULL)
+        return RTCP_EINVAL;
     *state = r->state;
     return RTCP_OK;
 }
@@ -326,10 +387,10 @@ uint16_t rtcp_receiver_port(const rtcp_receiver_t *r)
 }
 
 bool rtcp_receiver_send_hid_report(rtcp_receiver_t *r, uint32_t hid_uid,
-                                  const uint8_t *report, size_t length)
+                                   const uint8_t *report, size_t length)
 {
     return r != NULL && airplay_rtsp_server_send_hid_report(r->server,
-                                                          hid_uid, report, length);
+                                                            hid_uid, report, length);
 }
 
 bool rtcp_receiver_request_siri(rtcp_receiver_t *r)
@@ -344,7 +405,8 @@ bool rtcp_receiver_send_iap(rtcp_receiver_t *r, const uint8_t *bytes, size_t len
 
 int rtcp_receiver_get_peer(const rtcp_receiver_t *r, rtcp_addr_t *peer)
 {
-    if (r == NULL || peer == NULL) return RTCP_EINVAL;
+    if (r == NULL || peer == NULL)
+        return RTCP_EINVAL;
     memset(peer, 0, sizeof(*peer));
     return airplay_rtsp_server_get_peer(r->server, peer) ? RTCP_OK : RTCP_ENOENT;
 }
@@ -352,7 +414,8 @@ int rtcp_receiver_get_peer(const rtcp_receiver_t *r, rtcp_addr_t *peer)
 int rtcp_receiver_get_diagnostics(const rtcp_receiver_t *r,
                                   rtcp_receiver_diagnostics_t *diagnostics)
 {
-    if (r == NULL || diagnostics == NULL) return RTCP_EINVAL;
+    if (r == NULL || diagnostics == NULL)
+        return RTCP_EINVAL;
     memset(diagnostics, 0, sizeof(*diagnostics));
     airplay_rtsp_server_get_screen_stats(r->server, &diagnostics->screen);
     airplay_rtsp_server_get_audio_stats(r->server, &diagnostics->audio);
@@ -363,7 +426,8 @@ int rtcp_receiver_get_diagnostics(const rtcp_receiver_t *r,
 
 int rtcp_receiver_get_alt_video_status(const rtcp_receiver_t *r, rtcp_alt_video_status_t *out)
 {
-    if (!r || !out) return RTCP_EINVAL;
+    if (!r || !out)
+        return RTCP_EINVAL;
     airplay_rtsp_server_get_alt_video_status(r->server, out);
     out->configured = r->airplay.experimental_alt_video;
     return RTCP_OK;
@@ -371,43 +435,52 @@ int rtcp_receiver_get_alt_video_status(const rtcp_receiver_t *r, rtcp_alt_video_
 
 int rtcp_receiver_set_single_cipher_frame(rtcp_receiver_t *r, bool enabled)
 {
-    if (r == NULL) return RTCP_EINVAL;
-    if (r->server == NULL) return RTCP_ESTATE;
+    if (r == NULL)
+        return RTCP_EINVAL;
+    if (r->server == NULL)
+        return RTCP_ESTATE;
     airplay_rtsp_server_set_single_cipher_frame(r->server, enabled);
     return RTCP_OK;
 }
 
 int rtcp_receiver_send_data_stream(rtcp_receiver_t *r, rtcp_data_stream_kind_t kind,
-    const uint8_t *body, size_t length)
+                                   const uint8_t *body, size_t length)
 {
-    if (!r) return RTCP_EINVAL;
+    if (!r)
+        return RTCP_EINVAL;
     if (r->vehicle && (kind == RTCP_DATA_STREAM_VEHICLE || kind == RTCP_DATA_STREAM_VEHICLE_HIGH))
         return RTCP_ESTATE; /* Attached processor owns these output queues. */
-    if (r->ui_sync && kind == RTCP_DATA_STREAM_UI_SYNC) return RTCP_ESTATE;
+    if (r->ui_sync && kind == RTCP_DATA_STREAM_UI_SYNC)
+        return RTCP_ESTATE;
     return airplay_rtsp_server_send_data_stream(r->server, kind, body, length);
 }
 
 int rtcp_receiver_get_data_stream_status(const rtcp_receiver_t *r,
-    rtcp_data_stream_kind_t kind, rtcp_data_stream_status_t *out)
+                                         rtcp_data_stream_kind_t kind, rtcp_data_stream_status_t *out)
 {
-    if (!r || !out || (unsigned)kind >= RTCP_DATA_STREAM_COUNT) return RTCP_EINVAL;
-    if (r->server) return airplay_rtsp_server_get_data_stream_status(r->server, kind, out);
+    if (!r || !out || (unsigned)kind >= RTCP_DATA_STREAM_COUNT)
+        return RTCP_EINVAL;
+    if (r->server)
+        return airplay_rtsp_server_get_data_stream_status(r->server, kind, out);
     memset(out, 0, sizeof(*out));
     out->registered = (r->airplay.data_stream.channel_mask & RTCP_DATA_STREAM_MASK(kind)) != 0;
     return RTCP_OK;
 }
 
 int rtcp_receiver_get_vehicle_delivery_status(const rtcp_receiver_t *r,
-    rtcp_vehicle_delivery_status_t *out)
+                                              rtcp_vehicle_delivery_status_t *out)
 {
-    if (!r || !out) return RTCP_EINVAL;
+    if (!r || !out)
+        return RTCP_EINVAL;
     receiver_vehicle_status(r->vehicle, out);
     return RTCP_OK;
 }
 
 int rtcp_receiver_get_ui_sync_delivery_status(const rtcp_receiver_t *r,
-    rtcp_ui_sync_delivery_status_t *out)
+                                              rtcp_ui_sync_delivery_status_t *out)
 {
-    if (!r || !out) return RTCP_EINVAL;
-    *out=r->ui_delivery; return RTCP_OK;
+    if (!r || !out)
+        return RTCP_EINVAL;
+    *out = r->ui_delivery;
+    return RTCP_OK;
 }

@@ -32,7 +32,8 @@
 
 #define RTCP_LOCKDOWN_SESSION_ERROR_MAX 40U
 
-typedef enum {
+typedef enum
+{
     RTCP_LOCKDOWN_STAGE_IDLE = 0,
     RTCP_LOCKDOWN_STAGE_PAIR,
     RTCP_LOCKDOWN_STAGE_START_SESSION,
@@ -41,7 +42,8 @@ typedef enum {
     RTCP_LOCKDOWN_STAGE_SERVICE,
 } rtcp_lockdown_stage_t;
 
-typedef struct {
+typedef struct
+{
     /* Open a byte stream to `port` on the phone. */
     int (*open_connection)(void *user, uint16_t port, rtcp_stream_t *stream);
     /* Close a stream previously returned by open_connection(). */
@@ -82,11 +84,12 @@ typedef struct {
     uint32_t (*now_ms)(void);
 } rtcp_lockdown_session_config_t;
 
-typedef struct {
+typedef struct
+{
     rtcp_lockdown_session_config_t config;
 
-    rtcp_stream_t control;      /* TLS stream once StartSession enabled it */
-    rtcp_stream_t control_raw;  /* connection owned by open_connection */
+    rtcp_stream_t control;     /* TLS stream once StartSession enabled it */
+    rtcp_stream_t control_raw; /* connection owned by open_connection */
     rtcp_lockdown_tls_t *control_tls;
 
     rtcp_stream_t service;

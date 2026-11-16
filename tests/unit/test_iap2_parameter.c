@@ -9,7 +9,7 @@ int main(void)
 {
     uint8_t body[64];
     size_t used = 0U;
-    static const uint8_t payload[] = {0xde, 0xad, 0xbe, 0xef};
+    static const uint8_t payload[] = { 0xde, 0xad, 0xbe, 0xef };
 
     assert(iap2_param_encode(body, sizeof(body), 7, payload, sizeof(payload)) == 8U);
     assert(body[0] == 0 && body[1] == 8 && body[2] == 0 && body[3] == 7);

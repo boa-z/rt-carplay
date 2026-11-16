@@ -11,10 +11,11 @@
 #include "rtcp_linux.h"
 
 #define CAPTURE_BYTES 4096U
-#define FRAME_BYTES (AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES + \
-                     AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES)
+#define FRAME_BYTES   (AIRPLAY_CONTROL_CIPHER_MAX_FRAME_BYTES + \
+                       AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES)
 
-typedef struct {
+typedef struct
+{
     uint8_t bytes[CAPTURE_BYTES];
     size_t len;
     unsigned calls;
@@ -33,7 +34,8 @@ static bool capture_write(const uint8_t *bytes, size_t len, void *context)
 
 static void make_keys(uint8_t read_key[32], uint8_t write_key[32])
 {
-    for (size_t i = 0U; i < 32U; ++i) {
+    for (size_t i = 0U; i < 32U; ++i)
+    {
         read_key[i] = (uint8_t)(0x20U + i);
         write_key[i] = (uint8_t)(0x90U + i);
     }
@@ -84,7 +86,7 @@ static void test_event_ack(void)
     uint8_t write_key[32];
     make_keys(read_key, write_key);
 
-    capture_t capture = {0};
+    capture_t capture = { 0 };
     airplay_control_port_t *port = NULL;
     assert(airplay_control_port_create(&rtcp_os_linux, read_key, write_key, 0U,
                                        100U, capture_write, &capture,
@@ -102,7 +104,8 @@ static void test_event_ack(void)
     size_t frame_len = peer_frame(peer, request, sizeof(request) - 1U, frame);
 
     /* Feed the frame one byte at a time: the ack appears only on the last. */
-    for (size_t i = 0U; i + 1U < frame_len; ++i) {
+    for (size_t i = 0U; i + 1U < frame_len; ++i)
+    {
         assert(airplay_control_port_receive_encrypted(port, frame + i, 1U) ==
                RTCP_OK);
         assert(capture.calls == 0U);
@@ -117,7 +120,7 @@ static void test_event_ack(void)
     assert(strstr(plaintext, "CSeq: 5\r\n") != NULL);
 
     /* HID reports go out as an encrypted POST /command. */
-    static const uint8_t report[] = {0x01U, 0x02U, 0x00U};
+    static const uint8_t report[] = { 0x01U, 0x02U, 0x00U };
     capture.len = 0U;
     assert(airplay_control_port_send_hid_report(port, 1U, report,
                                                 sizeof(report)));
@@ -143,7 +146,7 @@ static void test_authentication_failure(void)
     uint8_t write_key[32];
     make_keys(read_key, write_key);
 
-    capture_t capture = {0};
+    capture_t capture = { 0 };
     airplay_control_port_t *port = NULL;
     assert(airplay_control_port_create(&rtcp_os_linux, read_key, write_key, 7U,
                                        1U, capture_write, &capture,
@@ -174,7 +177,7 @@ static void test_write_failure_destroys_channel(void)
     uint8_t write_key[32];
     make_keys(read_key, write_key);
 
-    capture_t capture = {0};
+    capture_t capture = { 0 };
     capture.fail_next = true;
     airplay_control_port_t *port = NULL;
     assert(airplay_control_port_create(&rtcp_os_linux, read_key, write_key, 0U,
@@ -197,8 +200,8 @@ static void test_write_failure_destroys_channel(void)
 
 static void test_argument_checks(void)
 {
-    uint8_t key[32] = {0};
-    capture_t capture = {0};
+    uint8_t key[32] = { 0 };
+    capture_t capture = { 0 };
     airplay_control_port_t *port = NULL;
     assert(airplay_control_port_create(NULL, key, key, 0U, 0U, capture_write,
                                        &capture, &port) == RTCP_EINVAL);
@@ -217,55 +220,72 @@ static void test_argument_checks(void)
 
 static bool capture_iap_write(const uint8_t *bytes, size_t len, void *context)
 {
-    capture_t *capture=context;
+    capture_t *capture = context;
     assert(capture->len + len <= sizeof(capture->bytes));
     memcpy(capture->bytes + capture->len, bytes, len);
-    capture->len += len; ++capture->calls;
+    capture->len += len;
+    ++capture->calls;
     return true;
 }
 static void test_large_iap_command(void)
 {
-    uint8_t key[32]={0}, payload[1500]; memset(payload,0x42,sizeof(payload));
-    capture_t capture={0};
-    airplay_control_port_t *port=NULL;
-    assert(airplay_control_port_create(&rtcp_os_linux,key,key,0,0,capture_iap_write,&capture,&port)==RTCP_OK);
-    assert(airplay_control_port_send_iap(port,payload,sizeof(payload)));
-    assert(capture.calls==2);
-    airplay_control_cipher_t *peer=make_peer(key,key);
+    uint8_t key[32] = { 0 }, payload[1500];
+    memset(payload, 0x42, sizeof(payload));
+    capture_t capture = { 0 };
+    airplay_control_port_t *port = NULL;
+    assert(airplay_control_port_create(&rtcp_os_linux, key, key, 0, 0, capture_iap_write, &capture, &port) == RTCP_OK);
+    assert(airplay_control_port_send_iap(port, payload, sizeof(payload)));
+    assert(capture.calls == 2);
+    airplay_control_cipher_t *peer = make_peer(key, key);
     char plaintext[3000];
-    decrypt_capture(peer,&capture,plaintext,sizeof(plaintext));
-    assert(strstr(plaintext,"POST /command RTSP/1.0") && strstr(plaintext,"Content-Length:"));
+    decrypt_capture(peer, &capture, plaintext, sizeof(plaintext));
+    assert(strstr(plaintext, "POST /command RTSP/1.0") && strstr(plaintext, "Content-Length:"));
     airplay_control_cipher_destroy(peer);
     airplay_control_port_destroy(port);
 }
 
 static void test_siri_command(void)
 {
-    uint8_t key[32]={0};capture_t capture={0};airplay_control_port_t *port=NULL;
-    assert(airplay_control_port_create(&rtcp_os_linux,key,key,0,0,capture_iap_write,&capture,&port)==RTCP_OK);
-    assert(airplay_control_port_request_siri(port));assert(capture.calls==2);
-    airplay_control_cipher_t *peer=make_peer(key,key);
-    size_t off=0;
-    for(unsigned action=2;action<=3;++action) {
-        uint8_t plain[1024];size_t consumed=0,n=0;
-        size_t wire_len=(size_t)capture.bytes[off]+((size_t)capture.bytes[off+1]<<8)+18;
-        assert(wire_len<=capture.len-off);
-        assert(airplay_control_cipher_decrypt(peer,capture.bytes+off,wire_len,&consumed,
-            plain,sizeof(plain)-1,&n)==AIRPLAY_CONTROL_CIPHER_OK);
-        assert(consumed && n);off+=consumed;plain[n]=0;
-        assert(strstr((char *)plain,action==2 ? "CSeq: 1\r\n" : "CSeq: 2\r\n"));
-        char *body=strstr((char *)plain,"\r\n\r\n");assert(body);body+=4;
-        airplay_bplist_doc_t doc;airplay_bplist_object_t root,params,value;
-        assert(airplay_bplist_open((uint8_t *)body,n-(size_t)(body-(char *)plain),&doc)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_root(&doc,&root)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_dict_get(&doc,root,"type",&value)==AIRPLAY_BPLIST_OK);
-        char type[32];size_t type_len;assert(airplay_bplist_get_string(&doc,value,type,sizeof(type),&type_len)==AIRPLAY_BPLIST_OK);
-        assert(!strcmp(type,"requestSiri"));
-        assert(airplay_bplist_dict_get(&doc,root,"params",&params)==AIRPLAY_BPLIST_OK);
-        assert(airplay_bplist_dict_get(&doc,params,"siriAction",&value)==AIRPLAY_BPLIST_OK);
-        uint64_t a;assert(airplay_bplist_get_uint(&doc,value,&a)==AIRPLAY_BPLIST_OK && a==action);
+    uint8_t key[32] = { 0 };
+    capture_t capture = { 0 };
+    airplay_control_port_t *port = NULL;
+    assert(airplay_control_port_create(&rtcp_os_linux, key, key, 0, 0, capture_iap_write, &capture, &port) == RTCP_OK);
+    assert(airplay_control_port_request_siri(port));
+    assert(capture.calls == 2);
+    airplay_control_cipher_t *peer = make_peer(key, key);
+    size_t off = 0;
+    for (unsigned action = 2; action <= 3; ++action)
+    {
+        uint8_t plain[1024];
+        size_t consumed = 0, n = 0;
+        size_t wire_len = (size_t)capture.bytes[off] + ((size_t)capture.bytes[off + 1] << 8) + 18;
+        assert(wire_len <= capture.len - off);
+        assert(airplay_control_cipher_decrypt(peer, capture.bytes + off, wire_len, &consumed,
+                                              plain, sizeof(plain) - 1, &n) == AIRPLAY_CONTROL_CIPHER_OK);
+        assert(consumed && n);
+        off += consumed;
+        plain[n] = 0;
+        assert(strstr((char *)plain, action == 2 ? "CSeq: 1\r\n" : "CSeq: 2\r\n"));
+        char *body = strstr((char *)plain, "\r\n\r\n");
+        assert(body);
+        body += 4;
+        airplay_bplist_doc_t doc;
+        airplay_bplist_object_t root, params, value;
+        assert(airplay_bplist_open((uint8_t *)body, n - (size_t)(body - (char *)plain), &doc) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc, root, "type", &value) == AIRPLAY_BPLIST_OK);
+        char type[32];
+        size_t type_len;
+        assert(airplay_bplist_get_string(&doc, value, type, sizeof(type), &type_len) == AIRPLAY_BPLIST_OK);
+        assert(!strcmp(type, "requestSiri"));
+        assert(airplay_bplist_dict_get(&doc, root, "params", &params) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc, params, "siriAction", &value) == AIRPLAY_BPLIST_OK);
+        uint64_t a;
+        assert(airplay_bplist_get_uint(&doc, value, &a) == AIRPLAY_BPLIST_OK && a == action);
     }
-    assert(off==capture.len);airplay_control_cipher_destroy(peer);airplay_control_port_destroy(port);
+    assert(off == capture.len);
+    airplay_control_cipher_destroy(peer);
+    airplay_control_port_destroy(port);
 }
 
 int main(void)

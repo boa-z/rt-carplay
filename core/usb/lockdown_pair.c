@@ -12,29 +12,32 @@
 #include "mbedtls/sha1.h"
 #include "mbedtls/sha256.h"
 
-#define DER_ARENA_BYTES 8192U
-#define RSA_KEY_BITS 2048
+#define DER_ARENA_BYTES     8192U
+#define RSA_KEY_BITS        2048
 #define RSA_PUBLIC_EXPONENT 65537
 
 /* Fixed validity covering the bring-up period.  Lockdown pair records are
  * self-signed and the phone does not use them for PKI; using a constant keeps
  * the core free of a wall clock. */
-#define CERT_NOT_BEFORE "250101000000Z"
+#define CERT_NOT_BEFORE        "250101000000Z"
 #define CERT_NOT_BEFORE_LENGTH 13U
-#define CERT_NOT_AFTER "350101000000Z"
-#define CERT_NOT_AFTER_LENGTH 13U
+#define CERT_NOT_AFTER         "350101000000Z"
+#define CERT_NOT_AFTER_LENGTH  13U
 
-typedef struct {
+typedef struct
+{
     uint8_t bytes[DER_ARENA_BYTES];
     size_t used;
 } der_arena_t;
 
-typedef struct {
+typedef struct
+{
     const uint8_t *data;
     size_t length;
 } der_node_t;
 
-typedef struct {
+typedef struct
+{
     rtcp_pair_rng_fn function;
     void *context;
 } rng_bridge_t;
@@ -46,7 +49,8 @@ static void arena_reset(der_arena_t *arena)
 
 static bool arena_claim(der_arena_t *arena, size_t length, uint8_t **result)
 {
-    if (length > sizeof(arena->bytes) - arena->used) {
+    if (length > sizeof(arena->bytes) - arena->used)
+    {
         return false;
     }
     *result = arena->bytes + arena->used;
@@ -56,11 +60,13 @@ static bool arena_claim(der_arena_t *arena, size_t length, uint8_t **result)
 
 static size_t length_header_size(size_t content)
 {
-    if (content < 0x80U) {
+    if (content < 0x80U)
+    {
         return 2U;
     }
     size_t count = 0U;
-    for (size_t value = content; value != 0U; value >>= 8) {
+    for (size_t value = content; value != 0U; value >>= 8)
+    {
         ++count;
     }
     return 2U + count;
@@ -69,16 +75,19 @@ static size_t length_header_size(size_t content)
 static size_t write_header(uint8_t *output, uint8_t tag, size_t content)
 {
     output[0] = tag;
-    if (content < 0x80U) {
+    if (content < 0x80U)
+    {
         output[1] = (uint8_t)content;
         return 2U;
     }
     size_t count = 0U;
-    for (size_t value = content; value != 0U; value >>= 8) {
+    for (size_t value = content; value != 0U; value >>= 8)
+    {
         ++count;
     }
     output[1] = (uint8_t)(0x80U | count);
-    for (size_t i = 0U; i < count; ++i) {
+    for (size_t i = 0U; i < count; ++i)
+    {
         output[2U + i] = (uint8_t)(content >> (8U * (count - 1U - i)));
     }
     return 2U + count;
@@ -89,11 +98,13 @@ static bool der_wrap(der_arena_t *arena, uint8_t tag, const uint8_t *content,
 {
     size_t header = length_header_size(content_length);
     uint8_t *output = NULL;
-    if (!arena_claim(arena, header + content_length, &output)) {
+    if (!arena_claim(arena, header + content_length, &output))
+    {
         return false;
     }
     header = write_header(output, tag, content_length);
-    if (content_length != 0U) {
+    if (content_length != 0U)
+    {
         memmove(output + header, content, content_length);
     }
     node->data = output;
@@ -106,20 +117,24 @@ static bool der_wrap_parts(der_arena_t *arena, uint8_t tag,
                            der_node_t *node)
 {
     size_t content_length = 0U;
-    for (size_t i = 0U; i < count; ++i) {
-        if (parts[i].length > SIZE_MAX - content_length) {
+    for (size_t i = 0U; i < count; ++i)
+    {
+        if (parts[i].length > SIZE_MAX - content_length)
+        {
             return false;
         }
         content_length += parts[i].length;
     }
     size_t header = length_header_size(content_length);
     uint8_t *output = NULL;
-    if (!arena_claim(arena, header + content_length, &output)) {
+    if (!arena_claim(arena, header + content_length, &output))
+    {
         return false;
     }
     header = write_header(output, tag, content_length);
     size_t offset = header;
-    for (size_t i = 0U; i < count; ++i) {
+    for (size_t i = 0U; i < count; ++i)
+    {
         memcpy(output + offset, parts[i].data, parts[i].length);
         offset += parts[i].length;
     }
@@ -132,7 +147,8 @@ static bool der_integer_positive(der_arena_t *arena, const uint8_t *bytes,
                                  size_t length, der_node_t *node)
 {
     size_t offset = 0U;
-    while (offset + 1U < length && bytes[offset] == 0U) {
+    while (offset + 1U < length && bytes[offset] == 0U)
+    {
         ++offset;
     }
     size_t content_length = length - offset;
@@ -140,12 +156,14 @@ static bool der_integer_positive(der_arena_t *arena, const uint8_t *bytes,
     size_t header = length_header_size(content_length + (pad ? 1U : 0U));
     uint8_t *output = NULL;
     if (!arena_claim(arena, header + content_length + (pad ? 1U : 0U),
-                     &output)) {
+                     &output))
+    {
         return false;
     }
     header = write_header(output, 0x02U,
                           content_length + (pad ? 1U : 0U));
-    if (pad) {
+    if (pad)
+    {
         output[header] = 0U;
         ++header;
     }
@@ -159,11 +177,13 @@ static bool der_integer_mpi(der_arena_t *arena, const mbedtls_mpi *value,
                             der_node_t *node)
 {
     size_t length = mbedtls_mpi_size(value);
-    if (length == 0U || length > RSA_KEY_BITS / 8 + 1U) {
+    if (length == 0U || length > RSA_KEY_BITS / 8 + 1U)
+    {
         return false;
     }
     uint8_t bytes[RSA_KEY_BITS / 8 + 1U];
-    if (mbedtls_mpi_write_binary(value, bytes, length) != 0) {
+    if (mbedtls_mpi_write_binary(value, bytes, length) != 0)
+    {
         return false;
     }
     return der_integer_positive(arena, bytes, length, node);
@@ -205,7 +225,8 @@ static bool der_bit_string(der_arena_t *arena, uint8_t unused,
     size_t content_length = 1U + length;
     size_t header = length_header_size(content_length);
     uint8_t *output = NULL;
-    if (!arena_claim(arena, header + content_length, &output)) {
+    if (!arena_claim(arena, header + content_length, &output))
+    {
         return false;
     }
     header = write_header(output, 0x03U, content_length);
@@ -245,20 +266,22 @@ static bool der_null(der_arena_t *arena, der_node_t *node)
  * common name.  It is not an Apple identity and is not checked by lockdown. */
 static bool der_name(der_arena_t *arena, der_node_t *node)
 {
-    static const uint8_t common_name_oid[] = {0x55, 0x04, 0x03};
+    static const uint8_t common_name_oid[] = { 0x55, 0x04, 0x03 };
     static const char common_name[] = "rt-carplay";
     der_node_t oid;
     der_node_t value;
     if (!der_oid(arena, common_name_oid, sizeof(common_name_oid), &oid) ||
         !der_wrap(arena, 0x0cU, (const uint8_t *)common_name,
-                  sizeof(common_name) - 1U, &value)) {
+                  sizeof(common_name) - 1U, &value))
+    {
         return false;
     }
-    der_node_t attribute_parts[2] = {oid, value};
+    der_node_t attribute_parts[2] = { oid, value };
     der_node_t attribute;
     der_node_t set;
     if (!der_sequence(arena, attribute_parts, 2U, &attribute) ||
-        !der_wrap(arena, 0x31U, attribute.data, attribute.length, &set)) {
+        !der_wrap(arena, 0x31U, attribute.data, attribute.length, &set))
+    {
         return false;
     }
     return der_sequence(arena, &set, 1U, node);
@@ -272,11 +295,12 @@ static int rng_bridge(void *context, unsigned char *output, size_t length)
 
 static bool algorithm_sha256_rsa(der_arena_t *arena, der_node_t *node)
 {
-    static const uint8_t oid[] = {0x2a, 0x86, 0x48, 0x86, 0xf7,
-                                  0x0d, 0x01, 0x01, 0x0b};
+    static const uint8_t oid[] = { 0x2a, 0x86, 0x48, 0x86, 0xf7,
+                                   0x0d, 0x01, 0x01, 0x0b };
     der_node_t parts[2];
     if (!der_oid(arena, oid, sizeof(oid), &parts[0]) ||
-        !der_null(arena, &parts[1])) {
+        !der_null(arena, &parts[1]))
+    {
         return false;
     }
     return der_sequence(arena, parts, 2U, node);
@@ -284,11 +308,12 @@ static bool algorithm_sha256_rsa(der_arena_t *arena, der_node_t *node)
 
 static bool algorithm_rsa(der_arena_t *arena, der_node_t *node)
 {
-    static const uint8_t oid[] = {0x2a, 0x86, 0x48, 0x86, 0xf7,
-                                  0x0d, 0x01, 0x01, 0x01};
+    static const uint8_t oid[] = { 0x2a, 0x86, 0x48, 0x86, 0xf7,
+                                   0x0d, 0x01, 0x01, 0x01 };
     der_node_t parts[2];
     if (!der_oid(arena, oid, sizeof(oid), &parts[0]) ||
-        !der_null(arena, &parts[1])) {
+        !der_null(arena, &parts[1]))
+    {
         return false;
     }
     return der_sequence(arena, parts, 2U, node);
@@ -303,20 +328,24 @@ static bool subject_public_key_info(der_arena_t *arena,
     der_node_t pkcs1;
     if (!der_integer_mpi(arena, modulus, &values[0]) ||
         !der_integer_mpi(arena, exponent, &values[1]) ||
-        !der_sequence(arena, values, 2U, &pkcs1)) {
+        !der_sequence(arena, values, 2U, &pkcs1))
+    {
         return false;
     }
     der_node_t algorithm;
     der_node_t bit_string;
     if (!algorithm_rsa(arena, &algorithm) ||
-        !der_bit_string(arena, 0U, pkcs1.data, pkcs1.length, &bit_string)) {
+        !der_bit_string(arena, 0U, pkcs1.data, pkcs1.length, &bit_string))
+    {
         return false;
     }
-    der_node_t parts[2] = {algorithm, bit_string};
-    if (!der_sequence(arena, parts, 2U, spki)) {
+    der_node_t parts[2] = { algorithm, bit_string };
+    if (!der_sequence(arena, parts, 2U, spki))
+    {
         return false;
     }
-    if (pkcs1_out != NULL) {
+    if (pkcs1_out != NULL)
+    {
         *pkcs1_out = pkcs1;
     }
     return true;
@@ -328,16 +357,20 @@ static bool extension(der_arena_t *arena, const uint8_t *oid,
 {
     der_node_t parts[3];
     size_t count = 0U;
-    if (!der_oid(arena, oid, oid_length, &parts[count++])) {
+    if (!der_oid(arena, oid, oid_length, &parts[count++]))
+    {
         return false;
     }
-    if (critical) {
-        if (!der_boolean(arena, true, &parts[count++])) {
+    if (critical)
+    {
+        if (!der_boolean(arena, true, &parts[count++]))
+        {
             return false;
         }
     }
     der_node_t encoded;
-    if (!der_octet_string(arena, value, &encoded)) {
+    if (!der_octet_string(arena, value, &encoded))
+    {
         return false;
     }
     parts[count++] = encoded;
@@ -346,16 +379,18 @@ static bool extension(der_arena_t *arena, const uint8_t *oid,
 
 static bool extensions_root(der_arena_t *arena, der_node_t *node)
 {
-    static const uint8_t basic_constraints[] = {0x55, 0x1d, 0x13};
+    static const uint8_t basic_constraints[] = { 0x55, 0x1d, 0x13 };
     der_node_t critical_value;
     der_node_t critical_seq;
     if (!der_boolean(arena, true, &critical_value) ||
-        !der_sequence(arena, &critical_value, 1U, &critical_seq)) {
+        !der_sequence(arena, &critical_value, 1U, &critical_seq))
+    {
         return false;
     }
     der_node_t item;
     if (!extension(arena, basic_constraints, sizeof(basic_constraints), true,
-                   &critical_seq, &item)) {
+                   &critical_seq, &item))
+    {
         return false;
     }
     return der_sequence(arena, &item, 1U, node);
@@ -364,29 +399,33 @@ static bool extensions_root(der_arena_t *arena, der_node_t *node)
 static bool extensions_leaf(der_arena_t *arena, const der_node_t *pkcs1,
                             bool include_subject_key_id, der_node_t *node)
 {
-    static const uint8_t basic_constraints[] = {0x55, 0x1d, 0x13};
-    static const uint8_t subject_key_id[] = {0x55, 0x1d, 0x0e};
-    static const uint8_t key_usage[] = {0x55, 0x1d, 0x0f};
-    static const uint8_t usage_bits[] = {0xa0};
+    static const uint8_t basic_constraints[] = { 0x55, 0x1d, 0x13 };
+    static const uint8_t subject_key_id[] = { 0x55, 0x1d, 0x0e };
+    static const uint8_t key_usage[] = { 0x55, 0x1d, 0x0f };
+    static const uint8_t usage_bits[] = { 0xa0 };
     der_node_t items[4];
     size_t count = 0U;
 
     der_node_t empty;
     if (!der_empty_sequence(arena, &empty) ||
         !extension(arena, basic_constraints, sizeof(basic_constraints), true,
-                   &empty, &items[count++])) {
+                   &empty, &items[count++]))
+    {
         return false;
     }
 
-    if (include_subject_key_id) {
+    if (include_subject_key_id)
+    {
         uint8_t digest[20];
-        if (mbedtls_sha1_ret(pkcs1->data, pkcs1->length, digest) != 0) {
+        if (mbedtls_sha1_ret(pkcs1->data, pkcs1->length, digest) != 0)
+        {
             return false;
         }
         der_node_t digest_value;
         if (!der_wrap(arena, 0x04U, digest, sizeof(digest), &digest_value) ||
             !extension(arena, subject_key_id, sizeof(subject_key_id), false,
-                       &digest_value, &items[count])) {
+                       &digest_value, &items[count]))
+        {
             return false;
         }
         ++count;
@@ -395,7 +434,8 @@ static bool extensions_leaf(der_arena_t *arena, const der_node_t *pkcs1,
     der_node_t usage;
     if (!der_bit_string(arena, 5U, usage_bits, sizeof(usage_bits), &usage) ||
         !extension(arena, key_usage, sizeof(key_usage), true, &usage,
-                   &items[count++])) {
+                   &items[count++]))
+    {
         return false;
     }
     return der_sequence(arena, items, count, node);
@@ -435,12 +475,14 @@ static bool build_certificate(der_arena_t *arena, mbedtls_pk_context *signer,
         !der_utc_time(arena, CERT_NOT_BEFORE, CERT_NOT_BEFORE_LENGTH,
                       &not_before) ||
         !der_utc_time(arena, CERT_NOT_AFTER, CERT_NOT_AFTER_LENGTH,
-                      &not_after)) {
+                      &not_after))
+    {
         return false;
     }
     validity_parts[0] = not_before;
     validity_parts[1] = not_after;
-    if (!der_sequence(arena, validity_parts, 2U, &validity)) {
+    if (!der_sequence(arena, validity_parts, 2U, &validity))
+    {
         return false;
     }
 
@@ -449,47 +491,54 @@ static bool build_certificate(der_arena_t *arena, mbedtls_pk_context *signer,
                 : extensions_leaf(arena, &pkcs1, include_subject_key_id,
                                   &extensions);
     if (!extensions_ok ||
-        !der_explicit(arena, 3U, &extensions, &extensions_explicit)) {
+        !der_explicit(arena, 3U, &extensions, &extensions_explicit))
+    {
         return false;
     }
 
-    der_node_t tbs_parts[7] = {version, serial,   algorithm, issuer,
-                               validity, subject,  spki};
+    der_node_t tbs_parts[7] = { version, serial, algorithm, issuer,
+                                validity, subject, spki };
     /* The extensions field follows the subject public key info. */
     der_node_t tbs_all[8];
-    for (size_t i = 0U; i < 7U; ++i) {
+    for (size_t i = 0U; i < 7U; ++i)
+    {
         tbs_all[i] = tbs_parts[i];
     }
     tbs_all[7] = extensions_explicit;
     der_node_t tbs;
-    if (!der_sequence(arena, tbs_all, 8U, &tbs)) {
+    if (!der_sequence(arena, tbs_all, 8U, &tbs))
+    {
         return false;
     }
 
     uint8_t digest[32];
-    if (mbedtls_sha256_ret(tbs.data, tbs.length, digest, 0) != 0) {
+    if (mbedtls_sha256_ret(tbs.data, tbs.length, digest, 0) != 0)
+    {
         return false;
     }
     uint8_t signature[RSA_KEY_BITS / 8];
     size_t signature_length = 0U;
     if (mbedtls_pk_sign(signer, MBEDTLS_MD_SHA256, digest, sizeof(digest),
                         signature, &signature_length, NULL, NULL) != 0 ||
-        signature_length != sizeof(signature)) {
+        signature_length != sizeof(signature))
+    {
         return false;
     }
     der_node_t signature_bits;
     if (!der_bit_string(arena, 0U, signature, signature_length,
-                        &signature_bits)) {
+                        &signature_bits))
+    {
         return false;
     }
-    der_node_t cert_parts[3] = {tbs, algorithm, signature_bits};
+    der_node_t cert_parts[3] = { tbs, algorithm, signature_bits };
     return der_sequence(arena, cert_parts, 3U, certificate);
 }
 
 static int generate_key(mbedtls_pk_context *key, rng_bridge_t *rng)
 {
     int ret = mbedtls_pk_setup(key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
     return mbedtls_rsa_gen_key(mbedtls_pk_rsa(*key), rng_bridge, rng,
@@ -499,7 +548,8 @@ static int generate_key(mbedtls_pk_context *key, rng_bridge_t *rng)
 static int export_public(const mbedtls_pk_context *key, mbedtls_mpi *modulus,
                          mbedtls_mpi *exponent)
 {
-    if (mbedtls_pk_get_type(key) != MBEDTLS_PK_RSA) {
+    if (mbedtls_pk_get_type(key) != MBEDTLS_PK_RSA)
+    {
         return -1;
     }
     return mbedtls_rsa_export(mbedtls_pk_rsa(*key), modulus, NULL, NULL, NULL,
@@ -515,7 +565,8 @@ static int parse_device_public_key(const uint8_t *pem, size_t pem_length,
     /* mbedtls_pk_parse_public_key() expects the trailing NUL in the length
      * for PEM input. */
     int ret = mbedtls_pk_parse_public_key(&key, pem, pem_length + 1U);
-    if (ret == 0) {
+    if (ret == 0)
+    {
         ret = export_public(&key, modulus, exponent);
     }
     mbedtls_pk_free(&key);
@@ -529,30 +580,35 @@ static int encode_pem(uint8_t *output, size_t capacity, const char *label,
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t label_length = strlen(label);
     size_t base64_length = ((der_length + 2U) / 3U) * 4U;
-    size_t needed = 17U + label_length;            /* -----BEGIN label----- */
+    size_t needed = 17U + label_length; /* -----BEGIN label----- */
     needed += base64_length + (base64_length + 63U) / 64U;
-    needed += 15U + label_length;                  /* -----END label----- */
-    needed += 1U;                                  /* NUL */
-    if (output == NULL || capacity < needed) {
+    needed += 15U + label_length; /* -----END label----- */
+    needed += 1U;                 /* NUL */
+    if (output == NULL || capacity < needed)
+    {
         return RTCP_ENOMEM;
     }
 
     size_t offset = 0U;
     int written = snprintf((char *)output, capacity, "-----BEGIN %s-----\n",
                            label);
-    if (written <= 0) {
+    if (written <= 0)
+    {
         return RTCP_EIO;
     }
     offset = (size_t)written;
 
     size_t column = 0U;
-    for (size_t i = 0U; i < der_length; i += 3U) {
+    for (size_t i = 0U; i < der_length; i += 3U)
+    {
         size_t remaining = der_length - i;
         uint32_t group = (uint32_t)der[i] << 16;
-        if (remaining > 1U) {
+        if (remaining > 1U)
+        {
             group |= (uint32_t)der[i + 1U] << 8;
         }
-        if (remaining > 2U) {
+        if (remaining > 2U)
+        {
             group |= der[i + 2U];
         }
         char quartet[4];
@@ -560,20 +616,24 @@ static int encode_pem(uint8_t *output, size_t capacity, const char *label,
         quartet[1] = alphabet[(group >> 12) & 0x3fU];
         quartet[2] = remaining > 1U ? alphabet[(group >> 6) & 0x3fU] : '=';
         quartet[3] = remaining > 2U ? alphabet[group & 0x3fU] : '=';
-        for (size_t c = 0U; c < 4U; ++c) {
+        for (size_t c = 0U; c < 4U; ++c)
+        {
             output[offset++] = (uint8_t)quartet[c];
-            if (++column == 64U) {
+            if (++column == 64U)
+            {
                 output[offset++] = '\n';
                 column = 0U;
             }
         }
     }
-    if (column != 0U) {
+    if (column != 0U)
+    {
         output[offset++] = '\n';
     }
     written = snprintf((char *)output + offset, capacity - offset,
                        "-----END %s-----\n", label);
-    if (written <= 0) {
+    if (written <= 0)
+    {
         return RTCP_EIO;
     }
     offset += (size_t)written;
@@ -584,7 +644,8 @@ static int encode_pem(uint8_t *output, size_t capacity, const char *label,
 static int write_private_key(mbedtls_pk_context *key, uint8_t *output,
                              size_t capacity, size_t *length)
 {
-    if (mbedtls_pk_write_key_pem(key, output, capacity) != 0) {
+    if (mbedtls_pk_write_key_pem(key, output, capacity) != 0)
+    {
         return RTCP_ENOMEM;
     }
     *length = strlen((const char *)output);
@@ -594,19 +655,23 @@ static int write_private_key(mbedtls_pk_context *key, uint8_t *output,
 int rtcp_pair_generate_uuid(char *output, size_t capacity,
                             rtcp_pair_rng_fn rng, void *rng_context)
 {
-    if (output == NULL || capacity < RTCP_PAIR_UUID_CHARS || rng == NULL) {
+    if (output == NULL || capacity < RTCP_PAIR_UUID_CHARS || rng == NULL)
+    {
         return RTCP_EINVAL;
     }
     uint8_t bytes[16];
-    if (rng(rng_context, bytes, sizeof(bytes)) != 0) {
+    if (rng(rng_context, bytes, sizeof(bytes)) != 0)
+    {
         return RTCP_EIO;
     }
     bytes[6] = (uint8_t)((bytes[6] & 0x0fU) | 0x40U);
     bytes[8] = (uint8_t)((bytes[8] & 0x3fU) | 0x80U);
     static const char hex[] = "0123456789ABCDEF";
     size_t offset = 0U;
-    for (size_t i = 0U; i < sizeof(bytes); ++i) {
-        if (i == 4U || i == 6U || i == 8U || i == 10U) {
+    for (size_t i = 0U; i < sizeof(bytes); ++i)
+    {
+        if (i == 4U || i == 6U || i == 8U || i == 10U)
+        {
             output[offset++] = '-';
         }
         output[offset++] = hex[bytes[i] >> 4];
@@ -624,7 +689,7 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
                               void *rng_context)
 {
     static der_arena_t arena;
-    rng_bridge_t rng_bridge_value = {rng, rng_context};
+    rng_bridge_t rng_bridge_value = { rng, rng_context };
     mbedtls_mpi device_modulus;
     mbedtls_mpi device_exponent;
     mbedtls_mpi host_modulus;
@@ -641,7 +706,8 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
         strlen(wifi_address) >= sizeof(record->wifi_address) ||
         strlen(host_id) >= sizeof(record->host_id) ||
         strlen(system_buid) >= sizeof(record->system_buid) ||
-        device_public_key_length + 1U > sizeof(record->device_public_key)) {
+        device_public_key_length + 1U > sizeof(record->device_public_key))
+    {
         return RTCP_EINVAL;
     }
 
@@ -665,17 +731,21 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
 
     if (parse_device_public_key(record->device_public_key,
                                 record->device_public_key_length,
-                                &device_modulus, &device_exponent) != 0) {
+                                &device_modulus, &device_exponent) != 0)
+    {
         goto cleanup;
     }
-    if (generate_key(&host_key, &rng_bridge_value) != 0) {
+    if (generate_key(&host_key, &rng_bridge_value) != 0)
+    {
         goto cleanup;
     }
-    if (generate_key(&root_key, &rng_bridge_value) != 0) {
+    if (generate_key(&root_key, &rng_bridge_value) != 0)
+    {
         goto cleanup;
     }
     if (export_public(&host_key, &host_modulus, &host_exponent) != 0 ||
-        export_public(&root_key, &root_modulus, &root_exponent) != 0) {
+        export_public(&root_key, &root_modulus, &root_exponent) != 0)
+    {
         goto cleanup;
     }
 
@@ -684,7 +754,8 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
                            true, false, &certificate) ||
         encode_pem(record->root_certificate, sizeof(record->root_certificate),
                    "CERTIFICATE", certificate.data,
-                   certificate.length) != RTCP_OK) {
+                   certificate.length) != RTCP_OK)
+    {
         goto cleanup;
     }
     record->root_certificate_length =
@@ -692,7 +763,8 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
 
     if (write_private_key(&root_key, record->root_private_key,
                           sizeof(record->root_private_key),
-                          &record->root_private_key_length) != RTCP_OK) {
+                          &record->root_private_key_length) != RTCP_OK)
+    {
         goto cleanup;
     }
 
@@ -700,7 +772,8 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
                            false, false, &certificate) ||
         encode_pem(record->host_certificate, sizeof(record->host_certificate),
                    "CERTIFICATE", certificate.data,
-                   certificate.length) != RTCP_OK) {
+                   certificate.length) != RTCP_OK)
+    {
         goto cleanup;
     }
     record->host_certificate_length =
@@ -708,7 +781,8 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
 
     if (write_private_key(&host_key, record->host_private_key,
                           sizeof(record->host_private_key),
-                          &record->host_private_key_length) != RTCP_OK) {
+                          &record->host_private_key_length) != RTCP_OK)
+    {
         goto cleanup;
     }
 
@@ -716,7 +790,8 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
                            &device_exponent, false, true, &certificate) ||
         encode_pem(record->device_certificate,
                    sizeof(record->device_certificate), "CERTIFICATE",
-                   certificate.data, certificate.length) != RTCP_OK) {
+                   certificate.data, certificate.length) != RTCP_OK)
+    {
         goto cleanup;
     }
     record->device_certificate_length =
@@ -733,7 +808,8 @@ cleanup:
     mbedtls_mpi_free(&host_modulus);
     mbedtls_mpi_free(&device_exponent);
     mbedtls_mpi_free(&device_modulus);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         memset(record, 0, sizeof(*record));
     }
     return result;
@@ -743,14 +819,23 @@ cleanup:
  * is subsequently parsed by the TLS backend and authenticated by the phone. */
 bool rtcp_pair_record_valid(const rtcp_pair_record_t *r)
 {
-    if (!r) return false;
-    const char *ids[] = {r->host_id, r->system_buid};
-    for (unsigned k = 0; k < 2; ++k) {
-        if (ids[k][36] != '\0') return false;
-        for (unsigned i = 0; i < 36; ++i) {
+    if (!r)
+        return false;
+    const char *ids[] = { r->host_id, r->system_buid };
+    for (unsigned k = 0; k < 2; ++k)
+    {
+        if (ids[k][36] != '\0')
+            return false;
+        for (unsigned i = 0; i < 36; ++i)
+        {
             char c = ids[k][i];
-            if (i == 8 || i == 13 || i == 18 || i == 23) { if (c != '-') return false; }
-            else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+            if (i == 8 || i == 13 || i == 18 || i == 23)
+            {
+                if (c != '-')
+                    return false;
+            }
+            else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                return false;
         }
     }
 #define VALID_FIELD(name) (r->name##_length > 0 && r->name##_length <= sizeof(r->name))

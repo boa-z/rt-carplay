@@ -24,7 +24,8 @@ typedef rtcp_screen_stats_t airplay_screen_server_stats_t;
 
 typedef void (*airplay_screen_server_exit_cb_t)(void *context);
 
-typedef struct {
+typedef struct
+{
     uint16_t requested_port; /* 0 selects an ephemeral port. */
     /* Listener address family: 0/RTCP_AF_INET (default) or RTCP_AF_INET6. */
     uint8_t family;
@@ -45,7 +46,7 @@ uint16_t airplay_screen_server_get_port(const airplay_screen_server_t *server);
 int airplay_screen_server_get_fd(const airplay_screen_server_t *server);
 
 void airplay_screen_server_get_stats(const airplay_screen_server_t *server,
-                                      airplay_screen_server_stats_t *stats);
+                                     airplay_screen_server_stats_t *stats);
 /* Called every RTSP owner iteration, even when the Screen fd is idle. */
 void airplay_screen_server_owner_tick(airplay_screen_server_t *server);
 void airplay_screen_server_poll(airplay_screen_server_t *server);

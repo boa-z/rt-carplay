@@ -9,10 +9,38 @@
 
 /* RFC 7748 test vector: Alice's X25519 public key. */
 static const uint8_t PEER_PUBLIC_KEY[32] = {
-    0x85, 0x20, 0xf0, 0x09, 0x89, 0x30, 0xa7, 0x54,
-    0x74, 0x8b, 0x7d, 0xdc, 0xb4, 0x3e, 0xf7, 0x5a,
-    0x0d, 0xbf, 0x3a, 0x0d, 0x26, 0x38, 0x1a, 0xf4,
-    0xeb, 0xa4, 0xa9, 0x8e, 0xaa, 0x9b, 0x4e, 0x6a,
+    0x85,
+    0x20,
+    0xf0,
+    0x09,
+    0x89,
+    0x30,
+    0xa7,
+    0x54,
+    0x74,
+    0x8b,
+    0x7d,
+    0xdc,
+    0xb4,
+    0x3e,
+    0xf7,
+    0x5a,
+    0x0d,
+    0xbf,
+    0x3a,
+    0x0d,
+    0x26,
+    0x38,
+    0x1a,
+    0xf4,
+    0xeb,
+    0xa4,
+    0xa9,
+    0x8e,
+    0xaa,
+    0x9b,
+    0x4e,
+    0x6a,
 };
 
 static unsigned g_random_calls;
@@ -27,7 +55,8 @@ static int fake_random(uint8_t *out, size_t len, void *context)
 
 static int fake_read_cert(uint8_t *der, size_t cap, size_t *der_len)
 {
-    if (cap < 908U) return RTCP_EINVAL;
+    if (cap < 908U)
+        return RTCP_EINVAL;
     memset(der, 0xc3, 908U);
     *der_len = 908U;
     return RTCP_OK;
@@ -37,9 +66,11 @@ static int fake_sign(const uint8_t *challenge, size_t len,
                      uint8_t *sig, size_t cap, size_t *sig_len)
 {
     (void)challenge;
-    if (len == 32U) return RTCP_EINVAL; /* no Auth 3.0 identity here */
-    assert(len == 20U); /* MFi 2.0C: SHA-1 digest */
-    if (cap < 128U) return RTCP_EINVAL;
+    if (len == 32U)
+        return RTCP_EINVAL; /* no Auth 3.0 identity here */
+    assert(len == 20U);     /* MFi 2.0C: SHA-1 digest */
+    if (cap < 128U)
+        return RTCP_EINVAL;
     memset(sig, 0x5a, 128U);
     *sig_len = 128U;
     return RTCP_OK;
@@ -106,8 +137,10 @@ int main(void)
 
     /* The signature is AES-CTR encrypted, so it must not leak the raw bytes. */
     bool raw_signature_visible = true;
-    for (size_t i = 0; i < 128U; ++i) {
-        if (response[sig_len_off + 4U + i] != 0x5aU) raw_signature_visible = false;
+    for (size_t i = 0; i < 128U; ++i)
+    {
+        if (response[sig_len_off + 4U + i] != 0x5aU)
+            raw_signature_visible = false;
     }
     assert(!raw_signature_visible);
 

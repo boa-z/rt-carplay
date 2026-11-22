@@ -170,10 +170,14 @@ clean:
 
 .PHONY: all check clean
 
-.PHONY: check-docs
+.PHONY: docs check-docs
+docs:
+	doxygen Doxyfile
+
 check-docs:
 	python3 scripts/check-docs.py
 	python3 scripts/test-check-docs.py
+	python3 scripts/check-api-docs.py
 
 .PHONY: check-rtthread-multicast
 check-rtthread-multicast:

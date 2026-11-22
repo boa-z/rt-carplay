@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/*
+/** @file stream.h
  * Portable blocking byte stream.
  *
  * Lockdown messages and TLS run over a byte stream, not directly over USBMUX:
@@ -15,18 +15,21 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/** Blocking read/write operations. One serialized caller drives the stream. */
 typedef struct
 {
-    /* Return the number of bytes read (possibly fewer than requested), 0 when
+    /** Return the number of bytes read (possibly fewer than requested), 0 when
      * the peer closed the stream, or a negative RTCP_* error.  RTCP_ETIMEDOUT
      * means nothing arrived before the timeout; the stream stays usable. */
     int (*read)(void *context, void *buffer, size_t length,
                 uint32_t timeout_ms);
-    /* Write the whole buffer.  Returns 0 on success or a negative RTCP_*
+    /** Write the whole buffer. Returns 0 on success or a negative RTCP_*
      * error. */
     int (*write)(void *context, const void *data, size_t length);
 } rtcp_stream_ops_t;
 
+/** Borrowed byte-stream operations and context. The caller owns and closes
+ * the underlying transport. */
 typedef struct
 {
     const rtcp_stream_ops_t *ops;

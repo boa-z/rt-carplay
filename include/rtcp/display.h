@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+/** @file display.h
+ * Classic main display description and geometry. */
 #ifndef RTCP_DISPLAY_H
 #define RTCP_DISPLAY_H
 #include <stdbool.h>
@@ -10,11 +12,14 @@ extern "C"
 {
 #endif
 
+/** Pixel rectangle with an inclusive origin and exclusive upper bounds. */
 typedef struct
 {
     uint16_t x, y, width, height;
 } rtcp_display_rect_t;
 
+/** Optional OEM PNG and declared pixel dimensions. The builder borrows
+ * png for the duration of capability serialization. */
 typedef struct
 {
     const uint8_t *png;
@@ -23,6 +28,7 @@ typedef struct
     uint16_t height_pixels;
 } rtcp_oem_icon_t;
 
+/** Automatic follows host light decisions. Light and Dark override them. */
 typedef enum
 {
     RTCP_APPEARANCE_AUTOMATIC = 0,
@@ -30,7 +36,7 @@ typedef enum
     RTCP_APPEARANCE_DARK = 2,
 } rtcp_appearance_setting_t;
 
-/* Optional Main Display profile. Initialize struct_size to sizeof(*profile).
+/** Optional Main Display profile. Initialize struct_size to sizeof(*profile).
  * Zero rectangles select the entire display/view respectively. Coordinates
  * refer to negotiated pixels, not a host framebuffer or video-layer viewport.
  * The host keeps the profile immutable for the duration of a build call.
@@ -47,14 +53,16 @@ typedef struct
     uint8_t appearance_setting; /* 0 automatic, 1 always light, 2 always dark */
 } rtcp_display_profile_t;
 
+/** Validate an optional profile against the offered display dimensions.
+ * A NULL profile selects the default. No ownership transfer or allocation. */
 bool rtcp_display_profile_validate(const rtcp_display_profile_t *, uint16_t width,
                                    uint16_t height);
 
-/* Aspect-fit an encoded frame into a host viewport. Integer rounding centers
+/** Aspect-fit an encoded frame into a host viewport. Integer rounding centers
  * the result. Returns false for empty/overflowing geometry. No allocation. */
 bool rtcp_display_fit(const rtcp_display_rect_t *viewport, uint16_t source_width,
                       uint16_t source_height, rtcp_display_rect_t *destination);
-/* Map a panel point inside the actual aspect-fit destination to the negotiated
+/** Map a panel point inside the actual aspect-fit destination to the negotiated
  * logical display. Bars/outside points are rejected. Output is unchanged on
  * failure; accepted coordinates are in [0, extent-1]. Ownership of a gesture
  * crossing the boundary remains the host's responsibility. */

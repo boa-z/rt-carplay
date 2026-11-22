@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+/** @file vehicle.h
+ * Experimental Vehicle State characteristic and control model. */
 #ifndef RTCP_VEHICLE_H
 #define RTCP_VEHICLE_H
 #include <stdbool.h>
@@ -18,6 +20,7 @@ extern "C"
 #define RTCP_VEHICLE_DATASTREAM_UUID      RTCP_DATA_STREAM_VEHICLE_UUID
 #define RTCP_VEHICLE_HIGH_DATASTREAM_UUID RTCP_DATA_STREAM_VEHICLE_HIGH_UUID
 
+/** Wire format IDs for characteristic and control values. */
 typedef enum
 {
     RTCP_VEHICLE_BOOL = 0,
@@ -29,19 +32,21 @@ typedef enum
     RTCP_VEHICLE_STRING = 10,
     RTCP_VEHICLE_DATA = 11
 } rtcp_vehicle_format_t;
+/** Endpoint ownership declared for a characteristic. */
 typedef enum
 {
     RTCP_VEHICLE_PHONE,
     RTCP_VEHICLE_CAR,
     RTCP_VEHICLE_SHARED
 } rtcp_vehicle_owner_t;
+/** Logical Vehicle State transport lane. */
 typedef enum
 {
     RTCP_VEHICLE_NORMAL,
     RTCP_VEHICLE_HIGH
 } rtcp_vehicle_lane_t;
 
-/* Strings are UTF-8 bytes with explicit length, without a trailing NUL.
+/** Strings are UTF-8 bytes with explicit length, without a trailing NUL.
  * Uint64 is limited to INT64_MAX by this OPACK foundation; larger values must
  * not be advertised. A missing value is represented by has_value=false. */
 typedef struct
@@ -60,6 +65,7 @@ typedef struct
     } as;
 } rtcp_vehicle_value_t;
 
+/** Characteristic descriptor with host-assigned IDs and optional constraints. */
 typedef struct
 {
     int64_t accessory_iid, accessory_type, service_iid, service_type, iid, type;
@@ -81,12 +87,14 @@ typedef struct
 #define RTCP_VEHICLE_MAX_CONTROLS           4U
 #define RTCP_VEHICLE_MAX_CONTROL_PARAMETERS 4U
 #define RTCP_VEHICLE_MAX_PARAMETER_NAME     32U
+/** Named parameter in an ordered, typed service-control descriptor. */
 typedef struct
 {
     const char *name;
     rtcp_vehicle_format_t format;
     size_t maximum_length; /* STRING/DATA only, 1..MAX_VALUE_BYTES. */
 } rtcp_vehicle_control_parameter_t;
+/** Service control and its declared request and response parameters. */
 typedef struct
 {
     int64_t service_iid, iid, type;
@@ -94,13 +102,14 @@ typedef struct
     const rtcp_vehicle_control_parameter_t *request, *response;
     size_t request_count, response_count;
 } rtcp_vehicle_control_t;
+/** Bounded values in the order declared by the control descriptor. */
 typedef struct
 {
     size_t count;
     rtcp_vehicle_value_t values[RTCP_VEHICLE_MAX_CONTROL_PARAMETERS];
 } rtcp_vehicle_control_values_t;
 
-/* validate_write is a pure policy check; return false to refuse a phone write.
+/** validate_write is a pure policy check; return false to refuse a phone write.
  * did_write runs only after the response fits and the new value is committed.
  * Neither callback implies actual vehicle actuation or feedback. */
 typedef struct
@@ -139,6 +148,7 @@ typedef enum
     RTCP_VEHICLE_METHOD_COUNT
 } rtcp_vehicle_method_t;
 
+/** Opaque Vehicle State processor. Serialize all calls on one owner. */
 typedef struct rtcp_vehicle rtcp_vehicle_t;
 typedef struct
 {
@@ -159,7 +169,7 @@ typedef struct
     int last_result;
 } rtcp_vehicle_status_t;
 
-/* Receiver-owned delivery workspace; counters are cumulative until destroy.
+/** Receiver-owned delivery workspace; counters are cumulative until destroy.
  * Queued means copied by transport, not acknowledged or applied by the phone. */
 typedef struct
 {
@@ -170,24 +180,33 @@ typedef struct
     int last_error;
 } rtcp_vehicle_delivery_status_t;
 
+/** Create an owned Vehicle State model from caller configuration.
+ * Returns RTCP_OK or a negative error. The caller owns destroy. */
 int rtcp_vehicle_create(const rtcp_vehicle_config_t *, rtcp_vehicle_t **);
+/** Free a detached model. Stop and destroy any borrowing Receiver first. */
 void rtcp_vehicle_destroy(rtcp_vehicle_t *);
-/* Clear session subscriptions/pending events, retain current vehicle values. */
+/** Clear session subscriptions/pending events, retain current vehicle values. */
 void rtcp_vehicle_reset_session(rtcp_vehicle_t *);
+/** Copy counters and current subscription status. Returns RTCP_EINVAL
+ * for NULL input or output. */
 int rtcp_vehicle_status(const rtcp_vehicle_t *, rtcp_vehicle_status_t *);
+/** Copy a characteristic value and its presence flag. An unknown IID
+ * returns RTCP_ENOENT. */
 int rtcp_vehicle_get(const rtcp_vehicle_t *, int64_t iid, rtcp_vehicle_value_t *, bool *has_value);
+/** Publish a local characteristic value and mark subscribed changes pending.
+ * Returns a negative RTCP error for an invalid value or unknown IID. */
 int rtcp_vehicle_set(rtcp_vehicle_t *, int64_t iid, const rtcp_vehicle_value_t *);
 
-/* OPACK vehicleStateProtocolInfo value, usable by host /info composition.
+/** Serialize OPACK vehicleStateProtocolInfo into caller storage for /info.
  * This API does not advertise or negotiate any capability by itself. */
 int rtcp_vehicle_info(rtcp_vehicle_t *, uint8_t *, size_t, size_t *);
-/* Complete decrypted Type 130 comm body, not an arbitrary TCP fragment.
+/** Process one complete decrypted Type 130 body.
  * Caller retains the request buffer until return. Output must not alias it.
  * RTCP_ENOMEM means bounded workspace/output exhaustion. No state commits on
  * malformed input or serialization failure. Replies stay on the input lane. */
 int rtcp_vehicle_handle(rtcp_vehicle_t *, rtcp_vehicle_lane_t,
                         const uint8_t *, size_t, uint8_t *, size_t, size_t *);
-/* Coalesces changed subscribed values into updateNotify on the HIGH lane.
+/** Coalesce changed subscribed values into updateNotify on the HIGH lane.
  * RTCP_ENOENT means no pending changes. Failed encoding retains pending data.
  * Successful encoding consumes those changes; caller then owns queuing/retry
  * of the encoded message until delivered or the authenticated session ends. */

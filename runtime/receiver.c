@@ -21,6 +21,8 @@ struct rtcp_receiver
     float volume_db;
     rtcp_now_playing_cb_t on_now_playing;
     void *now_playing_context;
+    rtcp_now_playing_details_cb_t on_now_playing_details;
+    void *now_playing_details_context;
     rtcp_host_ui_cb_t on_host_ui;
     void *host_ui_context;
     receiver_vehicle_t *vehicle;
@@ -46,6 +48,13 @@ static void receiver_now_playing(const rtcp_now_playing_t *update, void *context
     const rtcp_receiver_t *receiver = context;
     if (receiver->on_now_playing)
         receiver->on_now_playing(update, receiver->now_playing_context);
+}
+
+static void receiver_now_playing_details(const rtcp_now_playing_details_t *update, void *context)
+{
+    rtcp_receiver_t *receiver = context;
+    if (receiver->on_now_playing_details)
+        receiver->on_now_playing_details(update, receiver->now_playing_details_context);
 }
 
 static bool receiver_host_ui(void *context)
@@ -288,6 +297,8 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .get_volume_context = r,
         .on_now_playing = receiver_now_playing,
         .now_playing_context = r,
+        .on_now_playing_details = receiver_now_playing_details,
+        .now_playing_details_context = r,
         .on_host_ui = receiver_host_ui,
         .host_ui_context = r,
         .on_event_state = config->on_event_state,
@@ -525,6 +536,16 @@ int rtcp_receiver_set_now_playing_callback(rtcp_receiver_t *receiver, rtcp_now_p
         return RTCP_EINVAL;
     receiver->on_now_playing = callback;
     receiver->now_playing_context = context;
+    return RTCP_OK;
+}
+
+int rtcp_receiver_set_now_playing_details_callback(rtcp_receiver_t *receiver,
+                                                   rtcp_now_playing_details_cb_t callback, void *context)
+{
+    if (!receiver)
+        return RTCP_EINVAL;
+    receiver->on_now_playing_details = callback;
+    receiver->now_playing_details_context = context;
     return RTCP_OK;
 }
 

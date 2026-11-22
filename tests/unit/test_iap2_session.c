@@ -37,7 +37,11 @@ typedef struct
     uint8_t route_state;
     uint16_t maneuver_index;
     unsigned device_time_updates;
+    unsigned device_time_invalidations;
     rtcp_device_time_t device_time;
+    unsigned status_updates[4];
+    unsigned media_details, media_invalidations, route_details, route_invalidations;
+    unsigned lane_guidance;
 } harness_t;
 
 static harness_t g_harness;
@@ -71,8 +75,78 @@ static const uint8_t device_time_fixture[] = {
 static void capture_device_time(const rtcp_device_time_t *update, void *context)
 {
     harness_t *harness = context;
+    if (!update)
+    {
+        ++harness->device_time_invalidations;
+        return;
+    }
     ++harness->device_time_updates;
     harness->device_time = *update;
+}
+
+static void capture_phone_status(const rtcp_phone_status_t *update, void *context)
+{
+    harness_t *harness = context;
+    ++harness->status_updates[update->kind];
+    switch (update->kind)
+    {
+    case RTCP_PHONE_STATUS_POWER:
+        assert(update->data.power.has_battery_level && update->data.power.battery_level == 76U);
+        assert(update->data.power.has_external_charger && !update->data.power.external_charger);
+        break;
+    case RTCP_PHONE_STATUS_CELLULAR:
+        assert(update->data.cellular.signal_strength_count == 2U && update->data.cellular.signal_strength[1] == 3U);
+        assert(update->data.cellular.has_airplane_mode && update->data.cellular.airplane_mode);
+        break;
+    case RTCP_PHONE_STATUS_CALL:
+        assert(update->data.call.has_status && update->data.call.status == 0U);
+        assert(!strcmp(update->data.call.uuid, "call"));
+        break;
+    case RTCP_PHONE_STATUS_INVALIDATED:
+        break;
+    }
+}
+
+static void capture_media_details(const rtcp_now_playing_details_t *update, void *context)
+{
+    harness_t *harness = context;
+    if (update->invalidated)
+    {
+        ++harness->media_invalidations;
+        return;
+    }
+    ++harness->media_details;
+    assert(update->has_duration && update->duration_ms == 180000U);
+    assert(update->has_elapsed && update->elapsed_ms == 0U);
+    assert(update->has_artwork_transfer_id && update->artwork_transfer_id == 9U);
+}
+
+static void capture_route_details(const rtcp_route_details_t *update, void *context)
+{
+    harness_t *harness = context;
+    if (update->invalidated)
+    {
+        ++harness->route_invalidations;
+        return;
+    }
+    assert(update->maneuver_indices);
+    if (++harness->route_details == 1U)
+    {
+        assert(update->maneuver_index_count == 2U);
+        assert(update->maneuver_indices[0] == 8U && update->maneuver_indices[1] == 3U);
+        assert(update->has_distance_to_maneuver && update->distance_to_maneuver == 500U);
+    }
+    else
+        assert(update->maneuver_index_count == 0U);
+}
+
+static void capture_lane_guidance(const rtcp_lane_guidance_t *update, void *context)
+{
+    harness_t *harness = context;
+    ++harness->lane_guidance;
+    assert(update->index == 9U && update->lane_count == 1U);
+    assert(update->lanes[0].index == 2U && update->lanes[0].angle_count == 2U);
+    assert(update->lanes[0].angles[0] == -90 && update->lanes[0].angles[1] == 0);
 }
 
 static const uint8_t now_playing_fixture[] = {
@@ -719,6 +793,8 @@ int main(void)
                 .language = "en",
                 .wifi_ssid = NULL,
                 .bluetooth_address = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
+                .provide_location = wired_case == 0,
+                .provide_vehicle_speed = wired_case == 0,
             },
             .mfi = &mfi,
             .tx = capture_tx,
@@ -733,6 +809,11 @@ int main(void)
             .wired_reinvite_delay_ms = wired_case ? 10000U : 0U,
             .observe_message = observe_message,
             .on_device_time = wired_case == 0 ? capture_device_time : NULL,
+            .notify_device_time_invalidation = wired_case == 0,
+            .on_phone_status = wired_case == 0 ? capture_phone_status : NULL,
+            .on_now_playing_details = wired_case == 0 ? capture_media_details : NULL,
+            .on_route_details = wired_case == 0 ? capture_route_details : NULL,
+            .on_lane_guidance = wired_case == 0 ? capture_lane_guidance : NULL,
         };
         session = iap2_session_create(&wired_config);
         assert(session != NULL);
@@ -756,9 +837,14 @@ int main(void)
         assert(find_body_parameter(wired_identification->body,
                                    wired_identification->body_len, 7, &field, &field_len));
         bool advertises_time = false;
+        bool advertises_lanes = false;
         for (size_t offset = 0; offset + 1U < field_len; offset += 2U)
+        {
             advertises_time |= (field[offset] == 0x4e && field[offset + 1U] == 0x0b);
+            advertises_lanes |= (field[offset] == 0x52 && field[offset + 1U] == 0x04);
+        }
         assert(advertises_time == (wired_case == 0));
+        assert(advertises_lanes == (wired_case == 0));
         const uint8_t *usb_group = NULL;
         size_t usb_group_len = 0U;
         assert(find_body_parameter(wired_identification->body,
@@ -805,6 +891,50 @@ int main(void)
 
         if (wired_case == 0)
         {
+            const uint8_t speed_request[] = { 0, 4, 0, 4 };
+            const uint8_t duplicate_speed[] = { 0, 4, 0, 4, 0, 4, 0, 4 };
+            const char speed_sentence[] = "$PASCD,1.234,C,R,0,1,0.00,1.250*65\r\n";
+            assert(!iap2_session_send_vehicle_speed(session, 1234, RTCP_GEAR_REVERSE, 1250, 52));
+            iap2_session_handle_message(session, IAP2_MSG_START_LOCATION, speed_request, sizeof(speed_request), 52);
+            assert(iap2_session_location_requested(session) == RTCP_LOCATION_PASCD);
+            iap2_session_handle_message(session, IAP2_MSG_START_LOCATION, duplicate_speed, sizeof(duplicate_speed), 52);
+            assert(iap2_session_location_requested(session) == RTCP_LOCATION_PASCD);
+            assert(!iap2_session_send_vehicle_speed(session, 1234, (rtcp_vehicle_gear_t)'X', 1250, 52));
+            assert(iap2_session_send_vehicle_speed(session, 1234, RTCP_GEAR_REVERSE, 1250, 52));
+            drain_tx(session, 52);
+            const csm_record_t *speed = last_message(h, IAP2_MSG_LOCATION);
+            assert(speed && speed->body_len == 4U + sizeof(speed_sentence));
+            assert(!memcmp(speed->body + 4, speed_sentence, sizeof(speed_sentence)));
+            iap2_session_handle_message(session, IAP2_MSG_STOP_LOCATION, NULL, 0, 52);
+            assert(iap2_session_location_requested(session) == 0U);
+
+            const uint8_t battery[] = { 0, 6, 0, 6, 0, 76, 0, 5, 0, 4, 0 };
+            const uint8_t cellular[] = { 0, 6, 0, 0, 1, 3, 0, 5, 0, 2, 1 };
+            const uint8_t call[] = { 0, 9, 0, 4, 'c', 'a', 'l', 'l', 0, 0, 5, 0, 2, 0 };
+            const uint8_t media[] = { 0, 17, 0, 0, 0, 8, 0, 4, 0, 2, 0xbf, 0x20,
+                                      0, 5, 0, 26, 9, 0, 12, 0, 1, 0, 8, 0, 1, 0, 0, 0, 0 };
+            const uint8_t route[] = { 0, 8, 0, 13, 0, 8, 0, 3, 0, 8, 0, 10, 0, 0, 1, 0xf4 };
+            const uint8_t clear_list[] = { 0, 4, 0, 13 };
+            const uint8_t route_ended[] = { 0, 5, 0, 1, 0 };
+            const uint8_t lane[] = { 0, 6, 0, 1, 0, 9, 0, 22, 0, 2,
+                                     0, 6, 0, 0, 0, 2, 0, 6, 0, 2, 0xff, 0xa6, 0, 6, 0, 2, 0, 0 };
+            iap2_session_handle_message(session, 0xae01, battery, sizeof(battery) - 1U, 52);
+            assert(h->status_updates[RTCP_PHONE_STATUS_POWER] == 0U);
+            iap2_session_handle_message(session, 0xae01, battery, sizeof(battery), 52);
+            iap2_session_handle_message(session, 0x4158, cellular, sizeof(cellular), 52);
+            iap2_session_handle_message(session, 0x4155, call, sizeof(call), 52);
+            iap2_session_handle_message(session, 0x5001, media, sizeof(media), 52);
+            iap2_session_handle_message(session, 0x5201, route, sizeof(route), 52);
+            iap2_session_handle_message(session, IAP2_MSG_LANE_GUIDANCE, lane, sizeof(lane) - 1U, 52);
+            iap2_session_handle_message(session, IAP2_MSG_LANE_GUIDANCE, lane, sizeof(lane), 52);
+            iap2_session_handle_message(session, 0x5201, clear_list, sizeof(clear_list), 52);
+            iap2_session_handle_message(session, 0x5201, route_ended, sizeof(route_ended), 52);
+            assert(h->status_updates[RTCP_PHONE_STATUS_POWER] == 1U);
+            assert(h->status_updates[RTCP_PHONE_STATUS_CELLULAR] == 1U);
+            assert(h->status_updates[RTCP_PHONE_STATUS_CALL] == 1U);
+            assert(h->media_details == 1U && h->route_details == 2U && h->route_invalidations == 1U);
+            assert(h->lane_guidance == 1U);
+
             feed_peer_csm(session, IAP2_MSG_DEVICE_TIME_UPDATE,
                           device_time_fixture, sizeof(device_time_fixture), 52);
             drain_tx(session, 53);
@@ -940,9 +1070,24 @@ int main(void)
             for (size_t i = 0; i < h->message_count; ++i)
                 count += h->messages[i].id == 0x4301U;
             assert(count == 2U); /* An accepted TCP must not be interrupted. */
+            const uint8_t request[] = { 0, 4, 0, 4 };
+            iap2_session_handle_message(session, IAP2_MSG_START_LOCATION, request, sizeof(request), 20102);
+            assert(iap2_session_send_vehicle_speed(session, 20102, RTCP_GEAR_PARK, 0, 20102));
         }
 
         iap2_session_link_down(session);
+        size_t bytes_after_close = h->tx_len;
+        unsigned messages_after_close = h->observed_rx;
+        iap2_session_advance(session, 25000);
+        iap2_session_handle_message(session, 0x1d00, NULL, 0, 25000);
+        assert(h->tx_len == bytes_after_close && h->observed_rx == messages_after_close);
+        assert(iap2_session_location_requested(session) == 0U);
+        if (wired_case == 0)
+        {
+            assert(h->status_updates[RTCP_PHONE_STATUS_INVALIDATED] == 1U);
+            assert(h->media_invalidations == 1U && h->route_invalidations == 1U);
+            assert(h->device_time_invalidations == 1U);
+        }
         iap2_session_destroy(session);
     }
 

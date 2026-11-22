@@ -2,7 +2,7 @@
 #ifndef RTCP_LOG_H
 #define RTCP_LOG_H
 
-/*
+/** @file log.h
  * Minimal logging seam.  The core is silent unless a platform build defines
  * RTCP_LOG_ENABLE (and optionally RTCP_LOG_TAG).  Platform ports may instead
  * define RTCP_LOG_CUSTOM and provide RTCP_LOGE/W/I/D before including any

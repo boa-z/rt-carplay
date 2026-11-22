@@ -11,6 +11,7 @@
  */
 #include "iap2_session.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,9 @@
 #define IAP2_MSG_CARPLAY_AVAILABILITY       0x4300U
 #define IAP2_MSG_CARPLAY_START_SESSION      0x4301U
 #define IAP2_MSG_POWER_SOURCE_UPDATE        0xae03U
+#define IAP2_MSG_POWER_UPDATE               0xae01U
+#define IAP2_MSG_CELLULAR_UPDATE            0x4158U
+#define IAP2_MSG_CALL_UPDATE                0x4155U
 #define IAP2_MSG_TRANSPORT_NOTIFICATION     0x4e0eU
 #define IAP2_MSG_WIFI_CONFIG_REQUEST        0x5702U
 #define IAP2_MSG_WIFI_CONFIGURATION         0x5703U
@@ -48,6 +52,8 @@
 #define IAP2_MSG_ROUTE_GUIDANCE_UPDATE      0x5201U
 #define IAP2_MSG_ROUTE_MANEUVER_UPDATE      0x5202U
 #define IAP2_METADATA_TEXT_MAX              128U
+#define IAP2_MANEUVER_LIST_MAX              64U
+#define IAP2_LANES_PER_GUIDANCE_MAX         16U
 
 struct iap2_session
 {
@@ -80,6 +86,10 @@ struct iap2_session
     uint8_t now_playing_traces;
     bool now_playing_empty_traced;
     unsigned location_requested;
+    bool phone_status_reported;
+    bool now_playing_reported;
+    bool route_reported;
+    bool device_time_reported;
 };
 
 static bool session_is_wired(const iap2_session_t *session)
@@ -122,6 +132,34 @@ static bool send_csm(iap2_session_t *session,
     return queued;
 }
 
+static void invalidate_metadata(iap2_session_t *session)
+{
+    if (session->device_time_reported)
+    {
+        session->device_time_reported = false;
+        if (session->config.notify_device_time_invalidation)
+            session->config.on_device_time(NULL, session->config.context);
+    }
+    if (session->phone_status_reported)
+    {
+        session->phone_status_reported = false;
+        const rtcp_phone_status_t update = { .kind = RTCP_PHONE_STATUS_INVALIDATED };
+        session->config.on_phone_status(&update, session->config.context);
+    }
+    if (session->now_playing_reported)
+    {
+        session->now_playing_reported = false;
+        const rtcp_now_playing_details_t update = { .invalidated = true };
+        session->config.on_now_playing_details(&update, session->config.context);
+    }
+    if (session->route_reported)
+    {
+        session->route_reported = false;
+        const rtcp_route_details_t update = { .invalidated = true };
+        session->config.on_route_details(&update, session->config.context);
+    }
+}
+
 static void reset_wireless_negotiation(iap2_session_t *session)
 {
     session->location_requested = 0;
@@ -134,6 +172,7 @@ static void reset_wireless_negotiation(iap2_session_t *session)
     session->transport_notification_seen = false;
     session->pre_transport_wifi_configs = 0U;
     session->post_transport_wifi_configs = 0U;
+    invalidate_metadata(session);
     /*
      * airplay_event_connected and the invite pacing are deliberately kept:
      * the phone re-runs MFi/identification mid-session when the Bluetooth
@@ -172,15 +211,18 @@ static bool message_is_omitted(const iap2_session_t *session, uint16_t message_i
 
 static bool metadata_ready(const iap2_session_t *session)
 {
-    return session->identification_accepted && iap2_mfi_auth_is_authenticated(&session->auth);
+    return session->link_up && session->identification_accepted &&
+           iap2_mfi_auth_is_authenticated(&session->auth);
 }
 
 static bool send_identification_information(iap2_session_t *session, uint64_t now_ms)
 {
     iap2_identity_config_t identity = session->config.identity;
     identity.provide_location &= !session->location_component_rejected;
+    identity.provide_vehicle_speed &= session_is_wired(session) || session->config.airplay_tunnel;
     identity.receive_device_time = session->config.on_device_time != NULL &&
                                    (session_is_wired(session) || session->config.airplay_tunnel);
+    identity.receive_lane_guidance = session->config.on_route_details && session->config.on_lane_guidance;
 
     uint8_t body[IAP2_SESSION_IDENTIFICATION_CAPACITY];
     size_t body_len = 0U;
@@ -399,7 +441,7 @@ static void send_iap2_subscriptions(iap2_session_t *session, uint64_t now_ms)
     static const uint16_t message_ids[] = { 0xae00U, 0x4157U, 0x4154U };
     static const uint8_t parameter_ids[][6] = {
         { 4, 5, 6, 0, 0, 0 },
-        { 0, 4, 5, 0, 0, 0 },
+        { 0, 4, 5, 1, 2, 0 },
         { 0, 1, 2, 3, 4, 11 },
     };
     static const uint8_t parameter_counts[] = { 3, 3, 6 };
@@ -408,7 +450,11 @@ static void send_iap2_subscriptions(iap2_session_t *session, uint64_t now_ms)
         if (message_is_omitted(session, message_ids[i]))
             continue;
         body_len = 0U;
-        for (size_t j = 0; j < parameter_counts[i]; ++j)
+        size_t count = parameter_counts[i];
+        if (i == 1U && session->config.on_phone_status &&
+            (session_is_wired(session) || session->config.airplay_tunnel))
+            count = 5U;
+        for (size_t j = 0; j < count; ++j)
         {
             (void)iap2_param_append_void(body, sizeof(body), &body_len,
                                          parameter_ids[i][j]);
@@ -546,15 +592,23 @@ static void handle_device_time(iap2_session_t *session, const uint8_t *body, siz
         }
     }
     if (update.has_unix_seconds || update.has_time_zone_offset || update.has_daylight_saving_offset)
+    {
+        session->device_time_reported = true;
         session->config.on_device_time(&update, session->config.context);
+    }
 }
+
+static bool metadata_byte(const uint8_t *body, size_t body_len, uint16_t id, uint8_t *out);
+static bool metadata_uint(const uint8_t *body, size_t body_len, uint16_t id, size_t width, uint32_t *out);
 
 static void handle_now_playing(iap2_session_t *session, const uint8_t *body, size_t body_len)
 {
-    if (!session->config.on_now_playing || !metadata_ready(session))
+    if ((!session->config.on_now_playing && !session->config.on_now_playing_details) ||
+        !metadata_ready(session))
         return;
 
-    rtcp_now_playing_t update = { 0 };
+    rtcp_now_playing_details_t details = { 0 };
+    rtcp_now_playing_t *update = &details.item;
     char title[IAP2_METADATA_TEXT_MAX + 1U];
     char artist[IAP2_METADATA_TEXT_MAX + 1U];
     char album[IAP2_METADATA_TEXT_MAX + 1U];
@@ -562,27 +616,38 @@ static void handle_now_playing(iap2_session_t *session, const uint8_t *body, siz
     size_t group_len, status_len;
     if (iap2_param_find_single(body, body_len, 0, &group, &group_len))
     {
-        update.title = metadata_text(group, group_len, 1, title);
-        update.artist = metadata_text(group, group_len, 12, artist);
-        update.album = metadata_text(group, group_len, 6, album);
+        update->title = metadata_text(group, group_len, 1, title);
+        update->artist = metadata_text(group, group_len, 12, artist);
+        update->album = metadata_text(group, group_len, 6, album);
+        details.has_duration = metadata_uint(group, group_len, 4, 4, &details.duration_ms);
+        details.has_artwork_transfer_id = metadata_byte(group, group_len, 26, &details.artwork_transfer_id);
     }
-    if (iap2_param_find_single(body, body_len, 1, &group, &group_len) &&
-        iap2_param_find_single(group, group_len, 0, &status, &status_len) &&
-        status_len == 1U && status[0] <= 4U)
+    if (iap2_param_find_single(body, body_len, 1, &group, &group_len))
     {
-        update.has_playing = true;
-        update.playing = status[0] == 1U;
+        if (iap2_param_find_single(group, group_len, 0, &status, &status_len) &&
+            status_len == 1U && status[0] <= 4U)
+        {
+            update->has_playing = true;
+            update->playing = status[0] == 1U;
+        }
+        details.has_elapsed = metadata_uint(group, group_len, 1, 4, &details.elapsed_ms);
     }
-    bool usable = update.title || update.artist || update.album || update.has_playing;
-    if (usable)
-        session->config.on_now_playing(&update, session->config.context);
+    bool usable = update->title || update->artist || update->album || update->has_playing;
+    if (usable && session->config.on_now_playing)
+        session->config.on_now_playing(update, session->config.context);
+    if (session->config.on_now_playing_details &&
+        (usable || details.has_duration || details.has_elapsed || details.has_artwork_transfer_id))
+    {
+        session->now_playing_reported = true;
+        session->config.on_now_playing_details(&details, session->config.context);
+    }
     if (session->now_playing_traces < 16U && (usable || !session->now_playing_empty_traced))
     {
         ++session->now_playing_traces;
         session->now_playing_empty_traced |= !usable;
         RTCP_LOGI("iap2", "now_playing rx=0x5001 bytes=%u title=%u artist=%u album=%u playback=%u",
-                  (unsigned)body_len, update.title ? 1U : 0U, update.artist ? 1U : 0U,
-                  update.album ? 1U : 0U, update.has_playing ? 1U : 0U);
+                  (unsigned)body_len, update->title ? 1U : 0U, update->artist ? 1U : 0U,
+                  update->album ? 1U : 0U, update->has_playing ? 1U : 0U);
     }
 }
 
@@ -594,6 +659,88 @@ static bool metadata_byte(const uint8_t *body, size_t body_len, uint16_t id, uin
         return false;
     *out = data[0];
     return true;
+}
+
+static bool metadata_uint(const uint8_t *body, size_t body_len, uint16_t id, size_t width, uint32_t *out)
+{
+    const uint8_t *data;
+    size_t len;
+    if (!iap2_param_find_single(body, body_len, id, &data, &len) || len != width)
+        return false;
+    uint32_t value = 0;
+    for (size_t index = 0; index < width; ++index)
+        value = (value << 8) | data[index];
+    *out = value;
+    return true;
+}
+
+static bool metadata_bool(const uint8_t *body, size_t body_len, uint16_t id, bool *out)
+{
+    uint8_t value;
+    if (!metadata_byte(body, body_len, id, &value) || value > 1U)
+        return false;
+    *out = value != 0U;
+    return true;
+}
+
+static void handle_phone_status(iap2_session_t *session, uint16_t message_id, const uint8_t *body, size_t body_len)
+{
+    uint16_t start_id = message_id == IAP2_MSG_POWER_UPDATE ? 0xae00U : (uint16_t)(message_id - 1U);
+    if (!session->config.on_phone_status || !metadata_ready(session) ||
+        (!session_is_wired(session) && !session->config.airplay_tunnel) ||
+        message_is_omitted(session, message_id) || message_is_omitted(session, start_id) ||
+        !iap2_param_validate(body, body_len))
+        return;
+
+    rtcp_phone_status_t update = { 0 };
+    char first[IAP2_METADATA_TEXT_MAX + 1U], second[IAP2_METADATA_TEXT_MAX + 1U];
+    char third[IAP2_METADATA_TEXT_MAX + 1U];
+    switch (message_id)
+    {
+    case IAP2_MSG_POWER_UPDATE:
+    {
+        uint32_t level = 0;
+        update.kind = RTCP_PHONE_STATUS_POWER;
+        update.data.power.has_battery_level = metadata_uint(body, body_len, 6, 2, &level);
+        update.data.power.battery_level = (uint16_t)level;
+        update.data.power.has_charging_state = metadata_byte(body, body_len, 5, &update.data.power.charging_state);
+        update.data.power.has_external_charger = metadata_bool(body, body_len, 4, &update.data.power.external_charger);
+        if (!update.data.power.has_battery_level && !update.data.power.has_charging_state &&
+            !update.data.power.has_external_charger)
+            return;
+        break;
+    }
+    case IAP2_MSG_CELLULAR_UPDATE:
+        update.kind = RTCP_PHONE_STATUS_CELLULAR;
+        (void)iap2_param_find_single(body, body_len, 0, &update.data.cellular.signal_strength,
+                                     &update.data.cellular.signal_strength_count);
+        (void)iap2_param_find_single(body, body_len, 1, &update.data.cellular.registration_status,
+                                     &update.data.cellular.registration_status_count);
+        update.data.cellular.carrier = metadata_text(body, body_len, 4, first);
+        update.data.cellular.has_cellular_supported = metadata_bool(body, body_len, 5, &update.data.cellular.cellular_supported);
+        update.data.cellular.has_airplane_mode = metadata_bool(body, body_len, 2, &update.data.cellular.airplane_mode);
+        if (!update.data.cellular.signal_strength && !update.data.cellular.registration_status &&
+            !update.data.cellular.carrier && !update.data.cellular.has_cellular_supported &&
+            !update.data.cellular.has_airplane_mode)
+            return;
+        break;
+    case IAP2_MSG_CALL_UPDATE:
+        update.kind = RTCP_PHONE_STATUS_CALL;
+        update.data.call.remote_id = metadata_text(body, body_len, 0, first);
+        update.data.call.display_name = metadata_text(body, body_len, 1, second);
+        update.data.call.uuid = metadata_text(body, body_len, 4, third);
+        update.data.call.has_status = metadata_byte(body, body_len, 2, &update.data.call.status);
+        update.data.call.has_direction = metadata_byte(body, body_len, 3, &update.data.call.direction);
+        update.data.call.has_disconnect_reason = metadata_byte(body, body_len, 11, &update.data.call.disconnect_reason);
+        if (!update.data.call.remote_id && !update.data.call.display_name && !update.data.call.uuid &&
+            !update.data.call.has_status && !update.data.call.has_direction && !update.data.call.has_disconnect_reason)
+            return;
+        break;
+    default:
+        return;
+    }
+    session->phone_status_reported = true;
+    session->config.on_phone_status(&update, session->config.context);
 }
 
 static bool route_display_matches(const uint8_t *body, size_t body_len)
@@ -621,7 +768,7 @@ static bool route_display_matches(const uint8_t *body, size_t body_len)
 
 static void handle_route_guidance(iap2_session_t *session, const uint8_t *body, size_t body_len)
 {
-    if (!session->config.on_route_guidance || !metadata_ready(session) ||
+    if ((!session->config.on_route_guidance && !session->config.on_route_details) || !metadata_ready(session) ||
         !body || !route_display_matches(body, body_len))
         return;
 
@@ -634,8 +781,45 @@ static void handle_route_guidance(iap2_session_t *session, const uint8_t *body, 
         .distance_to_maneuver = metadata_text(body, body_len, 11, maneuver),
     };
     update.has_state = metadata_byte(body, body_len, 1, &update.state);
-    if (update.has_state || update.road || update.destination || update.distance_remaining || update.distance_to_maneuver)
+    bool usable = update.has_state || update.road || update.destination ||
+                  update.distance_remaining || update.distance_to_maneuver;
+    if (usable && session->config.on_route_guidance)
         session->config.on_route_guidance(&update, session->config.context);
+    if (!session->config.on_route_details)
+        return;
+
+    rtcp_route_details_t details = { .guidance = update, .invalidated = update.has_state && update.state == 0U };
+    details.has_distance_remaining = metadata_uint(body, body_len, 7, 4, &details.distance_remaining);
+    details.has_distance_to_maneuver = metadata_uint(body, body_len, 10, 4, &details.distance_to_maneuver);
+    details.has_remaining_units = metadata_byte(body, body_len, 9, &details.remaining_units);
+    details.has_maneuver_units = metadata_byte(body, body_len, 12, &details.maneuver_units);
+    uint32_t count = 0;
+    details.has_maneuver_count = metadata_uint(body, body_len, 14, 2, &count);
+    details.maneuver_count = (uint16_t)count;
+    details.has_lane_index = metadata_uint(body, body_len, 16, 2, &count);
+    details.lane_index = details.has_lane_index ? (uint16_t)count : 0;
+    details.has_lane_count = metadata_uint(body, body_len, 17, 2, &count);
+    details.lane_count = details.has_lane_count ? (uint16_t)count : 0;
+    details.has_lanes_shown = metadata_bool(body, body_len, 18, &details.lanes_shown);
+    uint16_t indices[IAP2_MANEUVER_LIST_MAX];
+    const uint8_t *list;
+    size_t list_len;
+    /* A zero-length TLV clears the order. A missing or malformed one leaves it unchanged. */
+    if (iap2_param_find_single(body, body_len, 13, &list, &list_len) &&
+        list_len % 2U == 0U && list_len / 2U <= IAP2_MANEUVER_LIST_MAX)
+    {
+        details.maneuver_indices = indices;
+        details.maneuver_index_count = list_len / 2U;
+        for (size_t index = 0; index < details.maneuver_index_count; ++index)
+            indices[index] = ((uint16_t)list[index * 2U] << 8) | list[index * 2U + 1U];
+    }
+    if (usable || details.has_distance_remaining || details.has_distance_to_maneuver ||
+        details.has_remaining_units || details.has_maneuver_units || details.has_maneuver_count ||
+        details.maneuver_indices || details.has_lane_index || details.has_lane_count || details.has_lanes_shown)
+    {
+        session->route_reported = !details.invalidated;
+        session->config.on_route_details(&details, session->config.context);
+    }
 }
 
 static void handle_route_maneuver(iap2_session_t *session, const uint8_t *body, size_t body_len)
@@ -657,7 +841,77 @@ static void handle_route_maneuver(iap2_session_t *session, const uint8_t *body, 
     };
     update.has_type = metadata_byte(body, body_len, 3, &update.type);
     if (update.has_type || update.description || update.road_after || update.distance)
+    {
+        if (session->config.on_route_details)
+            session->route_reported = true;
         session->config.on_route_maneuver(&update, session->config.context);
+    }
+}
+
+static int16_t signed_be16(const uint8_t *value)
+{
+    return (int16_t)(((int)value[0] ^ 0x80) * 256 + value[1] - 32768);
+}
+
+static bool parse_lane(const uint8_t *body, size_t body_len, rtcp_lane_t *lane)
+{
+    uint32_t index;
+    if (!metadata_uint(body, body_len, 0, 2, &index))
+        return false;
+    lane->index = (uint16_t)index;
+    lane->has_status = metadata_byte(body, body_len, 1, &lane->status);
+    const uint8_t *value;
+    size_t value_len;
+    if (iap2_param_find_single(body, body_len, 3, &value, &value_len) && value_len == 2U)
+    {
+        lane->has_highlight_angle = true;
+        lane->highlight_angle = signed_be16(value);
+    }
+    for (size_t offset = 0; offset < body_len;)
+    {
+        const uint8_t *parameter = body + offset;
+        size_t length = ((size_t)parameter[0] << 8) | parameter[1];
+        if (parameter[2] == 0U && parameter[3] == 2U)
+        {
+            if (length != 6U || lane->angle_count == RTCP_LANE_MAX_ANGLES)
+                return false;
+            lane->angles[lane->angle_count++] = signed_be16(parameter + 4);
+        }
+        offset += length;
+    }
+    return true;
+}
+
+static void handle_lane_guidance(iap2_session_t *session, const uint8_t *body, size_t body_len)
+{
+    uint32_t index;
+    if (!session->config.on_lane_guidance || !session->config.on_route_details ||
+        !metadata_ready(session) || message_is_omitted(session, IAP2_MSG_LANE_GUIDANCE) ||
+        !metadata_uint(body, body_len, 1, 2, &index) || !route_display_matches(body, body_len))
+        return;
+
+    rtcp_lane_t lanes[IAP2_LANES_PER_GUIDANCE_MAX] = { 0 };
+    char description[IAP2_METADATA_TEXT_MAX + 1U];
+    rtcp_lane_guidance_t update = { .index = (uint16_t)index, .description = metadata_text(body, body_len, 3, description) };
+    for (size_t offset = 0; offset < body_len;)
+    {
+        const uint8_t *parameter = body + offset;
+        size_t length = ((size_t)parameter[0] << 8) | parameter[1];
+        if (parameter[2] == 0U && parameter[3] == 2U)
+        {
+            if (update.lane_count == IAP2_LANES_PER_GUIDANCE_MAX ||
+                !parse_lane(parameter + 4, length - 4U, &lanes[update.lane_count]))
+                return;
+            ++update.lane_count;
+            update.lanes = lanes;
+        }
+        offset += length;
+    }
+    if (update.description || update.lanes)
+    {
+        session->route_reported = true;
+        session->config.on_lane_guidance(&update, session->config.context);
+    }
 }
 
 static void handle_start_location(iap2_session_t *session, const uint8_t *body, size_t body_len)
@@ -669,13 +923,33 @@ static void handle_start_location(iap2_session_t *session, const uint8_t *body, 
         message_is_omitted(session, IAP2_MSG_STOP_LOCATION) || !iap2_param_validate(body, body_len))
         return;
 
-    const uint8_t *data;
-    size_t len;
     unsigned requested = 0;
-    if (iap2_param_find_single(body, body_len, 1, &data, &len) && len == 0U)
-        requested |= RTCP_LOCATION_GGA;
-    if (iap2_param_find_single(body, body_len, 2, &data, &len) && len == 0U)
-        requested |= RTCP_LOCATION_RMC;
+    for (size_t offset = 0; offset < body_len;)
+    {
+        const uint8_t *parameter = body + offset;
+        size_t length = ((size_t)parameter[0] << 8) | parameter[1];
+        unsigned id = ((unsigned)parameter[2] << 8) | parameter[3];
+        unsigned kind = 0;
+        switch (id)
+        {
+        case 1:
+            kind = RTCP_LOCATION_GGA;
+            break;
+        case 2:
+            kind = RTCP_LOCATION_RMC;
+            break;
+        case 4:
+            kind = RTCP_LOCATION_PASCD;
+            break;
+        }
+        if (kind && (length != 4U || (requested & kind)))
+            return;
+        requested |= kind;
+        offset += length;
+    }
+    if (!session->config.identity.provide_vehicle_speed ||
+        (!session_is_wired(session) && !session->config.airplay_tunnel))
+        requested &= ~RTCP_LOCATION_PASCD;
     session->location_requested = requested;
 }
 
@@ -941,13 +1215,21 @@ void iap2_session_link_down(iap2_session_t *session)
     if (session == NULL)
         return;
     session->link_up = false;
+    iap2_core_reset(session->core, "transport_down");
+    if (session_is_wired(session) || session->config.airplay_tunnel)
+    {
+        session->airplay_event_connected = false;
+        session->carplay_invite_active = false;
+        session->carplay_invite_at_ms = 0;
+        session->carplay_reinvite_count = 0;
+    }
     reset_connection_state(session);
 }
 
 void iap2_session_feed(iap2_session_t *session, const uint8_t *bytes, size_t len,
                        uint64_t now_ms)
 {
-    if (session == NULL)
+    if (session == NULL || !session->link_up)
         return;
     session->now_ms = now_ms;
     iap2_core_feed(session->core, bytes, len, now_ms);
@@ -955,7 +1237,7 @@ void iap2_session_feed(iap2_session_t *session, const uint8_t *bytes, size_t len
 
 void iap2_session_advance(iap2_session_t *session, uint64_t now_ms)
 {
-    if (session == NULL)
+    if (session == NULL || !session->link_up)
         return;
     session->now_ms = now_ms;
     iap2_core_advance_time(session->core, now_ms);
@@ -1002,7 +1284,7 @@ void iap2_session_handle_message(iap2_session_t *session,
                                  size_t body_len,
                                  uint64_t now_ms)
 {
-    if (session == NULL)
+    if (session == NULL || !session->link_up)
         return;
     session->now_ms = now_ms;
     if (session->config.observe_message != NULL)
@@ -1021,6 +1303,7 @@ void iap2_session_handle_message(iap2_session_t *session,
     case IAP2_MSG_IDENTIFICATION_REJECTED:
         session->identification_accepted = false;
         session->location_requested = 0;
+        invalidate_metadata(session);
         handle_identification_rejected(session, body, body_len, now_ms);
         break;
     case IAP2_MSG_MFI_AUTH_REQUEST:
@@ -1088,11 +1371,19 @@ void iap2_session_handle_message(iap2_session_t *session,
     case IAP2_MSG_DEVICE_TIME_UPDATE:
         handle_device_time(session, body, body_len);
         break;
+    case IAP2_MSG_POWER_UPDATE:
+    case IAP2_MSG_CELLULAR_UPDATE:
+    case IAP2_MSG_CALL_UPDATE:
+        handle_phone_status(session, message_id, body, body_len);
+        break;
     case IAP2_MSG_ROUTE_GUIDANCE_UPDATE:
         handle_route_guidance(session, body, body_len);
         break;
     case IAP2_MSG_ROUTE_MANEUVER_UPDATE:
         handle_route_maneuver(session, body, body_len);
+        break;
+    case IAP2_MSG_LANE_GUIDANCE:
+        handle_lane_guidance(session, body, body_len);
         break;
     case IAP2_MSG_START_LOCATION:
         handle_start_location(session, body, body_len);
@@ -1130,6 +1421,13 @@ static int nmea_hex(char digit)
     return -1;
 }
 
+static bool send_location_text(iap2_session_t *session, const char *sentence, size_t length, uint64_t now_ms)
+{
+    uint8_t body[4U + RTCP_LOCATION_NMEA_MAX + 1U];
+    size_t body_len = iap2_param_encode(body, sizeof(body), 0, (const uint8_t *)sentence, length + 1U);
+    return body_len != 0U && send_csm(session, IAP2_MSG_LOCATION, body, body_len, NULL, NULL, now_ms);
+}
+
 bool iap2_session_send_location(iap2_session_t *session, const char *sentence, size_t length, uint64_t now_ms)
 {
     unsigned requested = iap2_session_location_requested(session);
@@ -1158,10 +1456,31 @@ bool iap2_session_send_location(iap2_session_t *session, const char *sentence, s
     if (high < 0 || low < 0 || checksum != (unsigned)(16 * high + low))
         return false;
 
-    uint8_t body[4U + RTCP_LOCATION_NMEA_MAX + 1U];
-    uint8_t text[RTCP_LOCATION_NMEA_MAX + 1U];
+    char text[RTCP_LOCATION_NMEA_MAX + 1U];
     memcpy(text, sentence, length);
     text[length] = '\0';
-    size_t body_len = iap2_param_encode(body, sizeof(body), 0, text, length + 1U);
-    return body_len != 0U && send_csm(session, IAP2_MSG_LOCATION, body, body_len, NULL, NULL, now_ms);
+    return send_location_text(session, text, length, now_ms);
+}
+
+bool iap2_session_send_vehicle_speed(iap2_session_t *session, uint64_t sample_ms,
+                                     rtcp_vehicle_gear_t gear, uint32_t speed_mm_s, uint64_t now_ms)
+{
+    if (!(iap2_session_location_requested(session) & RTCP_LOCATION_PASCD) ||
+        (gear != RTCP_GEAR_PARK && gear != RTCP_GEAR_REVERSE &&
+         gear != RTCP_GEAR_NEUTRAL && gear != RTCP_GEAR_DRIVE))
+        return false;
+
+    char sentence[RTCP_LOCATION_NMEA_MAX + 1U];
+    /* DiPlay's captured single-sample layout uses C and the fixed 0,1,0.00 fields. */
+    int length = snprintf(sentence, sizeof(sentence), "$PASCD,%" PRIu64 ".%03u,C,%c,0,1,0.00,%" PRIu32 ".%03u",
+                          sample_ms / 1000U, (unsigned)(sample_ms % 1000U), (int)gear,
+                          speed_mm_s / 1000U, (unsigned)(speed_mm_s % 1000U));
+    if (length < 0 || (size_t)length + 5U >= sizeof(sentence))
+        return false;
+    unsigned checksum = 0;
+    for (int index = 1; index < length; ++index)
+        checksum ^= (unsigned char)sentence[index];
+    if (snprintf(sentence + length, sizeof(sentence) - (size_t)length, "*%02X\r\n", checksum) != 5)
+        return false;
+    return send_location_text(session, sentence, (size_t)length + 5U, now_ms);
 }

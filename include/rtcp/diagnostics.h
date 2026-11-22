@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+/** @file diagnostics.h
+ * Poll-owner snapshots for established transport endpoints. */
 #ifndef RTCP_DIAGNOSTICS_H
 #define RTCP_DIAGNOSTICS_H
 
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Owner-thread snapshots. Elapsed wall time includes callbacks/preemption;
+/** Screen transport metrics. Elapsed wall time includes callbacks/preemption;
  * counters do not establish presentation quality or clock synchronization. */
 typedef struct
 {
@@ -33,7 +35,7 @@ typedef struct
     uint32_t sender_gap_max_us;
 } rtcp_screen_stats_t;
 
-/* Experimental alternate transport, owner-thread snapshot. Counters survive
+/** Experimental alternate transport, owner-thread snapshot. Counters survive
  * selective close until next open; open/close counts reset on stop/start.
  * last_error is transport-level EIO on unexpected loss, not a codec verdict. */
 typedef struct
@@ -45,6 +47,8 @@ typedef struct
     rtcp_screen_stats_t screen;
 } rtcp_alt_video_status_t;
 
+/** AirPlay timing exchange counts. Successful exchanges are protocol
+ * observations and do not attest to presentation synchronization. */
 typedef struct
 {
     bool active;
@@ -53,6 +57,7 @@ typedef struct
     uint32_t rejected, send_errors, timeouts;
 } rtcp_timing_stats_t;
 
+/** Audio transport, authentication and sink-delivery counters. */
 typedef struct
 {
     unsigned active_streams;
@@ -64,7 +69,7 @@ typedef struct
     uint32_t poll_gap_max_us;
 } rtcp_audio_stats_t;
 
-/* datagrams precede authentication; active_streams counts active Audio SETUP.
+/** datagrams precede authentication; active_streams counts active Audio SETUP.
  * Sink packet counters separately describe payloads accepted by the host. */
 typedef struct
 {

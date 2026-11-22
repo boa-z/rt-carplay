@@ -21,3 +21,16 @@ python3 packages/third-party/rt-carplay/scripts/format-code.py --root applicatio
 The helper enumerates tracked C/C++ files within the selected scope. `.clang-format-ignore` uses simple relative glob patterns. Vendored `third_party/` implementations, generated protocol/audio byte fixtures, generated font subsets and generated upstream adapters retain their source-generator or upstream form. Handwritten SDK core, public/internal headers, runtime, ports, examples, application code and existing test sources are included. New untracked files should be formatted with clang-format directly or staged before running the helper.
 
 Keep functional commits separate from bulk formatting. CI checks both scopes without rewriting them. Firmware compilation, existing Host regressions and actual LVGL previews validate the formatted code separately from the formatting check; none establishes board or iPhone acceptance.
+
+## API comments and documentation
+
+Use English Doxygen comments for public declarations. Describe ownership, pointer validity, thread and callback constraints, units, significant defaults, side effects and failure semantics where they affect callers. Explain wire IDs, compatibility branches and resource ordering in the implementation when the surrounding code cannot explain them.
+
+```sh
+make check-docs
+make docs
+```
+
+`make check-docs` checks documented public functions and callback types, local links and required language pairs with standard-library Python. `make docs` uses Doxygen and writes HTML below `build/doxygen`. Keep generated files out of Git. Fix Doxygen syntax warnings in public headers when editing the associated API.
+
+Review the paired user and developer guides when changing a public API, configuration option, protocol capability or observable behavior. Update the [Receiver API](receiver-api.md) for contracts and the [capability matrix](classic-capability-audit.md) for validation evidence. Internal refactors, comment corrections and test-only changes do not require changes to the README.

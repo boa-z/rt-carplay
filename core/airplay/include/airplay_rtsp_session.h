@@ -106,6 +106,8 @@ typedef struct
                         uint16_t *bound_port, void *);
     void (*stop_video)(uint16_t stream_type, void *);
     uint16_t alt_screen_requested_port;
+    rtcp_now_playing_details_cb_t on_now_playing_details;
+    void *now_playing_details_context;
 } airplay_rtsp_session_config_t;
 
 typedef enum

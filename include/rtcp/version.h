@@ -1,3 +1,5 @@
+/** @file version.h
+ * Build and release identity. */
 #ifndef RTCP_VERSION_H
 #define RTCP_VERSION_H
 
@@ -17,7 +19,9 @@ extern "C"
 {
 #endif
 
+/** Return the static SDK version string, including any development suffix. */
 const char *rtcp_version_string(void);
+/** Return the static source revision string embedded at build time. */
 const char *rtcp_build_git_sha(void);
 
 #ifdef __cplusplus

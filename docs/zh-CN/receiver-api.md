@@ -56,15 +56,21 @@ if (result == RTCP_OK) result = rtcp_receiver_start(receiver);
 
 Owner 可用 `rtcp_receiver_send_touch()` 发送完整的触点快照，或用 `rtcp_receiver_send_knob()` 发送旋钮、方向、主页、返回及确认状态。`rtcp_receiver_send_media_button()` 支持播放和切歌。会话建立前声明相应的可选 HID 设备，并在按下后发送释放。宿主负责实体键、触摸映射、焦点和本机音量策略。
 
-通过 `rtcp_receiver_set_now_playing_callback()` 接收增量 `rtcp_now_playing_t`。回调返回前复制非空的曲名、艺人和专辑字符串，仅在 `has_playing` 已设置时更新播放状态。会话结束时清除累计快照。Classic 导航数据、GNSS 转发和运行时分辨率重协商仍需公开线包依据和独立互操作验证。参见[能力审计](classic-capability-audit.md)。
+通过 `rtcp_receiver_set_now_playing_callback()` 接收增量 `rtcp_now_playing_t`。回调返回前复制非空曲名、艺人和专辑字符串，仅在 `has_playing` 已设置时更新播放状态。可选的 `rtcp_receiver_set_now_playing_details_callback()` 增加以毫秒计的时长和进度，以及借用的内联封面。整个会话退役时，`invalidated` 标志通知宿主清除累计快照。仅使用旧回调的宿主应根据会话状态清除快照。参见[能力矩阵](classic-capability-audit.md)。
 
-自行管理 iAP2 会话的宿主也可使用 `iap2_session_config_t.on_now_playing`。此可选回调在身份识别和 MFi 验证后由 iAP2 Owner 调用，将 `0x5001` 以同一增量类型上报。空字符串会清除字段。Luban-Lite 在无线 DataStream 隧道接入该回调，与 AirPlay 共用 Owner。诊断会记录 `0x5000` 是否入队，以及 `0x5001`、`updateMRNowPlayingInfo` 或 `updateMRPlaybackState` 解出了哪些字段。日志只记录字段是否存在。
+自行管理 iAP2 会话的宿主可注册 `iap2_session_config_t.on_now_playing` 和 `on_now_playing_details` 接收 `0x5001`。回调在身份识别及 MFi 验证后调用。空字符串会清除字段。扩展 iAP2 回调提供封面传输 ID，并在链路退役时发出失效通知。封面文件会话的组装由宿主管理。Luban-Lite 无线 DataStream 隧道与 AirPlay 共用 Owner，日志记录字段是否存在。
 
 宿主可设置 `iap2_session_config_t.on_device_time`，在有线 USB 或无线 AirPlay DataStream 隧道接收 `DeviceTimeUpdate`（`0x4E0B`）。会话在 `MessagesReceivedFromDevice` 中声明该通知，iPhone 主动推送，无需订阅命令。完成身份识别与 MFi 验证后，回调收到仅在调用期间有效的 `rtcp_device_time_t` 增量，字段为 UTC Unix 秒、时区基础偏移和夏令时偏移，两种偏移均以分钟计。存在标志用于区分缺省字段和零值。宿主负责系统时间及 RTC 策略，AirPlay 媒体时钟沿用原有机制。参考 [LIVI 的消息结构](https://github.com/f-io/LIVI/blob/main/native/crates/iap2-csm/src/messages/device_notifications.rs)和 [OCBM 的解码实现](https://github.com/lvalen91/ocbm/blob/main/crates/vendor/iap2-core/src/metadata.rs)。
 
 Classic 路线引导可由 iAP2 Owner 注册 `on_route_guidance`（`0x5201`）和 `on_route_maneuver`（`0x5202`）。`rtcp/navigation.h` 定义的增量类型包含限长的 UTF-8 文本和原始路线状态或转向类型，文本仅在回调期间有效。宿主应保留未出现的字段，遇到显式空文本时清除对应字段，状态为 `0` 或断线时清除路线。维护转向列表时可用转向索引关联更新。回调会过滤发给其它显示组件的更新。
 
 有 GNSS 数据源的宿主可在创建 iAP2 会话前设置 `identity.provide_location`。在同一 Owner 上调用 `iap2_session_location_requested()` 查询手机订阅的 GGA/RMC 类型，再用 `iap2_session_send_location()` 传入一条带校验和且不含 CR/LF 的 NMEA 语句。宿主管理数据采集、定位质量、发送节奏和重试。手机停止订阅、链路断开或重新鉴权时，SDK 会清除订阅。这些传输接口定义在 `iap2_session.h`。
+
+注册 `on_phone_status` 接收鉴权后的电源、蜂窝网络和通话增量。在 iAP2 Owner 上于回调返回前复制借用的数据，收到 `RTCP_PHONE_STATUS_INVALIDATED` 时清除缓存。仅在时间回调能接收 NULL 更新时启用 `notify_device_time_invalidation`。该更新表示曾提供过时间的链路已退役，宿主可据此作废待处理样本。
+
+注册 `on_route_details`，在原有文本之外接收数值距离、线协议单位和有序转向索引。列表缺省时保留宿主列表，显式空列表则清除。将 `on_lane_guidance` 与 `on_route_details` 一起注册以接收 `0x5204`。用返回的车道索引关联更新，`invalidated` 置位时清除路线、转向和车道缓存。
+
+要启用可选车速辅助，同时设置 `identity.provide_vehicle_speed` 和 `identity.provide_location`。收到 `RTCP_LOCATION_PASCD` 请求时，在 Owner 上调用 `iap2_session_send_vehicle_speed()`。传入单调时钟毫秒采样时间、以毫米每秒计的车速和受支持的 `rtcp_vehicle_gear_t`。返回 false 表示样本未能入队。数据源与采样节奏由宿主管理。
 
 ## 诊断与对端地址
 
@@ -73,6 +79,8 @@ Classic 路线引导可由 iAP2 Owner 注册 `on_route_guidance`（`0x5201`）�
 `rtcp_receiver_set_single_cipher_frame()` 是控制回复分帧的 Owner 线程 A/B 诊断接口。默认仍为分块，Stop/Start 后恢复默认；对停止的 Receiver 设置时返回 `RTCP_ESTATE`。这些 API 均属于 Receiver Owner，允许从该 Owner 的回调调用，不是跨线程访问接口。RT-Thread `carplay_ab` 命令在生命周期保护和队列互斥锁下提交请求值，由 Poll Worker 在下一次协议 Poll 前应用。输出分别显示已应用值、请求值和 Pending 标志。Shell 执行不会解引用协议对象，也不释放资源。
 
 ## 兼容迁移
+
+既有 Receiver 配置和元数据回调的结构布局保持原样。底层 `iap2_session_config_t` 及其身份描述符增加了可选字段。直接使用 iAP2 的宿主需与 SDK 一起重新编译，将完整描述符初始化为零，再显式设置所需回调或能力声明。
 
 早期 `.airplay` 配置过渡字段已由公共 `platform`、`media` 和 `iap2` 描述取代。迁移已有 `airplay_rtsp_server_config_t` 时，包含 `rtcp/receiver_compat.h` 并调用 `rtcp_receiver_config_from_airplay(&legacy, &config)`。该函数先清空目标，再复制所有描述与 Provider 引用，参数为 NULL 时返回 `RTCP_EINVAL`。转换后再设置 `on_state` 和上下文。已有 Provider 生命周期要求仍然适用，辅助函数不分配或打开资源。新集成应直接填写公共配置。
 

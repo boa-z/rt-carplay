@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+/** @file iap2_session.h
+ * Portable iAP2 link composition. Serialize all calls on one owner.
+ * Session callbacks execute synchronously and must not reenter or destroy it. */
 #pragma once
 
 #include <stdbool.h>
@@ -12,6 +15,7 @@
 #include "rtcp/media.h"
 #include "rtcp/mfi.h"
 #include "rtcp/navigation.h"
+#include "rtcp/phone_status.h"
 
 /*
  * Accessory-side iAP2 negotiation for the wireless (Bluetooth) CarPlay path.
@@ -24,6 +28,7 @@
  *   - get_airplay: AirPlay endpoint availability
  */
 
+/** Opaque, owner-thread iAP2 link and negotiation state. */
 typedef struct iap2_session iap2_session_t;
 
 typedef struct
@@ -92,15 +97,22 @@ typedef enum
     IAP2_SESSION_TRANSPORT_WIRED_USB,
 } iap2_session_transport_t;
 
+/** Supply current AP credentials. Keep strings alive for immediate
+ * serialization after return. False means the AP is unavailable. */
 typedef bool (*iap2_session_get_wifi_cb_t)(iap2_session_wifi_t *out, void *context);
+/** Supply the current AirPlay endpoint. False defers an invitation. Keep
+ * strings alive until the session copies them immediately after return. */
 typedef bool (*iap2_session_get_airplay_cb_t)(iap2_session_airplay_t *out, void *context);
+/** Observe a negotiation or link state transition on the session owner. */
 typedef void (*iap2_session_event_cb_t)(iap2_session_event_t event, void *context);
-/* Optional synchronous observer. Body is borrowed until return; do not retain
+/** Optional synchronous observer. Body is borrowed until return; do not retain
  * it or reenter/destroy the session. Outgoing means queued, not peer accepted. */
 typedef void (*iap2_session_message_cb_t)(bool outgoing, uint16_t message_id,
                                           const uint8_t *body, size_t body_len,
                                           void *context);
 
+/** iAP2 link providers and optional metadata callbacks. Copy the config at
+ * create and retain its referenced providers, contexts and strings. */
 typedef struct
 {
     iap2_identity_config_t identity; /* strings are borrowed for the session lifetime */
@@ -128,6 +140,14 @@ typedef struct
     rtcp_route_guidance_cb_t on_route_guidance;
     rtcp_route_maneuver_cb_t on_route_maneuver;
     rtcp_device_time_cb_t on_device_time;
+    /** Phone status on wired and Wi-Fi runtime links. NULL disables delivery. */
+    rtcp_phone_status_cb_t on_phone_status;
+    rtcp_now_playing_details_cb_t on_now_playing_details;
+    rtcp_route_details_cb_t on_route_details;
+    /** Requires on_route_details for route invalidations. */
+    rtcp_lane_guidance_cb_t on_lane_guidance;
+    /** Opt in to a NULL on_device_time update when link clock data expires. */
+    bool notify_device_time_invalidation;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES       4U
@@ -136,28 +156,36 @@ typedef struct
 #define IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS     10000U
 #define IAP2_SESSION_CARPLAY_REINVITE_MAX             5U
 
+/** Allocate a session and copy config. Providers, identity strings and user
+ * context are borrowed through destroy. Returns NULL for invalid input or
+ * allocation failure. */
 iap2_session_t *iap2_session_create(const iap2_session_config_t *config);
+/** Free the session. Call link_down first to deliver invalidations. */
 void iap2_session_destroy(iap2_session_t *session);
 
-/* Call when the RFCOMM link comes up / goes down. */
+/** Begin a fresh negotiation on an available transport. Use monotonic
+ * milliseconds from the same clock as feed and advance. */
 void iap2_session_link_up(iap2_session_t *session, uint64_t now_ms);
+/** Drop pending link traffic and invalidate link-scoped data immediately. */
 void iap2_session_link_down(iap2_session_t *session);
 
-/* Feed bytes received from the RFCOMM transport. */
+/** Feed a transport fragment. Bytes are consumed or copied before return.
+ * Fragments received after link_down are ignored. */
 void iap2_session_feed(iap2_session_t *session, const uint8_t *bytes, size_t len,
                        uint64_t now_ms);
 
-/* Periodic work: retransmits and CarPlay invite pacing. */
+/** Poll retransmission deadlines and invitation pacing with monotonic time. */
 void iap2_session_advance(iap2_session_t *session, uint64_t now_ms);
 
-/* AirPlay event stream state, used to pace CarPlay re-invites. */
+/** Update AirPlay event-channel readiness and invitation pacing. */
 void iap2_session_notify_airplay_event(iap2_session_t *session, bool connected,
                                        uint64_t now_ms);
 
-/*
+/**
  * Route one already-parsed iAP2 control message.  Exposed for transports that
  * demultiplex messages outside this session (and for unit tests); the normal
- * path calls it from the link layer callback.
+ * path calls it from the link layer callback. Body bytes are borrowed until
+ * return. A down link ignores the call.
  */
 void iap2_session_handle_message(iap2_session_t *session,
                                  uint16_t message_id,
@@ -165,13 +193,22 @@ void iap2_session_handle_message(iap2_session_t *session,
                                  size_t body_len,
                                  uint64_t now_ms);
 
+/** Return whether MFi authentication completed on this link. */
 bool iap2_session_is_authenticated(const iap2_session_t *session);
+/** Return whether the phone accepted this link's IdentificationInformation. */
 bool iap2_session_identification_accepted(const iap2_session_t *session);
 
-/* Owner-thread GNSS forwarding. The subscription mask is zero until the
- * authenticated phone requests location and is cleared on stop/link loss.
- * Send accepts one checksummed GGA/RMC sentence without CR/LF. A true return
- * means the iAP2 link queued it. Input is consumed before return. */
+/** Return requested RTCP_LOCATION_* bits after authentication and
+ * identification. Stop, link loss and reauthentication clear the mask. */
 unsigned iap2_session_location_requested(const iap2_session_t *session);
+/** Queue one subscribed, checksummed GGA/RMC sentence without CR/LF. Input
+ * is copied before return. False indicates rejection or queue failure. */
 bool iap2_session_send_location(iap2_session_t *session, const char *sentence,
                                 size_t length, uint64_t now_ms);
+
+/** Owner-thread PASCD report with one sample. sample_ms is monotonic time
+ * since host boot. Speed is an unsigned magnitude in millimetres/second.
+ * Returns true when queued on a subscribed runtime link. */
+bool iap2_session_send_vehicle_speed(iap2_session_t *session, uint64_t sample_ms,
+                                     rtcp_vehicle_gear_t gear, uint32_t speed_mm_s,
+                                     uint64_t now_ms);

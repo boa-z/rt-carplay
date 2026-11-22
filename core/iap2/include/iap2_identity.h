@@ -17,6 +17,8 @@ typedef struct
     uint8_t bluetooth_address[6];
     bool provide_location; /* Advertise host-provided GGA and RMC. */
     bool receive_device_time;
+    bool provide_vehicle_speed; /* Add PASCD to an enabled location component. */
+    bool receive_lane_guidance;
 } iap2_identity_config_t;
 
 #define IAP2_IDENTITY_MAX_OMITTED_MESSAGES 32U
@@ -25,6 +27,8 @@ typedef struct
 #define IAP2_MSG_LOCATION                  0xfffbU
 #define IAP2_MSG_STOP_LOCATION             0xfffcU
 #define IAP2_MSG_DEVICE_TIME_UPDATE        0x4e0bU
+#define IAP2_MSG_LANE_GUIDANCE             0x5204U
+#define IAP2_LANE_GUIDANCE_CAPACITY        8U
 
 /* Builds the bounded parameter body for iAP2 0x1d01 wireless IdentificationInformation. */
 bool iap2_identity_build_wireless(const iap2_identity_config_t *config,

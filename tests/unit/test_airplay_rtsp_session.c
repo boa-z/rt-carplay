@@ -2929,6 +2929,40 @@ static bool host_ui_requested(void *context)
     return true;
 }
 
+static const char now_playing_command[] =
+    "bplist00\xd2\x01\x02\x03\x0b\x56"
+    "params\x54"
+    "type\xd1\x01\x04"
+    "\xd3\x05\x06\x07\x08\x09\x0a"
+    "\x5f\x10\x27"
+    "kMRMediaRemoteNowPlayingInfoArtworkData"
+    "\x5f\x10\x24"
+    "kMRMediaRemoteNowPlayingInfoDuration"
+    "\x5f\x10\x27"
+    "kMRMediaRemoteNowPlayingInfoElapsedTime"
+    "\x43"
+    "art\x11\x01\x5f\x23\x40\x04\x00\x00\x00\x00\x00\x00"
+    "\x5f\x10\x16"
+    "updateMRNowPlayingInfo"
+    "\x08\x0d\x14\x19\x1c\x23\x4d\x74\x9e\xa2\xa5\xae"
+    "\x00\x00\x00\x00\x00\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x0c"
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc7";
+
+static void capture_now_playing_details(const rtcp_now_playing_details_t *update, void *context)
+{
+    unsigned *updates = context;
+    ++*updates;
+    if (update->invalidated)
+    {
+        assert(*updates == 2U);
+        return;
+    }
+    assert(*updates == 1U);
+    assert(update->has_duration && update->duration_ms == 351000U);
+    assert(update->has_elapsed && update->elapsed_ms == 2500U);
+    assert(update->has_artwork && update->artwork_length == 3U && !memcmp(update->artwork, "art", 3U));
+}
+
 static void test_iap_runtime_and_commands(void)
 {
     static const uint8_t identifier[] = "accessory", public_key[32] = { 0 };
@@ -2968,6 +3002,9 @@ static void test_iap_runtime_and_commands(void)
     unsigned host_ui_requests = 0;
     config.on_host_ui = host_ui_requested;
     config.host_ui_context = &host_ui_requests;
+    unsigned media_updates = 0;
+    config.on_now_playing_details = capture_now_playing_details;
+    config.now_playing_details_context = &media_updates;
     airplay_rtsp_session_t *session = NULL;
     assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_OK);
     EXPECT_IAP("POST", "/command", disable, "503 Service Unavailable");
@@ -2979,6 +3016,9 @@ static void test_iap_runtime_and_commands(void)
     expect_body_status(session, "POST", "/command", request_ui, request_ui_len, "503 Service Unavailable");
     assert(host_ui_requests == 0);
     airplay_rtsp_session_mark_control_cipher_active(session);
+    expect_body_status(session, "POST", "/command", (const uint8_t *)now_playing_command,
+                       sizeof(now_playing_command) - 1U, "200 OK");
+    assert(media_updates == 1U);
     expect_body_status(session, "POST", "/command", request_ui, request_ui_len, "200 OK");
     assert(host_ui_requests == 1);
     EXPECT_IAP("POST", "/command", modes, "200 OK");
@@ -3048,8 +3088,10 @@ static void test_iap_runtime_and_commands(void)
     EXPECT_IAP("TEARDOWN", "/stream", iap_stop, "200 OK");
     assert(iap_stops == 1);
     EXPECT_IAP("SETUP", "/stream", iap_setup, "503 Service Unavailable");
+    expect_body_status(session, "TEARDOWN", "/stream", NULL, 0, "200 OK");
+    assert(media_updates == 2U);
     airplay_rtsp_session_destroy(session);
-    assert(iap_stops == 1);
+    assert(iap_stops == 1 && media_updates == 2U);
 }
 static bool test_start_video(const airplay_rtsp_pairing_t *pairing, uint16_t type,
                              uint64_t connection, uint16_t requested, uint16_t *port, void *context)

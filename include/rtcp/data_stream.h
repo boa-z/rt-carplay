@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI); see NOTICE.
  */
+/** @file data_stream.h
+ * Experimental Type 130 lane transport and snapshots. */
 #ifndef RTCP_DATA_STREAM_H
 #define RTCP_DATA_STREAM_H
 #include <stdbool.h>
@@ -10,6 +12,7 @@
 #define RTCP_DATA_STREAM_VEHICLE_UUID      "3E2F3C61-AAD0-42CB-A8AA-BF22186DA62E"
 #define RTCP_DATA_STREAM_VEHICLE_HIGH_UUID "FF4A6720-F2BE-4F56-A3E1-DB3B4E37D634"
 #define RTCP_DATA_STREAM_UI_SYNC_UUID      "07D9F906-8D64-4B54-A808-A20BCA2C51C2"
+/** Independent authenticated data lane selected by its protocol UUID. */
 typedef enum
 {
     RTCP_DATA_STREAM_VEHICLE,
@@ -20,6 +23,7 @@ typedef enum
 #define RTCP_DATA_STREAM_MASK(kind) (1U << (kind))
 #define RTCP_DATA_STREAM_ALL_MASK   ((1U << RTCP_DATA_STREAM_COUNT) - 1U)
 
+/** Transport readiness of one lane, independent of application delivery. */
 typedef enum
 {
     RTCP_DATA_STREAM_IDLE,
@@ -28,6 +32,7 @@ typedef enum
     RTCP_DATA_STREAM_CLOSED,
     RTCP_DATA_STREAM_FAILED,
 } rtcp_data_stream_state_t;
+/** Copied lane state, traffic counters and bounded output queue usage. */
 typedef struct
 {
     bool registered, offered;
@@ -40,7 +45,7 @@ typedef struct
     size_t queued_packages, queued_bytes;
 } rtcp_data_stream_status_t;
 
-/* Optional transport registration, disabled when channel_mask is zero.
+/** Optional transport registration, disabled when channel_mask is zero.
  * It does not advertise enabledFeatures, vehicleStateProtocolInfo, uiSyncInfo
  * or displayPanels, or implement Vehicle State/UI Sync itself. The host must
  * register only protocols it can handle. Each callback runs on the Receiver

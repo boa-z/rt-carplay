@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+/** @file opack.h
+ * Bounded OPACK codec using caller-owned storage. */
 #ifndef RTCP_OPACK_H
 #define RTCP_OPACK_H
 #include <stdbool.h>
@@ -12,6 +14,7 @@ extern "C"
 #define RTCP_OPACK_MAX_NODES 512U
 #define RTCP_OPACK_MAX_DEPTH 16U
 #define RTCP_OPACK_MAX_BYTES 65536U
+/** Scalar and container tags accepted by this OPACK codec. */
 typedef enum
 {
     RTCP_OPACK_NULL,
@@ -26,7 +29,7 @@ typedef enum
     RTCP_OPACK_DICT
 } rtcp_opack_type_t;
 
-/* Nodes form a preorder arena. end is the exclusive subtree boundary.
+/** Nodes form a preorder arena. end is the exclusive subtree boundary.
  * Container count is array items or dictionary pairs; first child is index+1.
  * String/data/UUID bytes borrow the input buffer. No allocation or recursion
  * into external references. References decode to independent scalar nodes. */
@@ -47,6 +50,7 @@ typedef struct
     } value;
 } rtcp_opack_node_t;
 
+/** Result of an OPACK codec operation. */
 typedef enum
 {
     RTCP_OPACK_OK,
@@ -56,15 +60,19 @@ typedef enum
     RTCP_OPACK_UNSUPPORTED
 } rtcp_opack_result_t;
 
-/* Both count/length outputs are zero on error. Caller storage may be partially
+/** Decode bytes into caller-owned preorder nodes. Count is zero on error.
+ * Leaf byte spans borrow the input for as long as the nodes are used.
+ * Caller storage may be partially
  * written on failure and must not be consumed. UTF-8 must be valid, floats
  * finite, containers complete; trailing bytes and unknown tags are rejected. */
 rtcp_opack_result_t rtcp_opack_decode(const uint8_t *, size_t,
                                       rtcp_opack_node_t *, size_t capacity,
                                       size_t *node_count);
+/** Encode a complete node arena into a separate caller buffer. Length is
+ * zero on error. Discard partially written bytes after failure. */
 rtcp_opack_result_t rtcp_opack_encode(const rtcp_opack_node_t *, size_t count,
                                       uint8_t *, size_t capacity, size_t *length);
-/* Returns SIZE_MAX for absent keys or invalid arenas. Numeric dictionary keys
+/** Returns SIZE_MAX for absent keys or invalid arenas. Numeric dictionary keys
  * remain available by traversing the preorder nodes (Vehicle State uses them). */
 size_t rtcp_opack_dict_get(const rtcp_opack_node_t *, size_t count,
                            size_t dictionary, const char *key);

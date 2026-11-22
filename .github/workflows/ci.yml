@@ -32,7 +32,7 @@ jobs:
       - run: python3 -m pip install clang-format==23.1.1
       - run: python3 scripts/format-code.py --check
   documentation:
-    name: bilingual documentation
+    name: Public API and bilingual documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

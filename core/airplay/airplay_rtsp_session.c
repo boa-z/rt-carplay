@@ -79,6 +79,7 @@ struct airplay_rtsp_session
     uint32_t screen_entity;
     unsigned unsupported_commands;
     unsigned now_playing_traces;
+    bool now_playing_reported;
     session_data_stream_t data_stream[RTCP_DATA_STREAM_COUNT];
     uint32_t data_stream_offered, last_data_stream_id;
 };
@@ -524,6 +525,15 @@ static bool teardown_stream_selection(const airplay_rtsp_session_t *session, con
     return true;
 }
 
+static void invalidate_now_playing(airplay_rtsp_session_t *session)
+{
+    if (!session->now_playing_reported)
+        return;
+    session->now_playing_reported = false;
+    const rtcp_now_playing_details_t update = { .invalidated = true };
+    session->config.on_now_playing_details(&update, session->config.now_playing_details_context);
+}
+
 static airplay_rtsp_session_result_t handle_teardown(
     airplay_rtsp_session_t *session,
     const airplay_rtsp_request_t *request,
@@ -590,6 +600,8 @@ static airplay_rtsp_session_result_t handle_teardown(
     session->screen_entity = 0U;
     session->event_port = 0U;
     session->timing_port = 0U;
+    /* Stream-only TEARDOWN returns earlier and keeps session metadata live. */
+    invalidate_now_playing(session);
     return status_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
                            response, response_capacity, response_len);
 }
@@ -1401,10 +1413,23 @@ static airplay_rtsp_session_result_t handle_get_parameter(
                           (size_t)written, response, response_capacity, response_len);
 }
 
+static bool now_playing_ms(const airplay_bplist_doc_t *doc, airplay_bplist_object_t info, const char *key, uint32_t *out)
+{
+    airplay_bplist_object_t field;
+    double seconds;
+    if (airplay_bplist_dict_get_unique(doc, info, key, &field) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_get_number(doc, field, &seconds) != AIRPLAY_BPLIST_OK ||
+        seconds < 0.0 || seconds > UINT32_MAX / 1000.0)
+        return false;
+    *out = (uint32_t)(seconds * 1000.0);
+    return true;
+}
+
 static bool handle_now_playing(airplay_rtsp_session_t *session, const airplay_bplist_doc_t *doc,
                                airplay_bplist_object_t params, bool playback_state)
 {
     rtcp_now_playing_t update = { 0 };
+    rtcp_now_playing_details_t details = { 0 };
     airplay_bplist_object_t field;
     char text[3][129];
     if (playback_state)
@@ -1436,6 +1461,15 @@ static bool handle_now_playing(airplay_rtsp_session_t *session, const airplay_bp
                 airplay_bplist_get_utf8(doc, field, text[index], sizeof(text[index])))
                 *fields[index] = text[index];
         }
+        if (session->config.on_now_playing_details)
+        {
+            details.has_duration = now_playing_ms(doc, info, "kMRMediaRemoteNowPlayingInfoDuration", &details.duration_ms);
+            details.has_elapsed = now_playing_ms(doc, info, "kMRMediaRemoteNowPlayingInfoElapsedTime", &details.elapsed_ms);
+            details.has_artwork = airplay_bplist_dict_get_unique(doc, info, "kMRMediaRemoteNowPlayingInfoArtworkData", &field) ==
+                                      AIRPLAY_BPLIST_OK &&
+                                  airplay_bplist_get_data(doc, field, &details.artwork, &details.artwork_length) ==
+                                      AIRPLAY_BPLIST_OK;
+        }
     }
     if (session->now_playing_traces < 16U)
     {
@@ -1444,8 +1478,16 @@ static bool handle_now_playing(airplay_rtsp_session_t *session, const airplay_bp
                   playback_state ? "updateMRPlaybackState" : "updateMRNowPlayingInfo", update.title ? 1U : 0U,
                   update.artist ? 1U : 0U, update.album ? 1U : 0U, update.has_playing ? 1U : 0U);
     }
-    if (session->config.on_now_playing && (update.has_playing || update.title || update.artist || update.album))
+    bool usable = update.has_playing || update.title || update.artist || update.album;
+    if (session->config.on_now_playing && usable)
         session->config.on_now_playing(&update, session->config.now_playing_context);
+    if (session->config.on_now_playing_details &&
+        (usable || details.has_duration || details.has_elapsed || details.has_artwork))
+    {
+        details.item = update;
+        session->now_playing_reported = true;
+        session->config.on_now_playing_details(&details, session->config.now_playing_details_context);
+    }
     return true;
 }
 
@@ -2014,6 +2056,7 @@ void airplay_rtsp_session_destroy(airplay_rtsp_session_t *session)
 {
     if (session == NULL)
         return;
+    invalidate_now_playing(session);
     for (unsigned k = 0; k < RTCP_DATA_STREAM_COUNT; ++k) stop_data_stream(session, k);
     if (session->iap_port && session->config.stop_iap)
     {

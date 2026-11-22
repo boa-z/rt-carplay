@@ -105,6 +105,8 @@ typedef struct airplay_rtsp_server_config
     uint16_t alt_screen_port;
     airplay_screen_message_cb_t on_alt_screen_message;
     void *alt_screen_message_context;
+    rtcp_now_playing_details_cb_t on_now_playing_details;
+    void *now_playing_details_context;
 } airplay_rtsp_server_config_t;
 
 int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,

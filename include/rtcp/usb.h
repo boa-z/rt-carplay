@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/*
+/** @file usb.h
  * USB host transport seam.
  *
- * Wired CarPlay starts on the D213 USB1 host controller: the iPhone is
- * enumerated, switched to its CarPlay USB configuration, and then driven
+ * Wired CarPlay starts when the USB host enumerates the iPhone. It switches
+ * to the CarPlay USB configuration, then communicates
  * through a bulk pipe (USBMUX) and a CDC-NCM network interface.  The protocol
  * core must not know which host stack performs those transfers, so this
  * header defines a small hardware-independent description of the attached
@@ -58,6 +58,7 @@
 #define RTCP_USB_MAX_ALTSETTINGS 4U
 #define RTCP_USB_MAX_ENDPOINTS   4U
 
+/** Negotiated USB bus speed reported by the platform. */
 typedef enum
 {
     RTCP_USB_SPEED_UNKNOWN = 0,
@@ -67,6 +68,7 @@ typedef enum
     RTCP_USB_SPEED_SUPER = 4,
 } rtcp_usb_speed_t;
 
+/** One endpoint descriptor with the direction bit included in address. */
 typedef struct
 {
     uint8_t address;       /* bEndpointAddress, bit 7 set for IN */
@@ -75,6 +77,7 @@ typedef struct
     uint8_t interval;
 } rtcp_usb_endpoint_t;
 
+/** Bounded endpoint snapshot for a single alternate setting. */
 typedef struct
 {
     uint8_t alternate_setting;
@@ -82,6 +85,7 @@ typedef struct
     rtcp_usb_endpoint_t endpoints[RTCP_USB_MAX_ENDPOINTS];
 } rtcp_usb_altsetting_t;
 
+/** Interface identity and its bounded alternate-setting snapshots. */
 typedef struct
 {
     uint8_t number;
@@ -92,6 +96,7 @@ typedef struct
     rtcp_usb_altsetting_t altsettings[RTCP_USB_MAX_ALTSETTINGS];
 } rtcp_usb_interface_t;
 
+/** Copied device identity and selected configuration descriptors. */
 typedef struct
 {
     bool present;
@@ -112,6 +117,7 @@ typedef struct
     rtcp_usb_interface_t interfaces[RTCP_USB_MAX_INTERFACES];
 } rtcp_usb_device_t;
 
+/** Host-stack attach and detach events for one device lifetime. */
 typedef enum
 {
     /* The device finished enumeration and its configuration was selected. */
@@ -121,10 +127,12 @@ typedef enum
 } rtcp_usb_event_t;
 
 struct rtcp_usb;
+/** The USB stack may call this from its own thread. Record the event and
+ * wake the owner. Defer device operations to that owner. */
 typedef void (*rtcp_usb_event_cb_t)(struct rtcp_usb *usb,
                                     rtcp_usb_event_t event, void *user);
 
-/*
+/**
  * Platform operations.  A port supplies these; the protocol core only sees
  * this table.  All calls are made from one owning thread (the shell command
  * or the wired control task), except the event callback, which the host
@@ -155,30 +163,31 @@ typedef struct
                          size_t length, uint32_t timeout_ms);
 } rtcp_usb_ops_t;
 
+/** USB host backend. The caller keeps ops and context valid while open. */
 typedef struct rtcp_usb
 {
     const rtcp_usb_ops_t *ops;
     void *context;
 } rtcp_usb_t;
 
-/* Parse a raw configuration descriptor into `device`.  Device-level fields
+/** Parse a raw configuration descriptor into `device`. Device-level fields
  * are left untouched.  Returns RTCP_OK or RTCP_EINVAL. */
 int rtcp_usb_parse_configuration(rtcp_usb_device_t *device,
                                  const uint8_t *descriptor, size_t length);
 
-/* Return the index into device->interfaces for the first interface whose
+/** Return the index into device->interfaces for the first interface whose
  * class/subclass/protocol match, or RTCP_ENOENT. */
 int rtcp_usb_find_interface(const rtcp_usb_device_t *device, uint8_t class_code,
                             uint8_t subclass, uint8_t protocol);
 
-/* Find one bulk OUT and one bulk IN endpoint in the best alternate setting of
+/** Find one bulk OUT and one bulk IN endpoint in the best alternate setting of
  * `interface` (the highest alternate setting that has both).  Either output
  * pointer may be NULL.  Returns true when at least one was found. */
 bool rtcp_usb_interface_bulk_endpoints(const rtcp_usb_interface_t *interface,
                                        uint8_t *out_endpoint,
                                        uint8_t *in_endpoint);
 
-/*
+/**
  * Functions present in one configuration, derived from its interface
  * descriptors.  `ncm_*` describe the *standard* CDC-NCM function
  * (control 02/0d plus a CDC data interface 0a with a bulk pair); that is
@@ -196,10 +205,11 @@ typedef struct
     bool ptp;               /* class 06 / subclass 01 / protocol 01 */
 } rtcp_usb_functions_t;
 
+/** Analyze a copied device configuration and fill the caller's summary. */
 void rtcp_usb_classify_configuration(const rtcp_usb_device_t *device,
                                      rtcp_usb_functions_t *functions);
 
-/* Selection preference for the wired CarPlay configuration.  The standard
+/** Selection preference for the wired CarPlay configuration. The standard
  * CDC-NCM pair is preferred because the existing host driver can drive it;
  * Apple Ethernet is the fallback; OTHER means the configuration carries no
  * usable wired IP link. */
@@ -210,34 +220,37 @@ typedef enum
     RTCP_USB_CONFIG_NCM = 2,
 } rtcp_usb_configuration_kind_t;
 
+/** Return the best usable network function in the selected configuration. */
 rtcp_usb_configuration_kind_t rtcp_usb_configuration_kind(
     const rtcp_usb_device_t *device);
 
-/* True when the configuration carries USBMUX plus a complete, adjacent
+/** True when the configuration carries USBMUX plus a complete, adjacent
  * standard CDC-NCM function.  This is the descriptor answer to "can the
  * existing CherryUSB CDC-NCM driver be reused?". */
 bool rtcp_usb_configuration_has_ncm_link(const rtcp_usb_device_t *device);
 
-/* True when the selected configuration carries the wired CarPlay function
+/** True when the selected configuration carries the wired CarPlay function
  * set: a vendor-specific USBMUX interface plus either the standard CDC-NCM
  * pair or Apple's Ethernet interface.  This is the descriptor-derived
  * replacement for "configuration number 6". */
 bool rtcp_usb_is_carplay_configuration(const rtcp_usb_device_t *device);
 
-/*
+/** Borrow one whole printable descriptor line until callback return. */
+typedef void (*rtcp_usb_text_cb_t)(void *user, const char *line);
+
+/**
  * Human-readable dump of one raw configuration descriptor.  `emit` is called
  * once per line (no newline needed).  The walk uses the raw bytes, so it also
  * prints interfaces, alternate settings and endpoints beyond the
  * RTCP_USB_MAX_* model limits.  When `device` is not NULL, its parsed
  * classification is appended.  Returns RTCP_OK or RTCP_EINVAL.
  */
-typedef void (*rtcp_usb_text_cb_t)(void *user, const char *line);
 int rtcp_usb_describe_configuration(const rtcp_usb_device_t *device,
                                     const uint8_t *descriptor, size_t length,
                                     uint8_t index, rtcp_usb_text_cb_t emit,
                                     void *user);
 
-/* CarPlay NCM control interface number in the selected configuration, taken
+/** CarPlay NCM control interface number in the selected configuration, taken
  * from the descriptor (CDC-NCM control interface, or Apple Ethernet when the
  * device exposes no NCM function).  iAP2 USBHostTransportComponent parameter
  * 3 carries this number.  Returns RTCP_ENOENT when neither interface exists. */

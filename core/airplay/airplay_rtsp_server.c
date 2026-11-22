@@ -1096,6 +1096,8 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.get_volume_context = server->config.get_volume_context;
     session_config.on_now_playing = server->config.on_now_playing;
     session_config.now_playing_context = server->config.now_playing_context;
+    session_config.on_now_playing_details = server->config.on_now_playing_details;
+    session_config.now_playing_details_context = server->config.now_playing_details_context;
     session_config.on_host_ui = server->config.on_host_ui;
     session_config.host_ui_context = server->config.host_ui_context;
     session_config.volume_context = server;

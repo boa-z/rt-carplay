@@ -282,7 +282,7 @@ static bool build_identification(const iap2_identity_config_t *config,
             filtered_sent[filtered_sent_count++] = sent_messages[i];
         }
     }
-    uint16_t filtered_received[sizeof(wireless_received) / sizeof(wireless_received[0]) + 3U];
+    uint16_t filtered_received[sizeof(wireless_received) / sizeof(wireless_received[0]) + 4U];
     size_t filtered_received_count = 0U;
     for (size_t i = 0U; i < received_count; ++i)
     {
@@ -301,6 +301,10 @@ static bool build_identification(const iap2_identity_config_t *config,
     if (config->receive_device_time &&
         !is_message_omitted(IAP2_MSG_DEVICE_TIME_UPDATE, omitted_message_ids, omitted_message_count))
         filtered_received[filtered_received_count++] = IAP2_MSG_DEVICE_TIME_UPDATE;
+    const bool lanes = config->receive_lane_guidance &&
+                       !is_message_omitted(IAP2_MSG_LANE_GUIDANCE, omitted_message_ids, omitted_message_count);
+    if (lanes)
+        filtered_received[filtered_received_count++] = IAP2_MSG_LANE_GUIDANCE;
 
     if (!append_string(output, output_capacity, &used, 0, config->name) ||
         !append_string(output, output_capacity, &used, 1, config->model_identifier) ||
@@ -392,6 +396,8 @@ static bool build_identification(const iap2_identity_config_t *config,
             !append_string(component, sizeof(component), &component_len, 1, "GNSS") ||
             !append_void(component, sizeof(component), &component_len, 17) ||
             !append_void(component, sizeof(component), &component_len, 18) ||
+            (config->provide_vehicle_speed &&
+             !append_void(component, sizeof(component), &component_len, 20)) ||
             !append_group(output, output_capacity, &used, 22, component, component_len))
             return false;
     }
@@ -404,6 +410,9 @@ static bool build_identification(const iap2_identity_config_t *config,
         !append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 2, 64) ||
         !append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 4, 64) ||
         !append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 6, 8) ||
+        (lanes &&
+         (!append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 7, 128U) ||
+          !append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 8, IAP2_LANE_GUIDANCE_CAPACITY))) ||
         !append_group(output, output_capacity, &used, 30,
                       route_guidance, route_guidance_len))
     {

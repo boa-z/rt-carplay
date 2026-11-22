@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/*
+/** @file usbmux.h
  * Apple USBMUX v2 wire format (the multiplexing layer used on the iPhone's
  * CarPlay USB configuration, and by usbmuxd on the normal configuration).
  *
@@ -10,8 +10,8 @@
  *            | payload
  *
  * The peer's third header word is opaque on RX, matching usbmuxd.
- * The first frame sent by the host is the 20-byte version packet; it is the
- * initial packet uses an eight-byte header and three u32be words for
+ * The host's first frame is the 20-byte version packet. It uses an
+ * eight-byte header and three u32be words for
  * major (2), minor and padding, rather than the v2 header/magic.  The
  * host then sends a setup packet (proto 2, payload 0x07) and may open TCP
  * streams (proto 6) whose payload starts with a 20-byte TCP header in the
@@ -56,6 +56,7 @@
 /* Apple's receivers advertise this window (LIVI uses 131072 >> 8). */
 #define RTCP_USBMUX_TCP_WINDOW 0x0200U
 
+/** Decoded USBMUX TCP packet. Payload borrows the input frame. */
 typedef struct
 {
     uint16_t source_port;
@@ -68,16 +69,16 @@ typedef struct
     size_t payload_length;
 } rtcp_usbmux_tcp_packet_t;
 
-/* Build the 20-byte version announcement.  Returns the length or 0 when the
+/** Build the 20-byte version announcement. Returns the length or 0 when the
  * output buffer is too small. */
 size_t rtcp_usbmux_build_version(uint8_t *output, size_t capacity);
 
-/* Build a setup packet (proto 2).  flags is 0x07 on the wire after the
- * version handshake. */
+/** Build a setup packet (proto 2). flags is 0x07 after the version exchange.
+ * Returns bytes written, or zero when the output cannot hold the frame. */
 size_t rtcp_usbmux_build_setup(uint8_t *output, size_t capacity, uint8_t flags,
                                uint16_t tx_index);
 
-/* Build a TCP stream packet (proto 6).  tx_index is the per-host frame
+/** Build a TCP stream packet (proto 6). tx_index is the per-host frame
  * counter carried in the mux header.  Returns the length or 0 when the
  * payload is too large for the frame or the buffer is too small. */
 size_t rtcp_usbmux_build_tcp(uint8_t *output, size_t capacity, uint16_t tx_index,
@@ -86,11 +87,11 @@ size_t rtcp_usbmux_build_tcp(uint8_t *output, size_t capacity, uint16_t tx_index
                              uint8_t flags, const void *payload,
                              size_t payload_length);
 
-/*
+/**
  * Split one frame from a receive buffer. The outbound magic is not an
  * inbound invariant: like usbmuxd, RX validates protocol and size instead.
  *  On success returns 1 and sets
- * *frame_length, *proto and the payload pointer/length.  Returns 0 when the
+ * the frame length, protocol, and payload span borrowed from data. Returns 0 when the
  * buffer does not yet hold a complete frame (wait for more bulk data) and
  * RTCP_EIO when the header is not a valid USBMUX frame.  A frame length of
  * below that protocol's minimum or more than 1 MiB is rejected, as is an
@@ -100,7 +101,7 @@ int rtcp_usbmux_parse_frame(const uint8_t *data, size_t length,
                             size_t *frame_length, uint32_t *proto,
                             const uint8_t **payload, size_t *payload_length);
 
-/* Parse the 20-byte TCP header of a proto 6 payload.  Returns RTCP_OK or
+/** Parse the 20-byte TCP header of a proto 6 payload. Returns RTCP_OK or
  * RTCP_EINVAL when the frame is too short. */
 int rtcp_usbmux_parse_tcp(const uint8_t *payload, size_t payload_length,
                           rtcp_usbmux_tcp_packet_t *packet);

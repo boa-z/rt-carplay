@@ -8,7 +8,7 @@ The architecture migration does not attempt to fix the existing CarPlay audio ro
 
 ## Existing symptom and reproduction
 
-The existing board reports describe an authenticated wireless iAP2 tunnel with completed handoff and working video, while music remains on the iPhone. `carplay_status` reports `streams=0 datagrams=0`, and the audio sink has zero packets. Recorded SETUP candidates include 130/iAP2 and 110/Screen without 100/101/102 audio streams. A running `carplay-aud` worker or an open `sound0` device does not establish Audio SETUP or media receipt. Earlier capability/clock/Bluetooth-identity fixes are recorded in `audio-routing.md` and `audio-negotiation.md`; their presence did not establish a complete audio fix.
+A wireless session can complete iAP2 authentication and handoff and play video while music remains on the iPhone. In that case, `carplay_status` may report `streams=0 datagrams=0`, with SETUP for 130/iAP2 and 110/Screen but no 100/101/102 audio streams. A running `carplay-aud` worker or an open `sound0` is independent of Audio SETUP. See [audio negotiation](audio-negotiation.md) for capability and Bluetooth identity checks.
 
 To reproduce on the reference board, use the normal D213 GUI profile, complete phone consent and the established USB/Wireless connection flow, play changing video content and start music on the phone, then collect connection logs and the following read-only snapshots. Record the exact firmware/submodule revisions, iOS/device model, selected mode, actual phone audio route and whether a call/Siri/navigation stream was involved. Do not mix manual start/stop commands with the automatic launcher owner.
 

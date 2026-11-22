@@ -10,7 +10,7 @@ From the maintained Luban-Lite root, run actual board-adapter Host regressions w
 
 Branch: `main` (audio changes integrated). Hardware baseline: wireless v30 video and Bluetooth handoff were confirmed by the user. Audio changes on this branch have **not** been tested on D213 hardware.
 
-See [audio routing repair](audio-routing.md) for the subsequent discovery-mask and startup-clock-wrap fixes, connection-time Bluetooth identity refresh, the current image checksum and board diagnostics. The user's subsequent board trace still had no audio SETUP after the first routing repair; the identity repair and new capability trace did not establish audio SETUP in the user's next test. See [current negotiation investigation](audio-negotiation.md) for the formatter repair, truthful PCM/AAC flags, dual-rate media offer and current test image.
+See [audio negotiation](audio-negotiation.md) for discovery and Bluetooth identity checks, PCM/AAC capability flags and the dual-rate media offer. Use the [debugging guide](audio-debug-handoff.md) to distinguish missing Audio SETUP from downstream audio faults.
 
 ## Findings from actual code and open source references
 

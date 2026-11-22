@@ -10,7 +10,7 @@
 
 分支：`main`，音频修改已集成。硬件基线：用户确认过无线 v30 视频与蓝牙交接。该分支的音频修改**尚未在 D213 硬件上测试**。
 
-后续 Discovery Mask 和启动时钟回绕修复、连接时蓝牙身份刷新、当时镜像校验值及板端诊断见[音频路由修复](audio-routing.md)。首次路由修复后，用户后续板端 Trace 仍没有 Audio SETUP；身份修复及新能力 Trace 也未在下一次用户测试中确认 Audio SETUP。Formatter 修复、真实 PCM/AAC 标志、双采样率 Media Offer 和当时测试镜像见[协商调查](audio-negotiation.md)。
+见[音频协商](audio-negotiation.md)了解发现和蓝牙身份检查、PCM/AAC 能力标志及双采样率媒体声明。按[调试指南](audio-debug-handoff.md)区分缺失 Audio SETUP 和下游音频故障。
 
 ## 实际代码和开源参考中的发现
 

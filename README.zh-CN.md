@@ -126,19 +126,24 @@ Host 验证覆盖 `_airplay._tcp.local` 的 mDNS `PTR`、`SRV`、`TXT`、`A` 记
 
 ## 开发状态与已知限制
 
-可移植 API、原生 Linux/RT-Thread 配置、公共媒体元数据和兼容转换已通过 Host Tested 验证。包装层调度模型覆盖回滚、立即停止、输入互斥和蓝牙所有权领取，并不证明所有旧诊断或借用字符串均线程安全。板级适配与 Kconfig 所有权已拆分，独立 Headless 示例已具备真实 Socket、发现和持久化 Host 回归覆盖。其余设备 Worker 生命周期审查和实机验收仍未完成。全部 26 篇正式维护主文档现已有完整中文版本及本地／CI 文档检查；机械检查不证明语义翻译准确。
+Host 回归覆盖可移植 API、公共媒体元数据、真实 Socket、发现、持久化及生命周期回滚。具体能力证据和剩余硬件检查见 [Classic 能力审计](docs/zh-CN/classic-capability-audit.md)。
 
-本次重构冻结音频协商与输出策略。已有 iPhone 路由、零 Audio SETUP 流、Direct/Mixer 和声学问题属于独立调查。不提供 Android Auto、CarLife 或 CarLink。cherryusb-ipheth 保持独立，USB 配置选择和 CarPlay Session 由宿主负责。不能把 Host Tested 或 Cross-Compiled 等同于 Hardware Validated。
+宿主负责 USB 配置选择和 CarPlay 会话，并使用独立的 cherryusb-ipheth 驱动。iPhone 音频路由和声学仍需在设备上分别验证。Android Auto、CarLife 和 CarLink 在 SDK 的范围之外。
 
 ## 文档
 
-- [架构](docs/zh-CN/architecture.md)、[Receiver API](docs/zh-CN/receiver-api.md) 和[生命周期与所有权](docs/zh-CN/lifecycle-and-ownership.md) 已有完整中英版本。
-- [音频调试交接](docs/zh-CN/audio-debug-handoff.md) 已有完整中英版本。
-- 历史[60 FPS 可行性](docs/zh-CN/1024x600-60fps-feasibility.md)、[Zalink 对照](docs/zh-CN/zalink-performance-comparison.md)、[音频路由](docs/zh-CN/audio-routing.md)、[音频协商](docs/zh-CN/audio-negotiation.md)和[有线配对持久化](docs/zh-CN/wired-pairing-persistence.md)已有完整中英配对，保留各版本观察作为历史证据。
-- [配对重连](docs/zh-CN/bluetooth-bond-reconnect.md)、[有线视频性能](docs/zh-CN/wired-video-performance.md)和[有线停顿调查](docs/zh-CN/wired-video-stall-probe.md)也已有完整配对，包含历史测量与当前职责说明。[RT-Thread](port/rtthread/README.zh-CN.md)和 [Luban-Lite](port/luban-lite/README.zh-CN.md) Port 说明、[合成音频素材](tests/fixtures/audio/README.zh-CN.md)和[音频依赖来源](third_party/audio/README.zh-CN.md)已有完整配对；现行构建／熵源／生命周期用法与保留的早期移植命令明确区分。
-- [音频子系统](docs/zh-CN/audio-subsystem.md)、[音频参考复核](docs/zh-CN/audio-routing-reference-review.md)和[无线启动](docs/zh-CN/wireless-bringup.md)已有完整配对，保留实现矩阵、Host 实测开销、历史手机／板端反馈和未解决限制。V2.1 期间音频行为保持冻结。
-- [USBMUX 协商／验证](docs/zh-CN/usbmux-validation.md)、[有线认证调查](docs/zh-CN/wired-auth-investigation.md)和[已退役 RT-Thread 板级模板记录](examples/rtthread_app/README.zh-CN.md)也已有完整配对。历史命令和结果保持版本范围，并说明当前宿主职责与对应命令。
-- 运行 `make check-docs` 检查全部 27 对文档：发现、命名、双向导航、本地文件／标题锚点、段落格式、语言、标题层级、完整代码块、行内标识符及外部参考一致性。检查复用 cherryusb-ipheth 的 Apache-2.0 工具，并运行其 17 项独立变异回归。不访问外部网站。`docs/documentation-exceptions.json` 仅豁免保留的上游 Ed25519 署名。技术事实、正文数值和翻译含义仍需人工审查。
+| 领域 | 指南 |
+| --- | --- |
+| SDK 契约 | [Receiver API](docs/zh-CN/receiver-api.md)、[架构](docs/zh-CN/architecture.md)、[生命周期与所有权](docs/zh-CN/lifecycle-and-ownership.md)、[Classic 能力审计](docs/zh-CN/classic-capability-audit.md) |
+| 集成 | [RT-Thread](port/rtthread/README.zh-CN.md)、[Luban-Lite](port/luban-lite/README.zh-CN.md)、[宿主职责迁移](docs/zh-CN/luban-lite-migration.md) |
+| 传输 | [无线启动](docs/zh-CN/wireless-bringup.md)、[蓝牙重连](docs/zh-CN/bluetooth-bond-reconnect.md)、[有线信任持久化](docs/zh-CN/wired-pairing-persistence.md)、[视频会话](docs/zh-CN/video-stream-session.md) |
+| 音频 | [子系统](docs/zh-CN/audio-subsystem.md)、[协商](docs/zh-CN/audio-negotiation.md)、[调试](docs/zh-CN/audio-debug-handoff.md)、[测试素材](tests/fixtures/audio/README.zh-CN.md)、[依赖来源](third_party/audio/README.zh-CN.md) |
+| 实验 | [Ultra 基础](docs/zh-CN/ultra-foundation.md)、[Vehicle State](docs/zh-CN/vehicle-controls.md)、[UI Sync](docs/zh-CN/ui-sync.md)、[能力门控](docs/zh-CN/ui-sync-capabilities.md)、[LIVI 主题研究](docs/zh-CN/livi-theme-review.md) |
+| 贡献 | [代码格式](docs/zh-CN/code-formatting.md) |
+
+`docs/` 下以英文指南为主，简体中文放在 `docs/zh-CN/` 下并使用同名文件。目录入口使用 `README.md` 和 `README.zh-CN.md`。修改时同步更新两种语言，并执行 `make check-docs`。检查工具复用 cherryusb-ipheth 的 Apache-2.0 实现。`docs/documentation-exceptions.json` 保留上游 Ed25519 署名例外，技术准确性和翻译含义另行审阅。
+
+早期调试报告和已退役的集成说明可通过 `git log --all -- docs examples/rtthread_app` 和 `git show <revision>:<path>` 查阅。
 
 ## 许可证
 
@@ -153,7 +158,3 @@ Host 验证覆盖 `_airplay._tcp.local` 的 mDNS `PTR`、`SRV`、`TXT`、`A` 记
 Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
 
 iAP2 工作源于 `esp32-carplay-web-relay` 与 DiPlay，保留原始声明。Screen 实现记录 DiPlay 的协议行为；相关音频传输参考和 LIVI 署名保留于源码与声明。orlp/ed25519、mbedTLS、FAAD2、Opus 和 SpeexDSP 保留各自第三方许可。RT-Thread、Luban-Lite/ArtInChip 和 CherryUSB 提供宿主集成基础；cherryusb-ipheth 继续作为独立维护的驱动。
-
-## 仓库历史
-
-仓库所有者要求在可移植 SDK 重构完成后重建仓库，以移除已关闭 Pull Request 记录。当前 main 分支从已验证的 SDK 源码基线开始。研究文档中的旧提交和 CI 引用保留为历史证据，在本仓库中可能不再可访问；此前完整历史、Pull Request 元数据及最终 CI 日志已保存于经过验证的离线备份。

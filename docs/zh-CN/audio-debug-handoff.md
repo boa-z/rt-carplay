@@ -8,7 +8,7 @@
 
 ## 已有现象与复现
 
-已有实机报告描述：无线 iAP2 Tunnel 已认证并完成 Handoff，视频可工作，但音乐仍在 iPhone 本机播放。`carplay_status` 报告 `streams=0 datagrams=0`，音频 Sink 收到零个 Packet。记录的 SETUP 候选包含 130/iAP2 与 110/Screen，没有 100、101、102 音频流。`carplay-aud` Worker 已运行或 `sound0` 已打开，不代表 Audio SETUP 已建立或媒体已送达。此前的能力、时钟、Bluetooth 身份修复记录在 `audio-routing.md` 与 `audio-negotiation.md`；这些修复没有证明音频故障已经完整解决。
+无线连接可能已完成 iAP2 鉴权、交接并播放视频，同时音乐仍由 iPhone 本机播放。此时 `carplay_status` 可能显示 `streams=0 datagrams=0`，只有 130/iAP2 和 110/Screen 的 SETUP，缺少 100/101/102 音频流。`carplay-aud` 线程和 `sound0` 设备各自独立于 Audio SETUP。能力和蓝牙身份检查见[音频协商](audio-negotiation.md)。
 
 在参考板上复现时，使用正常 D213 GUI 配置，完成手机授权与既有 USB、Wireless 连接流程，播放持续变化的视频并在手机上启动音乐，然后收集连接日志和下列只读快照。记录准确的固件、Submodule 版本、iOS、手机型号、模式、手机实际音频路由，以及是否涉及通话、Siri、导航流。自动启动页拥有连接时，不要混用手动 Start、Stop 命令。
 

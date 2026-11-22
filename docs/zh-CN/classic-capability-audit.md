@@ -31,6 +31,6 @@
 
 `ui_night` 和 `map_night` 分别表示手机界面和地图的初始明暗状态。共享的 `appearance_setting` 用 0、1、2 表示自动、浅色、深色偏好。LIVI 向主界面发送带显示 UUID、整数模式和偏好的 `uiAppearanceUpdate`。两个参考项目均使用布尔 `setNightMode` 控制主地图。Socket 写入只证明发送到事件通道，画面效果需要手机确认。环境光判断和宿主 HMI 主题由宿主决定。
 
-最初的 `streams=0` 对应控制 SETUP。后续音频 SETUP、数据包到达和鉴权、设备播放是独立检查点。手机音量反馈和宿主应用增益也是不同动作。详见[音频协商](audio-negotiation.md)和[音频路由](audio-routing.md)。
+最初的 `streams=0` 对应控制 SETUP。后续音频 SETUP、数据包到达和鉴权、设备播放是独立检查点。手机音量反馈和宿主应用增益也是不同动作。详见[音频协商](audio-negotiation.md)和[音频调试](audio-debug-handoff.md)。
 
 Receiver 管理单活动会话。USB 拔出、蓝牙到 Wi-Fi 的交接、重试时机、已记忆手机优先级和传输切换策略由宿主负责。SDK 负责协议清理和端点重复建立。调用顺序见[生命周期与所有权](lifecycle-and-ownership.md)。

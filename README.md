@@ -126,19 +126,24 @@ Audio callbacks preserve LPCM little-endian S16 or encoded AAC/Opus plus codec, 
 
 ## Development status and known limitations
 
-The portable API, native Linux/RT-Thread configuration, public media metadata and compatibility conversion are Host Tested. The wrapper's scheduling model covers rollback, immediate stop, input exclusion and Bluetooth claims; it does not prove every legacy diagnostic or borrowed string is thread-safe. Board-adapter ownership and Kconfig ownership are separated. The standalone Headless example has real-socket/discovery/persistence Host regression coverage. Remaining device-worker lifecycle audits and physical acceptance are still open. All 26 maintained primary documents now have complete Chinese counterparts and a local/CI documentation gate; mechanical checks do not prove semantic translation accuracy.
+Host regressions cover the portable API, public media metadata, real sockets, discovery, persistence and lifecycle rollback. Consult the [Classic capability audit](docs/classic-capability-audit.md) for feature-level evidence and remaining hardware checks.
 
-Audio negotiation/output policy is frozen during this refactor. Existing iPhone routing, zero Audio SETUP streams, Direct/Mixer and acoustic issues remain separate investigations. No Android Auto, CarLife or CarLink support is included. cherryusb-ipheth stays independent; the host owns USB configuration selection and CarPlay sessions. Do not equate Host Tested or Cross-Compiled with Hardware Validated.
+The host owns USB configuration selection and CarPlay sessions, using cherryusb-ipheth as an independent driver. iPhone audio routing and acoustics require separate device verification. Android Auto, CarLife and CarLink are outside this SDK's scope.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md), [Receiver API](docs/receiver-api.md) and [lifecycle/ownership](docs/lifecycle-and-ownership.md) have full English/Chinese pairs.
-- [Audio debug handoff](docs/audio-debug-handoff.md) has a full English/Chinese pair.
-- Historical [60 FPS feasibility](docs/1024x600-60fps-feasibility.md), [Zalink comparison](docs/zalink-performance-comparison.md), [audio routing](docs/audio-routing.md), [audio negotiation](docs/audio-negotiation.md) and [wired pairing persistence](docs/wired-pairing-persistence.md) have full English/Chinese pairs; their versioned observations are preserved as historical evidence.
-- [Bond reconnect](docs/bluetooth-bond-reconnect.md), [wired video performance](docs/wired-video-performance.md) and [wired stall investigation](docs/wired-video-stall-probe.md) also have full pairs with historical measurements and current ownership notes. [RT-Thread](port/rtthread/README.md) and [Luban-Lite](port/luban-lite/README.md) port notes, [synthetic audio fixtures](tests/fixtures/audio/README.md) and [audio dependency provenance](third_party/audio/README.md) have full pairs. Current build/entropy/lifecycle guidance is distinguished from preserved bring-up commands.
-- [Audio subsystem](docs/audio-subsystem.md), [audio reference review](docs/audio-routing-reference-review.md) and [wireless bring-up](docs/wireless-bringup.md) have full pairs, preserving implementation matrices, measured Host costs, historical phone/board feedback and unresolved limits. Audio behavior remains frozen during V2.1.
-- [USBMUX negotiation/validation](docs/usbmux-validation.md), [wired authentication investigation](docs/wired-auth-investigation.md) and the [retired RT-Thread board-template record](examples/rtthread_app/README.md) also have full counterparts. Historical commands and results remain version-scoped; current host ownership and command equivalents are identified.
-- Run `make check-docs` for all 27 pairs: discovery, naming, reciprocal navigation, local files/heading fragments, paragraph layout, language, heading hierarchy, exact fenced blocks, inline literals and external-reference parity. The gate reuses the Apache-2.0 checker from cherryusb-ipheth and runs its 17 isolated mutation regressions. External sites are not fetched. `docs/documentation-exceptions.json` exempts only preserved upstream Ed25519 attribution. Human review remains necessary for technical facts, numeric prose and translation meaning.
+| Area | Guides |
+| --- | --- |
+| SDK contracts | [Receiver API](docs/receiver-api.md), [architecture](docs/architecture.md), [lifecycle and ownership](docs/lifecycle-and-ownership.md), [Classic capability audit](docs/classic-capability-audit.md) |
+| Integration | [RT-Thread](port/rtthread/README.md), [Luban-Lite](port/luban-lite/README.md), [host ownership migration](docs/luban-lite-migration.md) |
+| Transport | [Wireless bring-up](docs/wireless-bringup.md), [Bluetooth reconnect](docs/bluetooth-bond-reconnect.md), [wired trust persistence](docs/wired-pairing-persistence.md), [video sessions](docs/video-stream-session.md) |
+| Audio | [Subsystem](docs/audio-subsystem.md), [negotiation](docs/audio-negotiation.md), [debugging](docs/audio-debug-handoff.md), [fixtures](tests/fixtures/audio/README.md), [dependency provenance](third_party/audio/README.md) |
+| Experiments | [Ultra foundations](docs/ultra-foundation.md), [Vehicle State](docs/vehicle-controls.md), [UI Sync](docs/ui-sync.md), [capability gate](docs/ui-sync-capabilities.md), [LIVI theme research](docs/livi-theme-review.md) |
+| Contribution | [Code formatting](docs/code-formatting.md) |
+
+English guides in `docs/` are primary. Their Simplified Chinese counterparts use the same filename under `docs/zh-CN/`. Directory entry pages use `README.md` and `README.zh-CN.md`. Update both languages together and run `make check-docs`. The checker reuses the Apache-2.0 implementation from cherryusb-ipheth. `docs/documentation-exceptions.json` preserves the upstream Ed25519 attribution exception. Review technical accuracy and translation meaning separately.
+
+Prior bring-up reports and retired integration notes remain available through `git log --all -- docs examples/rtthread_app` and `git show <revision>:<path>`.
 
 ## License
 
@@ -153,7 +158,3 @@ Audio negotiation/output policy is frozen during this refactor. Existing iPhone 
 Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
 
 The iAP2 work derives from `esp32-carplay-web-relay` and DiPlay, with original notices retained. The screen implementation records DiPlay's protocol behavior; relevant audio transport references and LIVI attribution are preserved in source and notices. orlp/ed25519, mbedTLS, FAAD2, Opus and SpeexDSP retain their respective third-party licenses. RT-Thread, Luban-Lite/ArtInChip and CherryUSB supply the host integration foundations; cherryusb-ipheth remains a separately maintained driver.
-
-## Repository history
-
-The owner requested repository recreation to remove closed pull-request records after the portable SDK refactor. The current main branch starts from the verified SDK source baseline. Earlier commit and CI references in research documents remain historical evidence and may no longer resolve in this repository; the previous complete history, pull-request metadata and final CI logs were preserved in verified offline backups.

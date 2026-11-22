@@ -59,6 +59,24 @@ The AirPlay modules need `MBEDTLS_CHACHAPOLY_C` and `MBEDTLS_HKDF_C`. Fetch the 
 
 ## Build and test
 
+### SDK version and build provenance
+
+[`include/rtcp/version.h`](include/rtcp/version.h) is the source of truth for the SDK's SemVer. Development builds use `0.1.0-dev`. To prepare a formal release, set the version in that header, clear `RTCP_VERSION_SUFFIX` and tag the release commit with its exact version prefixed by `v`, for example `v0.1.0`. CI rejects release tags that differ from the header or point at a development version.
+
+```c
+#include <rtcp/version.h>
+#include <stdio.h>
+
+void print_sdk_version(void)
+{
+    printf("rt-carplay %s (%s)\n", rtcp_version_string(), rtcp_build_git_sha());
+}
+```
+
+Both APIs return static strings and are callable from C and C++. `rtcp/rtcp.h` also exposes the version macros. Make, CMake and SCons embed the SDK checkout's full commit, including when the SDK is a Git submodule. A source archive or unavailable Git metadata returns `unknown`. Make and CMake use Python 3 to generate the commit header. The SDK version and commit are independent of the host firmware version and OTA policy.
+
+### Host builds
+
 ```sh
 ./scripts/fetch-mbedtls.sh
 make -j8 check

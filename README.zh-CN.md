@@ -59,6 +59,24 @@ AirPlay 模块需要 `MBEDTLS_CHACHAPOLY_C` 与 `MBEDTLS_HKDF_C`。可获取固�
 
 ## 构建与测试
 
+### SDK 版本与构建来源
+
+SDK 的 SemVer 只在 [`include/rtcp/version.h`](include/rtcp/version.h) 维护。当前开发版为 `0.1.0-dev`。准备正式发布时，在该头文件更新版本并清空 `RTCP_VERSION_SUFFIX`，为发布提交打上对应的 `v` 前缀标签，例如 `v0.1.0`。标签与头文件版本不一致，或指向开发版时，CI 会报错。
+
+```c
+#include <rtcp/version.h>
+#include <stdio.h>
+
+void print_sdk_version(void)
+{
+    printf("rt-carplay %s (%s)\n", rtcp_version_string(), rtcp_build_git_sha());
+}
+```
+
+两个 API 均返回静态字符串，支持 C 和 C++。通过 `rtcp/rtcp.h` 仍可访问版本宏。Make、CMake 和 SCons 嵌入 SDK 检出的完整提交号，作为 Git 子模块集成时也读取 SDK 自身提交。源码归档或 Git 元数据不可用时返回 `unknown`。Make 和 CMake 通过 Python 3 生成提交号头文件。SDK 版本、提交号和宿主固件版本及 OTA 策略各自独立。
+
+### Host 构建
+
 ```sh
 ./scripts/fetch-mbedtls.sh
 make -j8 check

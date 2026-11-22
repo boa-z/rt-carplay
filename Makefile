@@ -37,7 +37,7 @@ PORT_LINUX_SRCS := $(wildcard port/linux/*.c)
 PORT_LINUX_OBJS := $(PORT_LINUX_SRCS:%.c=$(BUILD)/%.o)
 PORT_LINUX_LIB  := $(BUILD)/librtcp_port_linux.a
 
-TESTS := test_rtthread_headless test_receiver test_receiver_vehicle test_rtthread_clock test_audio_engine test_mfi2c  \
+TESTS := test_version test_rtthread_headless test_receiver test_receiver_vehicle test_rtthread_clock test_audio_engine test_mfi2c  \
          test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth \
          test_iap2_parameter test_iap2_session test_iap2_stream \
          test_airplay_bplist test_airplay_info_plist test_airplay_rtsp_codec test_airplay_tlv8 \
@@ -89,6 +89,13 @@ $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
+.PHONY: refresh-git-metadata
+$(BUILD)/rtcp_build_git_sha.h: refresh-git-metadata
+	python3 scripts/build-git-sha.py . --header "$@"
+
+$(BUILD)/runtime/version.o: CPPFLAGS += -DRTCP_BUILD_GIT_SHA_HEADER -I"$(BUILD)"
+$(BUILD)/runtime/version.o: $(BUILD)/rtcp_build_git_sha.h
+
 # The vendored Ed25519 field arithmetic relies on two's-complement signed
 # shifts; that is well-defined under -fwrapv and not a UBSan finding in our
 # code, so the host sanitizers are disabled for it only.
@@ -134,7 +141,11 @@ $(BUILD)/test_lockdown_session: tests/unit/test_lockdown_session.c $(LIB) $(MBED
 check-public-api:
 	$(CC) -std=c99 -Wall -Wextra -Werror -Iinclude -fsyntax-only tests/compile/public_receiver.c
 
-check: all check-public-api check-docs
+.PHONY: check-version
+check-version: $(BUILD)/test_version
+	python3 scripts/check-version.py --binary $(BUILD)/test_version
+
+check: all check-public-api check-docs check-version
 	@status=0; \
 	for t in $(BINS); do \
 	    echo "== $$t =="; \

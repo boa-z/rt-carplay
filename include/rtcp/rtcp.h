@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rtcp/version.h"
+
 #define RTCP_OK        0
 #define RTCP_EIO       -1
 #define RTCP_EINVAL    -2
@@ -13,8 +15,5 @@
 #define RTCP_ENOMEM    -5
 #define RTCP_ENOENT    -6
 #define RTCP_ESTATE    -7
-
-#define RTCP_VERSION_MAJOR 0
-#define RTCP_VERSION_MINOR 1
 
 #endif /* RTCP_H */

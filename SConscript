@@ -11,11 +11,14 @@
 # MPI, ChaCha20-Poly1305 and HKDF; see port/luban-lite/README.md.
 
 import os
+import runpy
 from building import *
 
 cwd = GetCurrentDir()
 
-src = Glob('runtime/*.c')
+runtime_src = Glob('runtime/*.c')
+version_src = [source for source in runtime_src if source.name == 'version.c']
+src = [source for source in runtime_src if source.name != 'version.c']
 cpppath = [cwd + '/include']
 ccflags = []
 
@@ -57,6 +60,13 @@ if GetDepend('LPKG_RT_CARPLAY_HEADLESS_EXAMPLE'):
 
 group = DefineGroup('rt-carplay', src, depend=['LPKG_USING_RT_CARPLAY'],
                     CPPPATH=cpppath, LOCAL_CCFLAGS=ccflags)
+
+if GetDepend('LPKG_USING_RT_CARPLAY'):
+    metadata = runpy.run_path(os.path.join(cwd, 'scripts', 'build-git-sha.py'))
+    version_group = DefineGroup('rt-carplay version', version_src, depend=['LPKG_USING_RT_CARPLAY'],
+                                LOCAL_CPPPATH=[os.path.join(cwd, 'include')],
+                                LOCAL_CPPDEFINES=['RTCP_BUILD_GIT_SHA=%s' % metadata['build_git_sha'](cwd)])
+    group = group + version_group
 
 if GetDepend('LPKG_RT_CARPLAY_AUDIO_CODECS'):
     group = group + SConscript(os.path.join(cwd, 'third_party', 'audio', 'SConscript'))

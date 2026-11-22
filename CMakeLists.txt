@@ -36,7 +36,19 @@ add_dependencies(rtcp_mbedcrypto rtcp_mbedtls)
 
 file(GLOB_RECURSE RTCP_CORE_SOURCES CONFIGURE_DEPENDS core/*.c)
 file(GLOB RTCP_ED25519_SOURCES CONFIGURE_DEPENDS third_party/ed25519/*.c)
-add_library(rtcp_core STATIC runtime/receiver.c runtime/receiver_vehicle.c ${RTCP_CORE_SOURCES} ${RTCP_ED25519_SOURCES})
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(RTCP_GIT_HEADER "${CMAKE_CURRENT_BINARY_DIR}/rtcp_build_git_sha.h")
+add_custom_target(rtcp_git_metadata
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-git-sha.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}" --header "${RTCP_GIT_HEADER}"
+    BYPRODUCTS "${RTCP_GIT_HEADER}"
+    VERBATIM)
+add_library(rtcp_core STATIC runtime/receiver.c runtime/receiver_vehicle.c runtime/version.c
+    ${RTCP_CORE_SOURCES} ${RTCP_ED25519_SOURCES})
+add_dependencies(rtcp_core rtcp_git_metadata)
+set_source_files_properties(runtime/version.c PROPERTIES
+    COMPILE_DEFINITIONS RTCP_BUILD_GIT_SHA_HEADER
+    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
 
 target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -102,7 +114,7 @@ if(RTCP_BUILD_TESTS)
     target_link_libraries(rtcp_test_support PUBLIC rtcp_core)
 
     set(RTCP_TESTS
-        test_rtthread_headless test_receiver test_receiver_vehicle test_rtthread_clock test_audio_engine
+        test_version test_rtthread_headless test_receiver test_receiver_vehicle test_rtthread_clock test_audio_engine
         test_mfi2c
         test_iap2_core test_iap2_identity test_iap2_carplay test_iap2_mfi_auth
         test_iap2_parameter test_iap2_session test_iap2_stream
@@ -176,7 +188,9 @@ if(RTCP_BUILD_TESTS)
         COMMAND test_airplay_pairing_e2e --vehicle)
     add_test(NAME test_receiver_ultra_applications_e2e
         COMMAND test_airplay_pairing_e2e --ultra-apps)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME check_version
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-version.py
+            --binary $<TARGET_FILE:test_version>)
     add_test(NAME test_vehicle_controls_independent_wire
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_vehicle_controls_wire.py $<TARGET_FILE:test_vehicle_controls>)
     add_test(NAME test_vehicle_info_independent_wire

@@ -9,6 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  version:
+    name: SDK version and release tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate SDK version
+        run: python3 scripts/check-version.py
+      - name: Validate the release tag
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/check-version.py --tag="$RELEASE_TAG"
   formatting:
     name: clang-format
     runs-on: ubuntu-latest

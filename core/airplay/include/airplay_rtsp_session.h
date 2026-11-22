@@ -80,6 +80,8 @@ typedef struct
     void *get_volume_context;
     rtcp_now_playing_cb_t on_now_playing;
     void *now_playing_context;
+    bool (*on_host_ui)(void *);
+    void *host_ui_context;
     airplay_rtsp_start_iap_cb_t start_iap;
     airplay_rtsp_stop_media_cb_t stop_iap;
     airplay_rtsp_disable_bt_cb_t disable_bluetooth;
@@ -141,6 +143,7 @@ void airplay_rtsp_session_mark_control_cipher_active(
     airplay_rtsp_session_t *session);
 void airplay_rtsp_session_destroy(airplay_rtsp_session_t *session);
 bool airplay_rtsp_session_is_established(const airplay_rtsp_session_t *session);
+uint32_t airplay_rtsp_session_screen_entity(const airplay_rtsp_session_t *);
 
 /* Owner reports an already closed endpoint without stopping it again.
  * Consumed seeds remain non-reusable in the session key ledger. */

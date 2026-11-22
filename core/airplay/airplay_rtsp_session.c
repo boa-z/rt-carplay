@@ -76,6 +76,7 @@ struct airplay_rtsp_session
     uint64_t iap_seed;
     uint16_t iap_port;
     unsigned modes_changes;
+    uint32_t screen_entity;
     unsigned unsupported_commands;
     unsigned now_playing_traces;
     session_data_stream_t data_stream[RTCP_DATA_STREAM_COUNT];
@@ -553,8 +554,6 @@ static airplay_rtsp_session_result_t handle_teardown(
             session->config.stop_iap(session->config.media_context);
             session->iap_port = 0;
         }
-        if (screen_selected & 1U)
-            session->record_active = false;
         session_rollback_video(session, screen_selected);
         for (size_t index = 0U; index < AIRPLAY_RTSP_SESSION_MAX_AUDIO_STREAMS;
              ++index)
@@ -588,6 +587,7 @@ static airplay_rtsp_session_result_t handle_teardown(
     session->timing_started = false;
     session->initial_setup_complete = false;
     session->record_active = false;
+    session->screen_entity = 0U;
     session->event_port = 0U;
     session->timing_port = 0U;
     return status_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
@@ -1832,8 +1832,33 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
             airplay_bplist_root(&doc, &root) != AIRPLAY_BPLIST_OK ||
             airplay_bplist_dict_get(&doc, root, "type", &object) != AIRPLAY_BPLIST_OK ||
             airplay_bplist_get_string(&doc, object, command, sizeof(command), &length) != AIRPLAY_BPLIST_OK ||
-            strlen(command) != length ||
-            airplay_bplist_dict_get(&doc, root, "params", &params) != AIRPLAY_BPLIST_OK ||
+            strlen(command) != length)
+            return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
+        airplay_bplist_result_t params_result = airplay_bplist_dict_get_unique(&doc, root, "params", &params);
+        if (strcmp(command, "requestUI") == 0)
+        {
+            if (!session->initial_setup_complete || !session->control_cipher_active)
+                return status_response(request, 503, "Service Unavailable", response, response_capacity, response_len);
+            if (params_result == AIRPLAY_BPLIST_OK)
+            {
+                if (airplay_bplist_get_type(&doc, params, &type, NULL) != AIRPLAY_BPLIST_OK ||
+                    type != AIRPLAY_BPLIST_DICTIONARY)
+                    return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
+                char url[2];
+                airplay_bplist_result_t url_result = airplay_bplist_dict_get_unique(&doc, params, "url", &object);
+                if (url_result != AIRPLAY_BPLIST_NOT_FOUND &&
+                    (url_result != AIRPLAY_BPLIST_OK ||
+                     airplay_bplist_get_string(&doc, object, url, sizeof(url), &length) != AIRPLAY_BPLIST_OK ||
+                     length != 0U))
+                    return status_response(request, 405, "Method Not Allowed", response, response_capacity, response_len);
+            }
+            else if (params_result != AIRPLAY_BPLIST_NOT_FOUND)
+                return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
+            if (session->config.on_host_ui && session->config.on_host_ui(session->config.host_ui_context))
+                return status_response(request, 200, "OK", response, response_capacity, response_len);
+            return status_response(request, 405, "Method Not Allowed", response, response_capacity, response_len);
+        }
+        if (params_result != AIRPLAY_BPLIST_OK ||
             airplay_bplist_get_type(&doc, params, &type, NULL) != AIRPLAY_BPLIST_OK || type != AIRPLAY_BPLIST_DICTIONARY)
             return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
         if (!session->initial_setup_complete)
@@ -1857,6 +1882,8 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
             airplay_audio_modes_t modes;
             if (!parse_audio_modes(&doc, params, &modes))
                 return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
+            if (modes.has_screen)
+                session->screen_entity = modes.screen_entity;
             if (session->config.on_audio_modes)
                 session->config.on_audio_modes(&modes, session->config.command_context);
             ++session->modes_changes;
@@ -2019,6 +2046,11 @@ void airplay_rtsp_session_iap_closed(airplay_rtsp_session_t *session)
 bool airplay_rtsp_session_is_established(const airplay_rtsp_session_t *session)
 {
     return session != NULL && session->record_active;
+}
+
+uint32_t airplay_rtsp_session_screen_entity(const airplay_rtsp_session_t *session)
+{
+    return session ? session->screen_entity : 0U;
 }
 
 void airplay_rtsp_session_video_closed(airplay_rtsp_session_t *s, uint16_t type)

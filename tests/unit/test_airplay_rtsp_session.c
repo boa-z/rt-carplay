@@ -1362,6 +1362,7 @@ static void test_screen_key_lifecycle(void)
                                        &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
     assert(ports.screen_stops == 1U);
     assert(ports.event_stops == 0U && ports.timing_stops == 0U);
+    assert(airplay_rtsp_session_is_established(session));
 
     request = parse_request("SETUP /stream RTSP/1.0\r\nCSeq: 16\r\n\r\n");
     request.body = k_setup_plist;
@@ -1388,6 +1389,7 @@ static void test_screen_key_lifecycle(void)
                                        &response_len, &enable_cipher) == AIRPLAY_RTSP_SESSION_OK);
     assert(ports.screen_stops == 2U);
     assert(ports.event_stops == 1U && ports.timing_stops == 1U);
+    assert(!airplay_rtsp_session_is_established(session));
 
     airplay_rtsp_session_destroy(session);
     assert(ports.screen_stops == 2U);
@@ -2921,6 +2923,12 @@ static void stop_audio_extended_test(uint16_t type, const airplay_audio_options_
     (void)o;
     test_stop_audio(type, context);
 }
+static bool host_ui_requested(void *context)
+{
+    ++*(unsigned *)context;
+    return true;
+}
+
 static void test_iap_runtime_and_commands(void)
 {
     static const uint8_t identifier[] = "accessory", public_key[32] = { 0 };
@@ -2957,11 +2965,22 @@ static void test_iap_runtime_and_commands(void)
     config.configure_audio = configure_audio_test;
     config.start_audio_ex = start_audio_extended_test;
     config.stop_audio_ex = stop_audio_extended_test;
+    unsigned host_ui_requests = 0;
+    config.on_host_ui = host_ui_requested;
+    config.host_ui_context = &host_ui_requests;
     airplay_rtsp_session_t *session = NULL;
     assert(airplay_rtsp_session_create(&config, &session) == AIRPLAY_RTSP_SESSION_OK);
     EXPECT_IAP("POST", "/command", disable, "503 Service Unavailable");
     EXPECT_IAP("SETUP", "/stream", iap_setup, "503 Service Unavailable");
     expect_body_status(session, "SETUP", "/stream", k_initial_setup_plist, sizeof(k_initial_setup_plist), "200 OK");
+    uint8_t request_ui[128];
+    size_t request_ui_len;
+    assert(airplay_bplist_build_projection_command(true, request_ui, sizeof(request_ui), &request_ui_len) == AIRPLAY_BPLIST_OK);
+    expect_body_status(session, "POST", "/command", request_ui, request_ui_len, "503 Service Unavailable");
+    assert(host_ui_requests == 0);
+    airplay_rtsp_session_mark_control_cipher_active(session);
+    expect_body_status(session, "POST", "/command", request_ui, request_ui_len, "200 OK");
+    assert(host_ui_requests == 1);
     EXPECT_IAP("POST", "/command", modes, "200 OK");
     EXPECT_IAP("POST", "/command", voice_modes, "200 OK");
     assert(modes_seen == 1);
@@ -2972,12 +2991,15 @@ static void test_iap_runtime_and_commands(void)
     assert(last_resource_modes.has_main_audio && last_resource_modes.main_audio_entity == 1);
     assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity == 1);
     assert(last_resource_modes.has_screen && last_resource_modes.screen_entity == 1);
+    assert(airplay_rtsp_session_screen_entity(session) == 1);
     assert(last_resource_modes.has_screen_permanent && last_resource_modes.screen_permanent_entity == 2);
     EXPECT_IAP("POST", "/command", permanent_delta, "200 OK");
     assert(!last_resource_modes.has_main_audio && !last_resource_modes.has_screen);
+    assert(airplay_rtsp_session_screen_entity(session) == 1);
     assert(last_resource_modes.has_main_audio_permanent && last_resource_modes.main_audio_permanent_entity == 2);
     EXPECT_IAP("POST", "/command", screen_delta, "200 OK");
     assert(last_resource_modes.has_screen && last_resource_modes.screen_entity == 2);
+    assert(airplay_rtsp_session_screen_entity(session) == 2);
     assert(!last_resource_modes.has_main_audio && !last_resource_modes.has_main_audio_permanent);
     EXPECT_IAP("POST", "/command", bad_permanent, "400 Bad Request");
     EXPECT_IAP("POST", "/command", bad_entity, "400 Bad Request");

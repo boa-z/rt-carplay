@@ -486,6 +486,14 @@ bool airplay_control_port_request_siri(airplay_control_port_t *port)
     return true;
 }
 
+bool airplay_control_port_set_projection_enabled(airplay_control_port_t *port, bool enabled)
+{
+    uint8_t plist[256];
+    size_t length;
+    return airplay_bplist_build_projection_command(enabled, plist, sizeof(plist), &length) == AIRPLAY_BPLIST_OK &&
+           send_command(port, plist, length);
+}
+
 bool airplay_control_port_set_appearance(airplay_control_port_t *port, const char *uuid,
                                          unsigned setting, bool ui_night, bool map_night)
 {

@@ -51,6 +51,77 @@ static void expect_uint(const airplay_bplist_doc_t *doc,
     assert(number == expected);
 }
 
+static void test_oem_info(bool dump)
+{
+    static const uint8_t png_120[] =
+        "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x78\x00\x00\x00\x78"
+        "\x01\x00\x00\x00\x00\x11\x1f\x0b\x7f\x00\x00\x00\x17IDAT"
+        "\x78\xda\x63\x60\x18\x05\xa3\x60\x14\x8c\x82\x51\x30\x0a\x46\x01\xbd\x01\x00"
+        "\x07\x80\x00\x01\x81\xf2\xfd\x65\x00\x00\x00\x00IEND\xae\x42\x60\x82";
+    static const uint8_t png_180[] =
+        "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\xb4\x00\x00\x00\xb4"
+        "\x01\x00\x00\x00\x00\x15\xb6\x3b\x9f\x00\x00\x00\x1bIDAT"
+        "\x78\xda\xed\xc1\x01\x0d\x00\x00\x00\xc2\xa0\xf7\x4f\x6d\x0e\x37\xa0\x00\x00\x00\x00\xbe\x0d"
+        "\x10\xe0\x00\x01\x59\x18\xa6\x96\x00\x00\x00\x00IEND\xae\x42\x60\x82";
+    static const uint8_t png_256[] =
+        "\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x01\x00\x00\x00\x01\x00"
+        "\x01\x00\x00\x00\x00\x74\x09\x95\xcb\x00\x00\x00\x1fIDAT"
+        "\x78\xda\xed\xc1\x01\x0d\x00\x00\x00\xc2\xa0\xf7\x4f\x6d\x0e\x37\xa0"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\xbe\x0d\x21\x00\x00\x01\x60\xe4\x9d\x97"
+        "\x00\x00\x00\x00IEND\xae\x42\x60\x82";
+    rtcp_oem_icon_t icons[] = {
+        { png_120, sizeof(png_120) - 1U, 120, 120 },
+        { png_180, sizeof(png_180) - 1U, 180, 180 },
+        { png_256, sizeof(png_256) - 1U, 256, 256 },
+    };
+    airplay_info_plist_config_t config = k_config;
+    config.audio_output = true;
+    config.audio_input = true;
+    config.hid_knob = true;
+    config.hid_media = true;
+    uint8_t output[AIRPLAY_INFO_PLIST_MAX_BYTES];
+    size_t length;
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root, array, icon, object;
+    assert(airplay_info_plist_build(&config, output, sizeof(output), &length));
+    assert(airplay_bplist_open(output, length, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "oemIcons", &array) == AIRPLAY_BPLIST_NOT_FOUND);
+    config.oem_icon_label = dump ? "测试品牌" : "Test OEM";
+    config.oem_icons = icons;
+    config.oem_icon_count = sizeof(icons) / sizeof(icons[0]);
+    assert(airplay_info_plist_build(&config, output, sizeof(output), &length));
+    if (dump)
+    {
+        assert(fwrite(output, 1, length, stdout) == length);
+        return;
+    }
+    assert(airplay_bplist_open(output, length, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    expect_string(&doc, root, "oemIconLabel", config.oem_icon_label);
+    assert(airplay_bplist_dict_get(&doc, root, "oemIcons", &array) == AIRPLAY_BPLIST_OK);
+    size_t size;
+    for (size_t index = 0; index < config.oem_icon_count; ++index)
+    {
+        assert(airplay_bplist_array_get(&doc, array, index, &icon) == AIRPLAY_BPLIST_OK);
+        expect_uint(&doc, icon, "widthPixels", icons[index].width_pixels);
+        expect_uint(&doc, icon, "heightPixels", icons[index].height_pixels);
+        assert(airplay_bplist_dict_get(&doc, icon, "imageData", &object) == AIRPLAY_BPLIST_OK);
+        const uint8_t *bytes;
+        assert(airplay_bplist_get_data(&doc, object, &bytes, &size) == AIRPLAY_BPLIST_OK);
+        assert(size == icons[index].png_len && memcmp(bytes, icons[index].png, size) == 0);
+        bool prerendered = false;
+        assert(airplay_bplist_dict_get(&doc, icon, "prerendered", &object) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_bool(&doc, object, &prerendered) == AIRPLAY_BPLIST_OK && prerendered);
+    }
+    bool value = false;
+    assert(airplay_bplist_dict_get(&doc, root, "oemIconVisible", &object) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_bool(&doc, object, &value) == AIRPLAY_BPLIST_OK && value);
+    assert(!airplay_info_plist_build(&config, output, length - 1U, &size) && size == 0);
+    icons[0].width_pixels = 180;
+    assert(!airplay_info_plist_build(&config, output, sizeof(output), &length) && length == 0);
+}
+
 static const char *match_file;
 static bool match_expected;
 static void test_vehicle_info(bool dump)
@@ -237,6 +308,11 @@ static void test_ui_info(bool dump, const char *file, bool expected)
 
 int main(int argc, char **argv)
 {
+    if (argc == 2 && !strcmp(argv[1], "--oem-wire"))
+    {
+        test_oem_info(true);
+        return 0;
+    }
     if (argc == 2 && !strcmp(argv[1], "--ui-wire"))
     {
         test_ui_info(true, NULL, false);
@@ -254,6 +330,7 @@ int main(int argc, char **argv)
         match_expected = !strcmp(argv[3], "yes");
     }
     test_vehicle_info(argc == 2 && !strcmp(argv[1], "--wire"));
+    test_oem_info(false);
     uint8_t plist[AIRPLAY_INFO_PLIST_MAX_BYTES];
     size_t plist_len = 0U;
     assert(airplay_info_plist_build(&k_config, plist, sizeof(plist), &plist_len));

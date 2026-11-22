@@ -1181,6 +1181,43 @@ airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action, uint8
     return build_setup_response(o, 7, out, capacity, written);
 }
 
+airplay_bplist_result_t airplay_bplist_build_projection_command(
+    bool enabled, uint8_t *out, size_t capacity, size_t *written)
+{
+    if (enabled)
+    {
+        bplist_write_object_t request[] = {
+            { .kind = BPLIST_WRITE_DICTIONARY, .references = { 1, 2, 3, 4 }, .reference_count = 4 },
+            { .kind = BPLIST_WRITE_STRING, .text = "type" },
+            { .kind = BPLIST_WRITE_STRING, .text = "params" },
+            { .kind = BPLIST_WRITE_STRING, .text = "requestUI" },
+            { .kind = BPLIST_WRITE_DICTIONARY },
+        };
+        return build_setup_response(request, sizeof(request) / sizeof(request[0]), out, capacity, written);
+    }
+    bplist_write_object_t take[] = {
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 1, 2, 3, 4 }, .reference_count = 4 },
+        { .kind = BPLIST_WRITE_STRING, .text = "type" },
+        { .kind = BPLIST_WRITE_STRING, .text = "params" },
+        { .kind = BPLIST_WRITE_STRING, .text = "changeModes" },
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 5, 6 }, .reference_count = 2 },
+        { .kind = BPLIST_WRITE_STRING, .text = "resources" },
+        { .kind = BPLIST_WRITE_ARRAY, .references = { 7 }, .reference_count = 1 },
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 }, .reference_count = 10 },
+        { .kind = BPLIST_WRITE_STRING, .text = "resourceID" },
+        { .kind = BPLIST_WRITE_STRING, .text = "transferType" },
+        { .kind = BPLIST_WRITE_STRING, .text = "transferPriority" },
+        { .kind = BPLIST_WRITE_STRING, .text = "takeConstraint" },
+        { .kind = BPLIST_WRITE_STRING, .text = "borrowConstraint" },
+        { .kind = BPLIST_WRITE_INTEGER, .number = 1 },
+        { .kind = BPLIST_WRITE_INTEGER, .number = 1 },
+        { .kind = BPLIST_WRITE_INTEGER, .number = 500 },
+        { .kind = BPLIST_WRITE_INTEGER, .number = 100 },
+        { .kind = BPLIST_WRITE_INTEGER, .number = 100 },
+    };
+    return build_setup_response(take, sizeof(take) / sizeof(take[0]), out, capacity, written);
+}
+
 airplay_bplist_result_t airplay_bplist_build_appearance_command(
     const char *uuid, unsigned setting, bool night, uint8_t *out, size_t capacity, size_t *written)
 {

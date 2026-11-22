@@ -351,7 +351,7 @@ static uint32_t ip_emit_array(ip_writer_t *w, const uint32_t *refs, size_t count
     return ip_emit_container(w, IP_MARKER_ARRAY, count, refs, count);
 }
 
-#define IP_MAX_DICT_ENTRIES 20U
+#define IP_MAX_DICT_ENTRIES 23U
 
 static uint32_t ip_emit_dict(ip_writer_t *w, const uint32_t *keys,
                              const uint32_t *values, size_t count)
@@ -820,6 +820,64 @@ static uint32_t emit_ui_panel(ip_writer_t *w, const rtcp_ui_sync_inventory_t *v)
     return ip_emit_array(w, &panel, 1);
 }
 
+static bool valid_oem_icons(const airplay_info_plist_config_t *config)
+{
+    static const uint8_t png_header[] = {
+        0x89,
+        'P',
+        'N',
+        'G',
+        13,
+        10,
+        26,
+        10,
+        0,
+        0,
+        0,
+        13,
+        'I',
+        'H',
+        'D',
+        'R',
+    };
+    if (!config->oem_icon_count)
+        return config->oem_icon_label == NULL;
+    if (!config->oem_icons || config->oem_icon_count > AIRPLAY_INFO_OEM_MAX_ICONS ||
+        !config->oem_icon_label || !config->oem_icon_label[0])
+        return false;
+    for (size_t index = 0; index < config->oem_icon_count; ++index)
+    {
+        const rtcp_oem_icon_t *icon = &config->oem_icons[index];
+        const uint8_t *png = icon->png;
+        if (!png || icon->png_len < 33U || icon->png_len > AIRPLAY_INFO_PLIST_MAX_BYTES ||
+            memcmp(png, png_header, sizeof(png_header)) ||
+            png[16] || png[17] || png[20] || png[21] ||
+            !icon->width_pixels || !icon->height_pixels ||
+            ((unsigned)png[18] << 8 | png[19]) != icon->width_pixels ||
+            ((unsigned)png[22] << 8 | png[23]) != icon->height_pixels)
+            return false;
+    }
+    return true;
+}
+
+static uint32_t emit_oem_icons(ip_writer_t *w, const airplay_info_plist_config_t *config)
+{
+    static const char * const keys[] = { "imageData", "widthPixels", "heightPixels", "prerendered" };
+    uint32_t icons[AIRPLAY_INFO_OEM_MAX_ICONS];
+    for (size_t index = 0; index < config->oem_icon_count; ++index)
+    {
+        const rtcp_oem_icon_t *icon = &config->oem_icons[index];
+        uint32_t values[] = {
+            ip_emit_data(w, icon->png, icon->png_len),
+            ip_emit_int(w, icon->width_pixels),
+            ip_emit_int(w, icon->height_pixels),
+            ip_emit_bool(w, true),
+        };
+        icons[index] = ip_emit_literal_dict(w, keys, values, sizeof(values) / sizeof(values[0]));
+    }
+    return ip_emit_array(w, icons, config->oem_icon_count);
+}
+
 static uint32_t emit_root(ip_writer_t *w,
                           const airplay_info_plist_config_t *config,
                           const char *name,
@@ -844,7 +902,7 @@ static uint32_t emit_root(ip_writer_t *w,
         "displays",
         "hidDevices",
     };
-    const char *keys[20];
+    const char *keys[IP_MAX_DICT_ENTRIES];
     memcpy(keys, base_keys, sizeof(base_keys));
 
     uint32_t bluetooth;
@@ -984,7 +1042,7 @@ static uint32_t emit_root(ip_writer_t *w,
     uint32_t modes = emit_modes(w);
     uint32_t extended = emit_extended_features(w);
 
-    uint32_t values[20];
+    uint32_t values[sizeof(keys) / sizeof(keys[0])];
     values[0] = ip_emit_string(w, config->source_version != NULL
                                       ? config->source_version
                                       : AIRPLAY_INFO_DEFAULT_SOURCE_VERSION);
@@ -1030,6 +1088,15 @@ static uint32_t emit_root(ip_writer_t *w,
         keys[entry_count] = "displayPanels";
         values[entry_count++] = emit_ui_panel(w, rtcp_ui_sync_get_inventory(config->ui_sync));
     }
+    if (config->oem_icon_count)
+    {
+        keys[entry_count] = "oemIconVisible";
+        values[entry_count++] = ip_emit_bool(w, true);
+        keys[entry_count] = "oemIconLabel";
+        values[entry_count++] = ip_emit_string(w, config->oem_icon_label);
+        keys[entry_count] = "oemIcons";
+        values[entry_count++] = emit_oem_icons(w, config);
+    }
     return ip_emit_literal_dict(w, keys, values, entry_count);
 }
 
@@ -1045,7 +1112,7 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
         config->height_pixels == 0U || output == NULL || output_len == NULL ||
         !rtcp_display_profile_validate(config->main_display_profile,
                                        config->width_pixels, config->height_pixels) ||
-        !ui_geometry(config))
+        !ui_geometry(config) || !valid_oem_icons(config))
     {
         return false;
     }
@@ -1069,7 +1136,7 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
     ip_writer_t writer;
     memset(&writer, 0, sizeof(writer));
     writer.out = output;
-    writer.capacity = vehicle && output_capacity > AIRPLAY_INFO_PLIST_MAX_BYTES
+    writer.capacity = (vehicle || config->oem_icon_count) && output_capacity > AIRPLAY_INFO_PLIST_MAX_BYTES
                           ? AIRPLAY_INFO_PLIST_MAX_BYTES
                           : output_capacity;
     writer.ok = true;
@@ -1102,9 +1169,10 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
     }
 
     size_t table_offset = writer.used;
+    const uint8_t offset_size = config->oem_icon_count && table_offset <= UINT16_MAX ? 2U : 4U;
     for (uint32_t i = 0U; i < writer.next_id; ++i)
     {
-        ip_be(&writer, writer.offsets[i], 4U);
+        ip_be(&writer, writer.offsets[i], offset_size);
     }
     if (!writer.ok)
     {
@@ -1114,7 +1182,7 @@ bool airplay_info_plist_build(const airplay_info_plist_config_t *config,
 
     static const uint8_t zeros[6] = { 0 };
     ip_bytes(&writer, zeros, sizeof(zeros));
-    ip_u8(&writer, 4U);                 /* offset size */
+    ip_u8(&writer, offset_size);        /* offset size */
     ip_u8(&writer, IP_REF_BYTES);       /* ref size */
     ip_be(&writer, writer.next_id, 8U); /* num objects */
     ip_be(&writer, root, 8U);           /* top object */

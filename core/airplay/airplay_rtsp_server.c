@@ -100,6 +100,7 @@ struct airplay_rtsp_server
     bool event_failed;
     bool event_stopping;
     bool screen_failed;
+    uint32_t screen_generation;
     airplay_screen_server_t *alt_screen_server;
     bool alt_screen_failed;
     rtcp_alt_video_status_t alt_video;
@@ -282,6 +283,8 @@ static bool server_start_screen(const airplay_rtsp_pairing_t *pairing,
         server_stop_screen(server);
         return false;
     }
+    if (++server->screen_generation == 0U)
+        ++server->screen_generation;
     RTCP_LOGI(TAG, "screen_setup=ready port=%u connection_id=0x%08x%08x",
               (unsigned)*bound_port, (unsigned)(stream_connection_id >> 32),
               (unsigned)(stream_connection_id & UINT32_MAX));
@@ -1093,6 +1096,8 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.get_volume_context = server->config.get_volume_context;
     session_config.on_now_playing = server->config.on_now_playing;
     session_config.now_playing_context = server->config.now_playing_context;
+    session_config.on_host_ui = server->config.on_host_ui;
+    session_config.host_ui_context = server->config.host_ui_context;
     session_config.volume_context = server;
     session_config.on_audio_modes = server_audio_modes;
     session_config.on_audio_duck = server_audio_duck;
@@ -1551,6 +1556,27 @@ void airplay_rtsp_server_stop(airplay_rtsp_server_t *server)
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *s)
 {
     return s && !s->stopping && s->event_connected && airplay_event_port_request_siri(s->event_port);
+}
+
+int airplay_rtsp_server_set_projection_enabled(airplay_rtsp_server_t *s, bool enabled)
+{
+    if (!s || s->stopping || !s->event_connected ||
+        !airplay_rtsp_session_is_established(s->session))
+        return RTCP_ESTATE;
+    return airplay_event_port_set_projection_enabled(s->event_port, enabled) ? RTCP_OK : RTCP_EIO;
+}
+
+uint32_t airplay_rtsp_server_screen_entity(const airplay_rtsp_server_t *s)
+{
+    return s && !s->stopping && airplay_rtsp_session_is_established(s->session)
+               ? airplay_rtsp_session_screen_entity(s->session)
+               : 0U;
+}
+
+uint32_t airplay_rtsp_server_screen_generation(const airplay_rtsp_server_t *s)
+{
+    return s && !s->stopping && !s->screen_failed && s->screen_server
+               ? s->screen_generation : 0U;
 }
 
 int airplay_rtsp_server_set_appearance(airplay_rtsp_server_t *s, unsigned setting,

@@ -78,6 +78,8 @@ typedef struct airplay_rtsp_server_config
     void *get_volume_context;
     rtcp_now_playing_cb_t on_now_playing;
     void *now_playing_context;
+    bool (*on_host_ui)(void *);
+    void *host_ui_context;
 
     /* Event-channel connect/disconnect notifications. */
     airplay_rtsp_event_state_cb_t on_event_state;
@@ -157,6 +159,9 @@ int airplay_rtsp_server_get_data_stream_status(const airplay_rtsp_server_t *,
 
 /* RTSP owner only; sends documented requestSiri down/up actions on event. */
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *);
+int airplay_rtsp_server_set_projection_enabled(airplay_rtsp_server_t *, bool);
+uint32_t airplay_rtsp_server_screen_entity(const airplay_rtsp_server_t *);
+uint32_t airplay_rtsp_server_screen_generation(const airplay_rtsp_server_t *);
 int airplay_rtsp_server_set_appearance(airplay_rtsp_server_t *, unsigned setting,
                                        bool ui_night, bool map_night);
 

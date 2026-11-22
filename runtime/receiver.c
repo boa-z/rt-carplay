@@ -21,6 +21,8 @@ struct rtcp_receiver
     float volume_db;
     rtcp_now_playing_cb_t on_now_playing;
     void *now_playing_context;
+    rtcp_host_ui_cb_t on_host_ui;
+    void *host_ui_context;
     receiver_vehicle_t *vehicle;
     rtcp_data_stream_backend_t raw_data_stream;
     rtcp_ui_sync_t *ui_sync;
@@ -44,6 +46,12 @@ static void receiver_now_playing(const rtcp_now_playing_t *update, void *context
     const rtcp_receiver_t *receiver = context;
     if (receiver->on_now_playing)
         receiver->on_now_playing(update, receiver->now_playing_context);
+}
+
+static bool receiver_host_ui(void *context)
+{
+    const rtcp_receiver_t *receiver = context;
+    return receiver->on_host_ui && receiver->on_host_ui(receiver->host_ui_context);
 }
 
 static bool receiver_info(const uint8_t **bytes, size_t *length, void *context)
@@ -280,6 +288,8 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .get_volume_context = r,
         .on_now_playing = receiver_now_playing,
         .now_playing_context = r,
+        .on_host_ui = receiver_host_ui,
+        .host_ui_context = r,
         .on_event_state = config->on_event_state,
         .event_state_context = config->event_state_context,
         .on_iap_bytes = config->iap2.on_bytes,
@@ -456,6 +466,38 @@ bool rtcp_receiver_send_media_button(rtcp_receiver_t *receiver, rtcp_media_butto
 bool rtcp_receiver_send_iap(rtcp_receiver_t *r, const uint8_t *bytes, size_t length)
 {
     return r != NULL && airplay_rtsp_server_send_iap(r->server, bytes, length);
+}
+
+int rtcp_receiver_set_projection_enabled(rtcp_receiver_t *r, bool enabled)
+{
+    return r ? airplay_rtsp_server_set_projection_enabled(r->server, enabled) : RTCP_EINVAL;
+}
+
+rtcp_projection_owner_t rtcp_receiver_get_projection_owner(const rtcp_receiver_t *r)
+{
+    switch (r ? airplay_rtsp_server_screen_entity(r->server) : 0U)
+    {
+    case 1U:
+        return RTCP_PROJECTION_PHONE;
+    case 2U:
+        return RTCP_PROJECTION_HOST;
+    default:
+        return RTCP_PROJECTION_UNKNOWN;
+    }
+}
+
+uint32_t rtcp_receiver_get_projection_stream_generation(const rtcp_receiver_t *r)
+{
+    return r ? airplay_rtsp_server_screen_generation(r->server) : 0U;
+}
+
+int rtcp_receiver_set_host_ui_callback(rtcp_receiver_t *r, rtcp_host_ui_cb_t callback, void *context)
+{
+    if (!r)
+        return RTCP_EINVAL;
+    r->on_host_ui = callback;
+    r->host_ui_context = context;
+    return RTCP_OK;
 }
 
 int rtcp_receiver_set_appearance(rtcp_receiver_t *r, rtcp_appearance_setting_t setting,

@@ -101,6 +101,32 @@ int rtcp_receiver_set_single_cipher_frame(rtcp_receiver_t *, bool enabled);
  * Bytes are consumed synchronously. False when the event channel is absent. */
 bool rtcp_receiver_send_iap(rtcp_receiver_t *, const uint8_t *, size_t);
 
+typedef enum
+{
+    RTCP_PROJECTION_UNKNOWN,
+    RTCP_PROJECTION_PHONE,
+    RTCP_PROJECTION_HOST,
+} rtcp_projection_owner_t;
+
+/* Owner-thread MainScreen focus request with the Classic session kept open.
+ * false requests the host screen; true asks iPhone to foreground CarPlay.
+ * OK means the command was written. Confirm ownership with the getter and
+ * wait for video before presenting resumed frames. Audio and iAP2 are not
+ * addressed by these commands. ESTATE if the session/event channel is absent. */
+int rtcp_receiver_set_projection_enabled(rtcp_receiver_t *, bool enabled);
+rtcp_projection_owner_t rtcp_receiver_get_projection_owner(const rtcp_receiver_t *);
+
+/* Owner-thread Type 110 identity for the lifetime of one started Receiver.
+ * Zero means no active stream. A replacement stream gets a new identity. */
+uint32_t rtcp_receiver_get_projection_stream_generation(const rtcp_receiver_t *);
+
+/* Optional callback for the phone's plain requestUI (for example from the
+ * OEM tile). Called on the Receiver owner; true accepts the request. The
+ * host owns its local display and calls the projection API as appropriate.
+ * Registration survives stop/start; NULL clears it. */
+typedef bool (*rtcp_host_ui_cb_t)(void *context);
+int rtcp_receiver_set_host_ui_callback(rtcp_receiver_t *, rtcp_host_ui_cb_t, void *context);
+
 /* Owner-thread Classic appearance update for the negotiated main display.
  * In Automatic, the host supplies current UI/map night decisions from its
  * sensors or vehicle signals. Light/Dark override those decisions. Returns

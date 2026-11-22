@@ -15,6 +15,14 @@ typedef struct
     uint16_t x, y, width, height;
 } rtcp_display_rect_t;
 
+typedef struct
+{
+    const uint8_t *png;
+    size_t png_len;
+    uint16_t width_pixels;
+    uint16_t height_pixels;
+} rtcp_oem_icon_t;
+
 typedef enum
 {
     RTCP_APPEARANCE_AUTOMATIC = 0,

@@ -2626,7 +2626,7 @@ static void run_event_channel(rtcp_receiver_t *server,
     mbedtls_platform_zeroize(peer_write_key, sizeof(peer_write_key));
 }
 
-static void run_screen_stream(rtcp_receiver_t *server, client_t *client,
+static uint32_t run_screen_stream(rtcp_receiver_t *server, client_t *client,
                               const uint8_t shared_secret[KEY_BYTES],
                               uint32_t *cseq)
 {
@@ -2636,6 +2636,7 @@ static void run_screen_stream(rtcp_receiver_t *server, client_t *client,
     size_t request_len;
     size_t body_len;
 
+    assert(rtcp_receiver_get_projection_stream_generation(server) == 0U);
     static const uint64_t connection_id = UINT64_C(0x1122334455667788);
     body_len = build_bplist_screen_setup(body, sizeof(body), connection_id);
     request_len = build_request(request, sizeof(request), "SETUP", "/stream",
@@ -2648,6 +2649,8 @@ static void run_screen_stream(rtcp_receiver_t *server, client_t *client,
     client_exchange(server, client, request, request_len, &response);
 
     expect_receiver_state(true, true, true, true, true);
+    uint32_t generation = rtcp_receiver_get_projection_stream_generation(server);
+    assert(generation != 0U);
     uint8_t output_key[KEY_BYTES];
     assert(airplay_screen_derive_output_key(shared_secret, KEY_BYTES,
                                             connection_id, output_key) ==
@@ -2711,9 +2714,11 @@ static void run_screen_stream(rtcp_receiver_t *server, client_t *client,
         (ntp >> 32U) * UINT64_C(1000000000) +
         (((ntp & UINT64_C(0xffffffff)) * UINT64_C(1000000000)) >> 32U);
     assert(screen_sender_time_ns == expected_ns);
+    assert(rtcp_receiver_get_projection_stream_generation(server) == generation);
 
     rtcp_net_linux.close(screen_fd);
     mbedtls_platform_zeroize(output_key, sizeof(output_key));
+    return generation;
 }
 
 /* Public Receiver bench: genuine authenticated control and concurrent encrypted
@@ -3152,10 +3157,11 @@ int main(int argc, char **argv)
     run_audio_stream(server, &client, shared_secret, &cseq, true);
     /* Reusing the existing default endpoint still works alongside media. */
     run_audio_stream(server, &client, shared_secret, &cseq, false);
-    run_screen_stream(server, &client, shared_secret, &cseq);
+    uint32_t first_screen_generation = run_screen_stream(server, &client, shared_secret, &cseq);
     mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
     run_tampered_frame(server, &client);
     expect_receiver_state(false, false, false, false, false);
+    assert(rtcp_receiver_get_projection_stream_generation(server) == 0U);
     if (vehicle_mode)
     {
         rtcp_vehicle_status_t status;
@@ -3223,7 +3229,8 @@ int main(int argc, char **argv)
         video_request(server, &client2, &cseq, "SETUP", 111, 9010, 200);
         assert(alt_status(server).ready);
     }
-    run_screen_stream(server, &client2, shared_secret2, &cseq);
+    uint32_t second_screen_generation = run_screen_stream(server, &client2, shared_secret2, &cseq);
+    assert(second_screen_generation != first_screen_generation);
     if (alt_mode)
     {
         uint64_t start = rtcp_os_linux.now_ms();

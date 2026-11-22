@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "airplay_bplist.h"
 #include "airplay_control_cipher.h"
 #include "rtcp/rtcp.h"
 #include "rtcp_linux.h"
@@ -65,6 +66,56 @@ static void make_keys(uint8_t read_key[32], uint8_t write_key[32])
     }
 }
 
+static void expect_projection_command(airplay_event_port_t *port,
+                                      airplay_control_cipher_t *peer, int client, bool enabled)
+{
+    assert(airplay_event_port_set_projection_enabled(port, enabled));
+    uint8_t frame[1024], plaintext[1024];
+    size_t received = 0, consumed, length;
+    do
+    {
+        assert(wait_event(client) && received < sizeof(frame));
+        int count = rtcp_net_linux.recv(client, frame + received, sizeof(frame) - received);
+        assert(count > 0);
+        received += (size_t)count;
+    } while (received < 2U ||
+             received < (size_t)(frame[0] | ((unsigned)frame[1] << 8)) + AIRPLAY_CONTROL_CIPHER_OVERHEAD_BYTES);
+    assert(airplay_control_cipher_decrypt(peer, frame, received, &consumed,
+                                          plaintext, sizeof(plaintext) - 1U, &length) == AIRPLAY_CONTROL_CIPHER_OK);
+    plaintext[length] = '\0';
+    assert(strncmp((const char *)plaintext, "POST /command RTSP/1.0\r\n", 24U) == 0);
+    const char *body = strstr((const char *)plaintext, "\r\n\r\n");
+    assert(body);
+    body += 4;
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root, type, params, resources, resource;
+    char name[16];
+    size_t size;
+    assert(airplay_bplist_open((const uint8_t *)body, length - (size_t)(body - (const char *)plaintext), &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "type", &type) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_string(&doc, type, name, sizeof(name), &size) == AIRPLAY_BPLIST_OK);
+    assert(strcmp(name, enabled ? "requestUI" : "changeModes") == 0);
+    assert(airplay_bplist_dict_get(&doc, root, "params", &params) == AIRPLAY_BPLIST_OK);
+    if (enabled)
+    {
+        assert(airplay_bplist_dict_get(&doc, params, "url", &type) == AIRPLAY_BPLIST_NOT_FOUND);
+        assert(airplay_bplist_dict_get(&doc, params, "resources", &type) == AIRPLAY_BPLIST_NOT_FOUND);
+        return;
+    }
+    assert(airplay_bplist_dict_get(&doc, params, "resources", &resources) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, resources, 0, &resource) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_array_get(&doc, resources, 1, &type) == AIRPLAY_BPLIST_NOT_FOUND);
+    static const char * const keys[] = { "resourceID", "transferType", "transferPriority", "takeConstraint", "borrowConstraint" };
+    static const uint64_t values[] = { 1, 1, 500, 100, 100 };
+    for (size_t index = 0; index < sizeof(values) / sizeof(values[0]); ++index)
+    {
+        uint64_t value;
+        assert(airplay_bplist_dict_get(&doc, resource, keys[index], &type) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_uint(&doc, type, &value) == AIRPLAY_BPLIST_OK && value == values[index]);
+    }
+}
+
 int main(void)
 {
     uint8_t read_key[32];
@@ -87,6 +138,7 @@ int main(void)
     uint16_t port_number = airplay_event_port_get_port(port);
     assert(port_number != 0U);
     assert(states.transitions == 0U);
+    assert(!airplay_event_port_set_projection_enabled(port, false));
 
     rtcp_addr_t address = loopback(port_number);
     int client = rtcp_net_linux.connect(&address);
@@ -151,6 +203,10 @@ int main(void)
     plaintext[plaintext_len] = '\0';
     assert(strncmp(plaintext, "RTSP/1.0 200 OK\r\n", 17U) == 0);
     assert(strstr(plaintext, "CSeq: 9\r\n") != NULL);
+
+    expect_projection_command(port, peer, client, false);
+    expect_projection_command(port, peer, client, true);
+    assert(states.connected && states.transitions == 1U);
 
     /* Losing the controller tears the channel down and reports it. */
     rtcp_net_linux.close(client);

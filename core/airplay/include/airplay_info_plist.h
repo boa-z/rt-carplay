@@ -15,6 +15,7 @@
 #include "rtcp/ui_sync.h"
 
 #define AIRPLAY_INFO_PLIST_MAX_BYTES 6144U
+#define AIRPLAY_INFO_OEM_MAX_ICONS   3U
 
 /* DiPlay CarPlay feature mask with audio-output bits cleared (no audio sink). */
 #define AIRPLAY_INFO_DEFAULT_FEATURES 0x615203a4e2ULL
@@ -68,6 +69,12 @@ typedef struct
     rtcp_ui_sync_t *ui_sync;
     bool hid_knob;
     bool hid_media;
+    /* Optional host-owned PNGs, borrowed only for build(). Supply variants
+     * at 120, 180 and 256 px for device coverage. The full plist must fit
+     * the existing capability budget, so use compact PNG encodings. */
+    const rtcp_oem_icon_t *oem_icons;
+    size_t oem_icon_count;
+    const char *oem_icon_label;
 } airplay_info_plist_config_t;
 
 /*

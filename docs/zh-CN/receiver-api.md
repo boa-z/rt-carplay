@@ -44,6 +44,12 @@ if (result == RTCP_OK) result = rtcp_receiver_start(receiver);
 
 ## Classic 运行时控制
 
+在 `airplay_info_plist_config_t` 中填入 `oem_icons`、`oem_icon_count` 和 `oem_icon_label`，即可在 iPhone 的 CarPlay 首页声明 OEM 图标。建议通过 `rtcp_oem_icon_t` 提供 120、180 和 256 像素三档紧凑的方形 PNG。构建器将 PNG 和 UTF-8 标签复制到 plist，检查配置尺寸是否与 PNG 头部一致，整份响应仍须符合 6144 字节的预算。未配置时省略 OEM 字段。使用自带 `/info` 的宿主继续通过原有能力接口传入。字段依据见 [DiPlay 的 AirPlayInfoPlist](https://github.com/shihabal3amri/DiPlay/blob/main/shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayInfoPlist.kt) 和 [OCBM 的 info 构建器](https://github.com/lvalen91/ocbm/blob/main/crates/vendor/receiver/src/info.rs)。
+
+通过 `rtcp_receiver_set_host_ui_callback()` 接收 iPhone 发来的普通 `requestUI`，例如用户点击 OEM 图标。回调在接收端 Owner 线程执行，由宿主安排本地界面切换。带特定 URL 的请求由其他功能处理。
+
+调用 `rtcp_receiver_set_projection_enabled(receiver, false)` 请求将 MainScreen 交给宿主，传 `true` 请求 iPhone 恢复 CarPlay 前台。接收端在已有的加密事件通道发送只针对 MainScreen 的 `changeModes`（Take）以及 `requestUI`。`RTCP_OK` 表示消息已写入。使用 `rtcp_receiver_get_projection_owner()` 查看手机返回的 `modesChanged`，等重新收到视频后再显示投屏。音频、iAP2 和 Type 111 各有独立生命周期。Type 110 的生命周期由 iPhone 决定，iPhone 可以保留传输连接。命令依据见 [OCBM 的事件实现](https://github.com/lvalen91/ocbm/blob/main/crates/vendor/receiver/src/events.rs)。
+
 在 Owner 线程调用 `rtcp_receiver_set_appearance()`，传入 `RTCP_APPEARANCE_AUTOMATIC`、`RTCP_APPEARANCE_LIGHT` 或 `RTCP_APPEARANCE_DARK`。自动模式接受宿主当前的界面与地图日夜状态，可由环境光和车灯状态决定。浅色和深色覆盖这两项状态。更新使用已协商的主显示 UUID 和加密事件通道。`RTCP_OK` 表示两条消息均已写入。重连后重新应用偏好，在 iPhone 上验证渲染后的界面和地图。宿主独立管理本机 HMI 主题。
 
 宿主实际应用增益变化后调用 `rtcp_receiver_set_volume_db()`，包括收到 `on_volume` 请求的情况。这会记录实际增益，供手机后续发起 `GET_PARAMETER volume` 查询。静音使用 `-144` dB。Duck、资源和活动流各自保留独立约定。初始 `streams=0`、缺少 Audio SETUP、完成 SETUP 后播放异常是不同的检查点。

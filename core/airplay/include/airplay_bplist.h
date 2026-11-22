@@ -102,6 +102,8 @@ airplay_bplist_result_t airplay_bplist_get_data(
 bool airplay_bplist_get_utf8(const airplay_bplist_doc_t *, airplay_bplist_object_t,
                              char *output, size_t capacity);
 
+airplay_bplist_result_t airplay_bplist_build_projection_command(
+    bool enabled, uint8_t *out, size_t capacity, size_t *written);
 airplay_bplist_result_t airplay_bplist_build_appearance_command(
     const char *uuid, unsigned setting, bool night, uint8_t *out, size_t capacity, size_t *written);
 

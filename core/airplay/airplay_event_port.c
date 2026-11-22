@@ -218,6 +218,12 @@ void airplay_event_port_poll(airplay_event_port_t *port)
     mbedtls_platform_zeroize(port->rx, (size_t)received);
 }
 
+void airplay_event_port_poll_error(airplay_event_port_t *port)
+{
+    if (port)
+        fail_event_port(port, "poll_error");
+}
+
 bool airplay_event_port_send_hid_report(airplay_event_port_t *port,
                                         uint32_t hid_uid,
                                         const uint8_t *report,
@@ -262,4 +268,11 @@ bool airplay_event_port_send_iap(airplay_event_port_t *port, const uint8_t *data
 bool airplay_event_port_request_siri(airplay_event_port_t *port)
 {
     return port && !port->failed && port->connected_notified && airplay_control_port_request_siri(port->control);
+}
+
+bool airplay_event_port_set_appearance(airplay_event_port_t *port, const char *uuid,
+                                       unsigned setting, bool ui_night, bool map_night)
+{
+    return port && !port->failed && port->connected_notified &&
+           airplay_control_port_set_appearance(port->control, uuid, setting, ui_night, map_night);
 }

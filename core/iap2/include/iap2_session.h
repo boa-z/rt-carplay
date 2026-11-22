@@ -8,7 +8,9 @@
 #include "iap2_core.h"
 #include "iap2_identity.h"
 #include "iap2_mfi_auth.h"
+#include "rtcp/media.h"
 #include "rtcp/mfi.h"
+#include "rtcp/navigation.h"
 
 /*
  * Accessory-side iAP2 negotiation for the wireless (Bluetooth) CarPlay path.
@@ -121,6 +123,9 @@ typedef struct
      * Zero disables it. One extra wired invitation is allowed before TCP. */
     uint32_t wired_reinvite_delay_ms;
     iap2_session_message_cb_t observe_message;
+    rtcp_now_playing_cb_t on_now_playing;
+    rtcp_route_guidance_cb_t on_route_guidance;
+    rtcp_route_maneuver_cb_t on_route_maneuver;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES       4U
@@ -160,3 +165,11 @@ void iap2_session_handle_message(iap2_session_t *session,
 
 bool iap2_session_is_authenticated(const iap2_session_t *session);
 bool iap2_session_identification_accepted(const iap2_session_t *session);
+
+/* Owner-thread GNSS forwarding. The subscription mask is zero until the
+ * authenticated phone requests location and is cleared on stop/link loss.
+ * Send accepts one checksummed GGA/RMC sentence without CR/LF. A true return
+ * means the iAP2 link queued it. Input is consumed before return. */
+unsigned iap2_session_location_requested(const iap2_session_t *session);
+bool iap2_session_send_location(iap2_session_t *session, const char *sentence,
+                                size_t length, uint64_t now_ms);

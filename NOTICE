@@ -18,6 +18,18 @@ Third-party code currently included:
 
 Third-party protocol code currently included:
 
+- Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
+  Copyright (C) 2025-2026 Lasse Heitgres. GPL-3.0-or-later.
+  The optional knob and media HID descriptors are from `livi-cp/src/hid.rs`
+  at revision 4451f8f8b927032dd59708ab2f1591548410139e. Classic appearance
+  commands follow the same revision's `livi-cp/src/stack/events.rs`, and
+  volume query response behavior follows `livi-cp/src/airplay.rs`. iAP2 Now
+  Playing field IDs and playback states follow `iap2-csm/src/messages/now_playing.rs`.
+  Classic navigation and GNSS message fields follow the same revision's
+  `iap2-csm/src/messages/{route_guidance,location,identification}.rs`.
+  DiPlay's `Iap2Endpoint.kt` and `Iap2Messages.kt` corroborate the message IDs
+  and NMEA payload. See the DiPlay attribution below.
+
 - The modules in `core/iap2/` (`iap2_core`, `iap2_identity`, `iap2_carplay`,
   `iap2_mfi_auth`) and the ported AirPlay modules in `core/airplay/`
   (plist/RTSP/TLV8/screen/DataStream, Pair-Setup/Pair-Verify/SRP-6a,

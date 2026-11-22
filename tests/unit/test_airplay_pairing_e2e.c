@@ -23,6 +23,7 @@
 #include "airplay_control_cipher.h"
 #include "airplay_ed25519.h"
 #include "airplay_info_plist.h"
+#include "airplay_rtsp_codec.h"
 #include "airplay_screen.h"
 #include "airplay_srp6a.h"
 #include "airplay_srp6a_test_client.h"
@@ -1005,6 +1006,21 @@ static void run_encrypted_info(rtcp_receiver_t *server, client_t *client,
 
 /* The sender's SET_PARAMETER volume reaches the receiver callback and the
  * session acknowledges it with 200 OK. */
+static void expect_volume_query(rtcp_receiver_t *server, client_t *client,
+                                uint32_t *cseq, const char *parameter, const char *expected)
+{
+    uint8_t request[256];
+    response_t response;
+    size_t length = build_request(request, sizeof(request), "GET_PARAMETER", "/stream",
+                                  "text/parameters", (*cseq)++, (const uint8_t *)parameter, strlen(parameter));
+    client_exchange(server, client, request, length, &response);
+    assert(contains(response.headers, response.headers_len, "200"));
+    assert(response.body_len == strlen(expected));
+    assert(memcmp(response.body, expected, response.body_len) == 0);
+    if (response.body_len)
+        assert(contains(response.headers, response.headers_len, "text/parameters"));
+}
+
 static void run_set_parameter_volume(rtcp_receiver_t *server,
                                      client_t *client, uint32_t *cseq)
 {
@@ -1020,6 +1036,347 @@ static void run_set_parameter_volume(rtcp_receiver_t *server,
     assert(contains(response.headers, response.headers_len, "200"));
     assert(volume_events == before + 1U);
     assert(volume_last_db > -12.001f && volume_last_db < -11.999f);
+    expect_volume_query(server, client, cseq, "volume\r\n", "");
+    assert(rtcp_receiver_set_volume_db(server, -12.375f) == RTCP_OK);
+    assert(rtcp_receiver_set_volume_db(server, 1.0f) == RTCP_EINVAL);
+    expect_volume_query(server, client, cseq, "volume\r\n", "volume: -12.375\r\n");
+    expect_volume_query(server, client, cseq, "volume-other", "");
+    assert(rtcp_receiver_set_volume_db(server, -144.0f) == RTCP_OK);
+    expect_volume_query(server, client, cseq, "volume", "volume: -144.000\r\n");
+}
+
+static void capture_now_playing(const rtcp_now_playing_t *update, void *context)
+{
+    unsigned *events = context;
+    if ((*events)++ == 0)
+    {
+        assert(update->title && !strcmp(update->title, "\xe5\xa4\x9c\xe8\x88\xaa\xf0\x9f\x8e\xb5"));
+        assert(update->artist && !strcmp(update->artist, "Artist"));
+        assert(!update->album && !update->has_playing);
+    }
+    else
+        assert(!update->title && !update->artist && !update->album && update->has_playing && update->playing);
+}
+
+static void run_now_playing(rtcp_receiver_t *server, client_t *client, uint32_t *cseq)
+{
+    static const uint8_t track[] = {
+        0x62,
+        0x70,
+        0x6c,
+        0x69,
+        0x73,
+        0x74,
+        0x30,
+        0x30,
+        0xd2,
+        0x01,
+        0x02,
+        0x03,
+        0x09,
+        0x56,
+        0x70,
+        0x61,
+        0x72,
+        0x61,
+        0x6d,
+        0x73,
+        0x54,
+        0x74,
+        0x79,
+        0x70,
+        0x65,
+        0xd1,
+        0x01,
+        0x04,
+        0xd2,
+        0x05,
+        0x06,
+        0x07,
+        0x08,
+        0x5f,
+        0x10,
+        0x22,
+        0x6b,
+        0x4d,
+        0x52,
+        0x4d,
+        0x65,
+        0x64,
+        0x69,
+        0x61,
+        0x52,
+        0x65,
+        0x6d,
+        0x6f,
+        0x74,
+        0x65,
+        0x4e,
+        0x6f,
+        0x77,
+        0x50,
+        0x6c,
+        0x61,
+        0x79,
+        0x69,
+        0x6e,
+        0x67,
+        0x49,
+        0x6e,
+        0x66,
+        0x6f,
+        0x41,
+        0x72,
+        0x74,
+        0x69,
+        0x73,
+        0x74,
+        0x5f,
+        0x10,
+        0x21,
+        0x6b,
+        0x4d,
+        0x52,
+        0x4d,
+        0x65,
+        0x64,
+        0x69,
+        0x61,
+        0x52,
+        0x65,
+        0x6d,
+        0x6f,
+        0x74,
+        0x65,
+        0x4e,
+        0x6f,
+        0x77,
+        0x50,
+        0x6c,
+        0x61,
+        0x79,
+        0x69,
+        0x6e,
+        0x67,
+        0x49,
+        0x6e,
+        0x66,
+        0x6f,
+        0x54,
+        0x69,
+        0x74,
+        0x6c,
+        0x65,
+        0x56,
+        0x41,
+        0x72,
+        0x74,
+        0x69,
+        0x73,
+        0x74,
+        0x64,
+        0x59,
+        0x1c,
+        0x82,
+        0x2a,
+        0xd8,
+        0x3c,
+        0xdf,
+        0xb5,
+        0x5f,
+        0x10,
+        0x16,
+        0x75,
+        0x70,
+        0x64,
+        0x61,
+        0x74,
+        0x65,
+        0x4d,
+        0x52,
+        0x4e,
+        0x6f,
+        0x77,
+        0x50,
+        0x6c,
+        0x61,
+        0x79,
+        0x69,
+        0x6e,
+        0x67,
+        0x49,
+        0x6e,
+        0x66,
+        0x6f,
+        0x08,
+        0x0d,
+        0x14,
+        0x19,
+        0x1c,
+        0x21,
+        0x46,
+        0x6a,
+        0x71,
+        0x7a,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x93,
+    };
+    static const uint8_t playback[] = {
+        0x62,
+        0x70,
+        0x6c,
+        0x69,
+        0x73,
+        0x74,
+        0x30,
+        0x30,
+        0xd2,
+        0x01,
+        0x02,
+        0x03,
+        0x06,
+        0x56,
+        0x70,
+        0x61,
+        0x72,
+        0x61,
+        0x6d,
+        0x73,
+        0x54,
+        0x74,
+        0x79,
+        0x70,
+        0x65,
+        0xd1,
+        0x04,
+        0x05,
+        0x5f,
+        0x10,
+        0x0f,
+        0x6d,
+        0x72,
+        0x50,
+        0x6c,
+        0x61,
+        0x79,
+        0x62,
+        0x61,
+        0x63,
+        0x6b,
+        0x53,
+        0x74,
+        0x61,
+        0x74,
+        0x65,
+        0x10,
+        0x01,
+        0x5f,
+        0x10,
+        0x15,
+        0x75,
+        0x70,
+        0x64,
+        0x61,
+        0x74,
+        0x65,
+        0x4d,
+        0x52,
+        0x50,
+        0x6c,
+        0x61,
+        0x79,
+        0x62,
+        0x61,
+        0x63,
+        0x6b,
+        0x53,
+        0x74,
+        0x61,
+        0x74,
+        0x65,
+        0x08,
+        0x0d,
+        0x14,
+        0x19,
+        0x1c,
+        0x2e,
+        0x30,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x07,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x48,
+    };
+    unsigned events = 0;
+    assert(rtcp_receiver_set_now_playing_callback(server, capture_now_playing, &events) == RTCP_OK);
+    uint8_t request[512];
+    response_t response;
+    size_t length = build_request(request, sizeof(request), "POST", "/command", PLIST_TYPE,
+                                  (*cseq)++, track, sizeof(track));
+    client_exchange(server, client, request, length, &response);
+    assert(contains(response.headers, response.headers_len, "200") && events == 1);
+    length = build_request(request, sizeof(request), "POST", "/command", PLIST_TYPE,
+                           (*cseq)++, playback, sizeof(playback));
+    client_exchange(server, client, request, length, &response);
+    assert(contains(response.headers, response.headers_len, "200") && events == 2);
+    assert(rtcp_receiver_set_now_playing_callback(server, NULL, NULL) == RTCP_OK);
 }
 
 static void run_tampered_frame(rtcp_receiver_t *server,
@@ -1510,7 +1867,7 @@ static int data_listen(uint8_t family, uint16_t port)
         fail_next_listener = false;
         return RTCP_EIO;
     }
-    return rtcp_net_linux.listen(family, port);
+    return rtcp_net_linux.listen(family, port == 7000U ? 0U : port);
 }
 #include "vehicle_test_wire.h"
 #include "vehicle_control_test_model.h"
@@ -2084,9 +2441,84 @@ static void run_ui_processor(client_t *client, const uint8_t shared[32], uint32_
     request_data(client, cseq, RTCP_DATA_STREAM_UI_SYNC, 7520, 200, &id);
 }
 
+static void verify_appearance(rtcp_receiver_t *server, int fd, airplay_control_cipher_t *peer,
+                              rtcp_appearance_setting_t setting, bool ui_night, bool map_night,
+                              bool expected_ui, bool expected_map)
+{
+    assert(rtcp_receiver_set_appearance(server, setting, ui_night, map_night) == RTCP_OK);
+    uint8_t plain[1024];
+    size_t available = 0;
+    for (unsigned command = 0; command < 2; ++command)
+    {
+        airplay_rtsp_request_t request;
+        while (airplay_rtsp_parse_request(plain, available, &request) != AIRPLAY_RTSP_PARSE_COMPLETE)
+        {
+            size_t received = receive_decrypted(server, fd, peer, plain + available, sizeof(plain) - available);
+            assert(received > 0);
+            available += received;
+        }
+        assert(!strcmp(request.method, "POST") && !strcmp(request.path, "/command"));
+
+        airplay_bplist_doc_t doc;
+        airplay_bplist_object_t root, field, params;
+        char text[40];
+        size_t length;
+        assert(airplay_bplist_open(request.body, request.body_len, &doc) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc, root, "type", &field) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_string(&doc, field, text, sizeof(text), &length) == AIRPLAY_BPLIST_OK);
+        assert(!strcmp(text, command == 0 ? "uiAppearanceUpdate" : "setNightMode"));
+        assert(airplay_bplist_dict_get(&doc, root, "params", &params) == AIRPLAY_BPLIST_OK);
+        if (command == 0)
+        {
+            uint64_t value;
+            assert(airplay_bplist_dict_get(&doc, params, "uuid", &field) == AIRPLAY_BPLIST_OK);
+            assert(airplay_bplist_get_string(&doc, field, text, sizeof(text), &length) == AIRPLAY_BPLIST_OK);
+            assert(!strcmp(text, "b7e6c5a0-1111-4000-8000-000000000001"));
+            assert(airplay_bplist_dict_get(&doc, params, "appearanceMode", &field) == AIRPLAY_BPLIST_OK);
+            assert(airplay_bplist_get_uint(&doc, field, &value) == AIRPLAY_BPLIST_OK && value == expected_ui);
+            assert(airplay_bplist_dict_get(&doc, params, "appearanceSetting", &field) == AIRPLAY_BPLIST_OK);
+            assert(airplay_bplist_get_uint(&doc, field, &value) == AIRPLAY_BPLIST_OK && value == (unsigned)setting);
+        }
+        else
+        {
+            bool value;
+            assert(airplay_bplist_dict_get(&doc, params, "nightMode", &field) == AIRPLAY_BPLIST_OK);
+            assert(airplay_bplist_get_bool(&doc, field, &value) == AIRPLAY_BPLIST_OK && value == expected_map);
+        }
+        available -= request.consumed;
+        memmove(plain, plain + request.consumed, available);
+    }
+    assert(available == 0);
+}
+
+static void expect_hid_report(rtcp_receiver_t *server, int fd, airplay_control_cipher_t *peer,
+                              const char *expected_uid, const uint8_t *expected_report, size_t expected_len)
+{
+    uint8_t plain[512];
+    size_t plain_len = receive_decrypted(server, fd, peer, plain, sizeof(plain));
+    airplay_rtsp_request_t request;
+    assert(airplay_rtsp_parse_request(plain, plain_len, &request) == AIRPLAY_RTSP_PARSE_COMPLETE);
+    assert(!strcmp(request.method, "POST") && !strcmp(request.path, "/command") && request.consumed == plain_len);
+
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root, field;
+    char uid[16];
+    size_t length;
+    const uint8_t *report;
+    assert(airplay_bplist_open(request.body, request.body_len, &doc) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_dict_get(&doc, root, "uuid", &field) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_string(&doc, field, uid, sizeof(uid), &length) == AIRPLAY_BPLIST_OK);
+    assert(!strcmp(uid, expected_uid));
+    assert(airplay_bplist_dict_get(&doc, root, "hidReport", &field) == AIRPLAY_BPLIST_OK);
+    assert(airplay_bplist_get_data(&doc, field, &report, &length) == AIRPLAY_BPLIST_OK);
+    assert(length == expected_len && memcmp(report, expected_report, length) == 0);
+}
+
 static void run_event_channel(rtcp_receiver_t *server,
                               const uint8_t shared_secret[KEY_BYTES],
-                              uint16_t event_port)
+                              uint16_t event_port, bool poll_error)
 {
     static const uint8_t hid_report[12] = {
         0xde,
@@ -2103,6 +2535,7 @@ static void run_event_channel(rtcp_receiver_t *server,
         0x08,
     };
     /* Before the controller attaches there is no event channel to write. */
+    assert(rtcp_receiver_set_appearance(server, RTCP_APPEARANCE_LIGHT, false, false) == RTCP_ESTATE);
     assert(!rtcp_receiver_send_hid_report(e2e_receiver, 0x2a2a2a2aU,
                                           hid_report,
                                           sizeof(hid_report)));
@@ -2149,13 +2582,44 @@ static void run_event_channel(rtcp_receiver_t *server,
     assert(contains(plain, plain_len, "hidSendReport"));
     assert(contains(plain, plain_len, "hidReport"));
 
-    rtcp_net_linux.close(event_fd);
+    const rtcp_touch_contact_t contacts[] = { { 300, 150, true }, { 401, 257, true } };
+    const uint8_t touch[] = { 0, 1, 44, 1, 150, 0, 1, 1, 145, 1, 1, 1 };
+    assert(rtcp_receiver_send_touch(server, contacts));
+    expect_hid_report(server, event_fd, peer, "2a2a2a2a", touch, sizeof(touch));
+    const rtcp_knob_report_t invalid_knob = { .wheel = INT8_MIN };
+    assert(!rtcp_receiver_send_knob(server, &invalid_knob));
+    const rtcp_knob_report_t knob = { .select = true, .back = true, .x = -1, .y = 1, .wheel = -2 };
+    const uint8_t knob_report[] = { 5, 255, 1, 254 };
+    assert(rtcp_receiver_send_knob(server, &knob));
+    expect_hid_report(server, event_fd, peer, "2a2a2a2b", knob_report, sizeof(knob_report));
+    assert(!rtcp_receiver_send_media_button(server, (rtcp_media_button_t)7));
+    const uint8_t next[] = { 4 }, release[] = { 0 };
+    assert(rtcp_receiver_send_media_button(server, RTCP_MEDIA_NEXT));
+    expect_hid_report(server, event_fd, peer, "2a2a2a2c", next, sizeof(next));
+    assert(rtcp_receiver_send_media_button(server, RTCP_MEDIA_RELEASE));
+    expect_hid_report(server, event_fd, peer, "2a2a2a2c", release, sizeof(release));
+
+    assert(rtcp_receiver_set_appearance(server, (rtcp_appearance_setting_t)3, false, false) == RTCP_EINVAL);
+    verify_appearance(server, event_fd, peer, RTCP_APPEARANCE_AUTOMATIC, true, false, true, false);
+    verify_appearance(server, event_fd, peer, RTCP_APPEARANCE_LIGHT, true, true, false, false);
+    verify_appearance(server, event_fd, peer, RTCP_APPEARANCE_DARK, false, false, true, true);
+
+    if (poll_error)
+        fail_poll_port = event_port;
+    else
+        rtcp_net_linux.close(event_fd);
     start = rtcp_os_linux.now_ms();
     while (event_connected && rtcp_os_linux.now_ms() - start < WAIT_LIMIT_MS)
     {
         receiver_poll(server, 10);
     }
     assert(!event_connected);
+    if (poll_error)
+    {
+        assert(fail_poll_port == 0 && receiver_connected(server));
+        rtcp_net_linux.close(event_fd);
+    }
+    assert(rtcp_receiver_set_appearance(server, RTCP_APPEARANCE_DARK, false, false) == RTCP_ESTATE);
 
     airplay_control_cipher_destroy(peer);
     mbedtls_platform_zeroize(peer_read_key, sizeof(peer_read_key));
@@ -2542,6 +3006,8 @@ int main(int argc, char **argv)
 
     uint8_t info_plist[INFO_PLIST_BYTES];
     airplay_info_plist_config_t info = { 0 };
+    info.hid_knob = true;
+    info.hid_media = true;
     info.device_id = ACCESSORY_ID;
     info.name = "rt-carplay e2e";
     info.model = "AppleTV6,2";
@@ -2624,6 +3090,10 @@ int main(int argc, char **argv)
     rtcp_receiver_t *server = NULL;
     assert(rtcp_receiver_create(&receiver_config, &e2e_receiver) == RTCP_OK);
     memset(&receiver_config, 0, sizeof(receiver_config)); /* Descriptors are copied. */
+    fail_next_listener = true;
+    assert(rtcp_receiver_start(e2e_receiver) == RTCP_EIO);
+    assert(rtcp_receiver_port(e2e_receiver) == 0);
+    assert(rtcp_receiver_stop(e2e_receiver) == RTCP_OK);
     assert(rtcp_receiver_start(e2e_receiver) == RTCP_OK);
     server = e2e_receiver;
     assert(server != NULL);
@@ -2666,7 +3136,7 @@ int main(int argc, char **argv)
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).enabled == ui_mode);
     if (vehicle_mode)
         assert(run_initial_setup(server, &client, &cseq, false) == event_port);
-    run_event_channel(server, shared_secret, event_port);
+    run_event_channel(server, shared_secret, event_port, false);
     if (vehicle_mode)
         run_vehicle_processor(&client, shared_secret, &cseq, vehicle, !ui_mode);
     else
@@ -2744,8 +3214,9 @@ int main(int argc, char **argv)
     request_data(&client2, &guard_cseq, RTCP_DATA_STREAM_UI_SYNC, 8000, 503, &guard_id);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).registered && !data_status(RTCP_DATA_STREAM_UI_SYNC).offered);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state == RTCP_DATA_STREAM_IDLE);
-    run_event_channel(server, shared_secret2, event_port2);
+    run_event_channel(server, shared_secret2, event_port2, true);
     run_set_parameter_volume(server, &client2, &cseq);
+    run_now_playing(server, &client2, &cseq);
     run_audio_stream(server, &client2, shared_secret2, &cseq, false);
     if (alt_mode)
     {

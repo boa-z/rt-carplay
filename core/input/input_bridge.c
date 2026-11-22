@@ -67,13 +67,13 @@ static void map_coordinates(const input_bridge_t *bridge, double x, double y,
     *out_y = map_axis(mapped_y, bridge->height);
 }
 
-static void encode_report(const input_bridge_t *bridge,
-                          uint8_t report[INPUT_BRIDGE_HID_REPORT_BYTES])
+void input_bridge_encode_touch(const rtcp_touch_contact_t contacts[RTCP_TOUCH_CONTACTS],
+                               uint8_t report[INPUT_BRIDGE_HID_REPORT_BYTES])
 {
     memset(report, 0, INPUT_BRIDGE_HID_REPORT_BYTES);
     for (size_t slot = 0; slot < INPUT_BRIDGE_TOUCH_CONTACTS; ++slot)
     {
-        const input_contact_t *contact = &bridge->contacts[slot];
+        const rtcp_touch_contact_t *contact = &contacts[slot];
         size_t offset = slot * 6U;
         report[offset] = (uint8_t)slot;
         report[offset + 1U] = contact->down ? 0x01U : 0x00U;
@@ -86,7 +86,13 @@ static void encode_report(const input_bridge_t *bridge,
 
 static bool emit_report(input_bridge_t *bridge)
 {
-    encode_report(bridge, bridge->last_report);
+    rtcp_touch_contact_t contacts[RTCP_TOUCH_CONTACTS];
+    for (size_t slot = 0; slot < RTCP_TOUCH_CONTACTS; ++slot)
+    {
+        const input_contact_t *contact = &bridge->contacts[slot];
+        contacts[slot] = (rtcp_touch_contact_t){ .x = contact->x, .y = contact->y, .down = contact->down };
+    }
+    input_bridge_encode_touch(contacts, bridge->last_report);
     bridge->has_report = true;
     if (bridge->report_cb == NULL)
     {

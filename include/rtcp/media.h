@@ -79,6 +79,17 @@ typedef int (*rtcp_audio_packet_cb_t)(uint16_t stream_type, const uint8_t *data,
                                       size_t length, const rtcp_audio_format_t *format, uint32_t rtp_timestamp,
                                       uint64_t arrival_time_us, void *context);
 
+/* Classic Now Playing delta. NULL text fields and absent playback state
+ * leave the host's previous values unchanged. Text is UTF-8, bounded to
+ * 128 bytes per field and borrowed for the callback only. */
+typedef struct
+{
+    const char *title, *artist, *album;
+    bool has_playing, playing;
+} rtcp_now_playing_t;
+
+typedef void (*rtcp_now_playing_cb_t)(const rtcp_now_playing_t *, void *context);
+
 typedef struct
 {
     /* NULL video selects an intentional discard sink; NULL audio refuses

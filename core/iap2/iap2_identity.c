@@ -262,6 +262,10 @@ static bool build_identification(const iap2_identity_config_t *config,
         0x4300,
     };
     const bool wired = profile == IDENTITY_PROFILE_WIRED_USB;
+    const bool location = config->provide_location &&
+                          !is_message_omitted(IAP2_MSG_START_LOCATION, omitted_message_ids, omitted_message_count) &&
+                          !is_message_omitted(IAP2_MSG_LOCATION, omitted_message_ids, omitted_message_count) &&
+                          !is_message_omitted(IAP2_MSG_STOP_LOCATION, omitted_message_ids, omitted_message_count);
     const uint16_t *sent_messages = wired ? wired_sent : wireless_sent;
     size_t sent_count = wired ? sizeof(wired_sent) / sizeof(wired_sent[0])
                               : sizeof(wireless_sent) / sizeof(wireless_sent[0]);
@@ -286,6 +290,13 @@ static bool build_identification(const iap2_identity_config_t *config,
         {
             filtered_received[filtered_received_count++] = received_messages[i];
         }
+    }
+
+    if (location)
+    {
+        filtered_sent[filtered_sent_count++] = IAP2_MSG_LOCATION;
+        filtered_received[filtered_received_count++] = IAP2_MSG_START_LOCATION;
+        filtered_received[filtered_received_count++] = IAP2_MSG_STOP_LOCATION;
     }
 
     if (!append_string(output, output_capacity, &used, 0, config->name) ||
@@ -370,9 +381,21 @@ static bool build_identification(const iap2_identity_config_t *config,
         }
     }
 
+    if (location)
+    {
+        uint8_t component[32];
+        size_t component_len = 0;
+        if (!append_u16(component, sizeof(component), &component_len, 0, 0) ||
+            !append_string(component, sizeof(component), &component_len, 1, "GNSS") ||
+            !append_void(component, sizeof(component), &component_len, 17) ||
+            !append_void(component, sizeof(component), &component_len, 18) ||
+            !append_group(output, output_capacity, &used, 22, component, component_len))
+            return false;
+    }
+
     uint8_t route_guidance[96];
     size_t route_guidance_len = 0U;
-    if (!append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 0, 42) ||
+    if (!append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 0, IAP2_ROUTE_DISPLAY_ID) ||
         !append_string(route_guidance, sizeof(route_guidance), &route_guidance_len, 1,
                        "RouteGuidance") ||
         !append_u16(route_guidance, sizeof(route_guidance), &route_guidance_len, 2, 64) ||

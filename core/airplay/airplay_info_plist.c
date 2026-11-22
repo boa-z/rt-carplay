@@ -638,7 +638,7 @@ static uint32_t emit_display(ip_writer_t *w,
     values[6] = ip_emit_int(w, config->height_physical_mm != 0U
                                    ? config->height_physical_mm
                                    : IP_DEFAULT_HEIGHT_PHYSICAL);
-    values[7] = ip_emit_int(w, IP_DISPLAY_FEATURES);
+    values[7] = ip_emit_int(w, IP_DISPLAY_FEATURES | (config->hid_knob ? 0x02U : 0U));
     values[8] = ip_emit_int(w, 1);
     values[9] = ip_emit_int(w, p != NULL && p->ui_night);
     values[10] = ip_emit_int(w, p != NULL ? p->appearance_setting : 0);
@@ -650,7 +650,7 @@ static uint32_t emit_display(ip_writer_t *w,
 }
 
 static uint32_t emit_hid_device(ip_writer_t *w, const airplay_info_plist_config_t *config,
-                                const uint8_t *descriptor,
+                                const char *uid, const char *name, const uint8_t *descriptor,
                                 size_t descriptor_len)
 {
     static const char * const keys[] = {
@@ -666,8 +666,8 @@ static uint32_t emit_hid_device(ip_writer_t *w, const airplay_info_plist_config_
     values[0] = ip_emit_int(w, 1);
     values[1] = ip_emit_int(w, 2);
     values[2] = ip_emit_int(w, 0);
-    values[3] = ip_emit_string(w, IP_HID_UUID);
-    values[4] = ip_emit_string(w, IP_HID_NAME);
+    values[3] = ip_emit_string(w, uid);
+    values[4] = ip_emit_string(w, name);
     const rtcp_display_profile_t *p = config->main_display_profile;
     values[5] = ip_emit_string(w, p != NULL && p->uuid != NULL ? p->uuid : IP_DISPLAY_UUID);
     values[6] = ip_emit_data(w, descriptor, descriptor_len);
@@ -859,8 +859,128 @@ static uint32_t emit_root(ip_writer_t *w,
     }
     uint32_t display = emit_display(w, config);
     uint32_t displays = ip_emit_array(w, &display, 1U);
-    uint32_t hid = emit_hid_device(w, config, descriptor, descriptor_len);
-    uint32_t hids = ip_emit_array(w, &hid, 1U);
+    static const uint8_t knob_descriptor[] = {
+        0x05,
+        0x01,
+        0x09,
+        0x08,
+        0xa1,
+        0x01,
+        0x05,
+        0x09,
+        0x09,
+        0x01,
+        0x15,
+        0x00,
+        0x25,
+        0x01,
+        0x75,
+        0x01,
+        0x95,
+        0x01,
+        0x81,
+        0x02,
+        0x05,
+        0x0c,
+        0x0a,
+        0x23,
+        0x02,
+        0x0a,
+        0x24,
+        0x02,
+        0x95,
+        0x02,
+        0x81,
+        0x02,
+        0x95,
+        0x05,
+        0x81,
+        0x01,
+        0x05,
+        0x01,
+        0x09,
+        0x01,
+        0xa1,
+        0x00,
+        0x09,
+        0x30,
+        0x09,
+        0x31,
+        0x15,
+        0x81,
+        0x25,
+        0x7f,
+        0x75,
+        0x08,
+        0x95,
+        0x02,
+        0x81,
+        0x02,
+        0xc0,
+        0x09,
+        0x38,
+        0x15,
+        0x81,
+        0x25,
+        0x7f,
+        0x75,
+        0x08,
+        0x95,
+        0x01,
+        0x81,
+        0x06,
+        0xc0,
+    };
+    static const uint8_t media_descriptor[] = {
+        0x05,
+        0x0c,
+        0x09,
+        0x01,
+        0xa1,
+        0x01,
+        0x15,
+        0x00,
+        0x25,
+        0x06,
+        0x05,
+        0x0c,
+        0x0a,
+        0x00,
+        0x00,
+        0x0a,
+        0xb0,
+        0x00,
+        0x0a,
+        0xb1,
+        0x00,
+        0x0a,
+        0xcd,
+        0x00,
+        0x0a,
+        0xb5,
+        0x00,
+        0x0a,
+        0xb6,
+        0x00,
+        0x0a,
+        0x9e,
+        0x02,
+        0x75,
+        0x08,
+        0x95,
+        0x01,
+        0x81,
+        0x00,
+        0xc0,
+    };
+    uint32_t hid[3];
+    size_t hid_count = 0;
+    hid[hid_count++] = emit_hid_device(w, config, IP_HID_UUID, IP_HID_NAME, descriptor, descriptor_len);
+    if (config->hid_knob)
+        hid[hid_count++] = emit_hid_device(w, config, "2a2a2a2b", "CarPlay Knob", knob_descriptor, sizeof(knob_descriptor));
+    if (config->hid_media)
+        hid[hid_count++] = emit_hid_device(w, config, "2a2a2a2c", "CarPlay Media", media_descriptor, sizeof(media_descriptor));
+    uint32_t hids = ip_emit_array(w, hid, hid_count);
     uint32_t modes = emit_modes(w);
     uint32_t extended = emit_extended_features(w);
 

@@ -588,11 +588,11 @@ airplay_bplist_result_t airplay_bplist_get_string(
     return AIRPLAY_BPLIST_OK;
 }
 
-bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *doc,
-                                       airplay_bplist_object_t object, const uint8_t *text, size_t length)
+static bool process_utf8(const airplay_bplist_doc_t *doc, airplay_bplist_object_t object,
+                         const uint8_t *text, char *output, size_t length)
 {
     bplist_object_info_t info;
-    if ((!text && length) || resolve_object(doc, object, &info) != AIRPLAY_BPLIST_OK ||
+    if (resolve_object(doc, object, &info) != AIRPLAY_BPLIST_OK ||
         (info.type != 5U && info.type != 6U))
         return false;
     size_t pos = 0;
@@ -646,11 +646,34 @@ bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *doc,
             encoded[3] = (uint8_t)(0x80U | (cp & 63));
             n = 4;
         }
-        if (n > length - pos || memcmp(text + pos, encoded, n))
+        if (n > length - pos)
+            return false;
+        if (output)
+        {
+            if (cp == 0)
+                return false;
+            memcpy(output + pos, encoded, n);
+        }
+        else if (memcmp(text + pos, encoded, n))
             return false;
         pos += n;
     }
-    return pos == length;
+    if (!output)
+        return pos == length;
+    output[pos] = '\0';
+    return true;
+}
+
+bool airplay_bplist_string_equals_utf8(const airplay_bplist_doc_t *doc,
+                                       airplay_bplist_object_t object, const uint8_t *text, size_t length)
+{
+    return (text || length == 0) && process_utf8(doc, object, text, NULL, length);
+}
+
+bool airplay_bplist_get_utf8(const airplay_bplist_doc_t *doc, airplay_bplist_object_t object,
+                             char *output, size_t capacity)
+{
+    return output && capacity && process_utf8(doc, object, NULL, output, capacity - 1);
 }
 
 airplay_bplist_result_t airplay_bplist_get_data(
@@ -707,6 +730,7 @@ typedef enum
     BPLIST_WRITE_DATA,
     BPLIST_WRITE_STRING,
     BPLIST_WRITE_INTEGER,
+    BPLIST_WRITE_BOOL,
     BPLIST_WRITE_ARRAY,
     BPLIST_WRITE_DICTIONARY,
 } bplist_write_kind_t;
@@ -801,6 +825,11 @@ static bool emit_write_object(const bplist_write_object_t *object,
         output[(*offset)++] = (uint8_t)(0x10U | power);
         return write_be(output, capacity, offset, object->number, width);
     }
+    case BPLIST_WRITE_BOOL:
+        if (*offset >= capacity)
+            return false;
+        output[(*offset)++] = object->number ? 0x09U : 0x08U;
+        return true;
     case BPLIST_WRITE_ARRAY:
     case BPLIST_WRITE_DICTIONARY:
     {
@@ -1150,4 +1179,25 @@ airplay_bplist_result_t airplay_bplist_build_siri_command(unsigned action, uint8
         { .kind = BPLIST_WRITE_INTEGER, .number = action }
     };
     return build_setup_response(o, 7, out, capacity, written);
+}
+
+airplay_bplist_result_t airplay_bplist_build_appearance_command(
+    const char *uuid, unsigned setting, bool night, uint8_t *out, size_t capacity, size_t *written)
+{
+    bplist_write_object_t objects[] = {
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 1, 2, 3, 4 }, .reference_count = 4 },
+        { .kind = BPLIST_WRITE_STRING, .text = "type" },
+        { .kind = BPLIST_WRITE_STRING, .text = "params" },
+        { .kind = BPLIST_WRITE_STRING, .text = uuid ? "uiAppearanceUpdate" : "setNightMode" },
+        { .kind = BPLIST_WRITE_DICTIONARY, .references = { 5, 6 }, .reference_count = 2 },
+        { .kind = BPLIST_WRITE_STRING, .text = uuid ? "appearanceMode" : "nightMode" },
+        { .kind = uuid ? BPLIST_WRITE_INTEGER : BPLIST_WRITE_BOOL, .number = night },
+        { .kind = BPLIST_WRITE_STRING, .text = "uuid" },
+        { .kind = BPLIST_WRITE_STRING, .text = uuid },
+        { .kind = BPLIST_WRITE_STRING, .text = "appearanceSetting" },
+        { .kind = BPLIST_WRITE_INTEGER, .number = setting },
+    };
+    if (uuid)
+        objects[4] = (bplist_write_object_t){ .kind = BPLIST_WRITE_DICTIONARY, .references = { 5, 7, 9, 6, 8, 10 }, .reference_count = 6 };
+    return build_setup_response(objects, uuid ? 11 : 7, out, capacity, written);
 }

@@ -298,6 +298,12 @@ static void test_alt_stream_type(void)
     rtcp_net_linux.close(client);
 }
 
+static int burst_poll(struct rtcp_pollfd *fds, int count, int timeout_ms)
+{
+    assert(timeout_ms == 0);
+    return rtcp_net_linux.poll(fds, count, WAIT_MS);
+}
+
 static void test_bounded_burst(void)
 {
     uint8_t key[TEST_KEY_BYTES] = { 0 }, pcm[32] = { 0 }, wire[128];
@@ -310,7 +316,9 @@ static void test_bounded_burst(void)
     };
     memcpy(config.output_key, key, sizeof(key));
     airplay_audio_stream_t *stream = NULL;
-    assert(airplay_audio_stream_start(&rtcp_os_linux, &rtcp_net_linux, &config, &stream) == RTCP_OK);
+    struct rtcp_net burst_net = rtcp_net_linux;
+    burst_net.poll = burst_poll;
+    assert(airplay_audio_stream_start(&rtcp_os_linux, &burst_net, &config, &stream) == RTCP_OK);
     int client = rtcp_net_linux.udp_open(RTCP_AF_INET, 0, false);
     assert(client >= 0);
     rtcp_addr_t address = loopback(airplay_audio_stream_get_data_port(stream));

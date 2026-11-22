@@ -38,6 +38,7 @@ uint16_t airplay_event_port_get_port(const airplay_event_port_t *port);
 int airplay_event_port_get_fd(const airplay_event_port_t *port);
 
 void airplay_event_port_poll(airplay_event_port_t *port);
+void airplay_event_port_poll_error(airplay_event_port_t *port);
 void airplay_event_port_stop(airplay_event_port_t *port,
                              const struct rtcp_net *net);
 
@@ -52,3 +53,5 @@ bool airplay_event_port_send_hid_report(airplay_event_port_t *port,
 bool airplay_event_port_send_iap(airplay_event_port_t *, const uint8_t *, size_t);
 
 bool airplay_event_port_request_siri(airplay_event_port_t *);
+bool airplay_event_port_set_appearance(airplay_event_port_t *, const char *uuid,
+                                       unsigned setting, bool ui_night, bool map_night);

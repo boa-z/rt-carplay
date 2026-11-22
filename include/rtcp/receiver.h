@@ -11,6 +11,7 @@
 #include "rtcp/input.h"
 #include "rtcp/diagnostics.h"
 #include "rtcp/data_stream.h"
+#include "rtcp/display.h"
 #include "rtcp/vehicle.h"
 #include "rtcp/ui_sync.h"
 
@@ -99,6 +100,28 @@ int rtcp_receiver_set_single_cipher_frame(rtcp_receiver_t *, bool enabled);
 /* Owner-thread tunneled iAP2 output, including iAP2 callbacks during poll.
  * Bytes are consumed synchronously. False when the event channel is absent. */
 bool rtcp_receiver_send_iap(rtcp_receiver_t *, const uint8_t *, size_t);
+
+/* Owner-thread Classic appearance update for the negotiated main display.
+ * In Automatic, the host supplies current UI/map night decisions from its
+ * sensors or vehicle signals. Light/Dark override those decisions. Returns
+ * ESTATE until the encrypted event channel is ready, ENOTSUP without a
+ * main display UUID, and EIO if either command could not be written.
+ * Success reports socket writes. The host keeps the preference and can
+ * reapply it after reconnect or supply it in the next /info payload. */
+int rtcp_receiver_set_appearance(rtcp_receiver_t *, rtcp_appearance_setting_t,
+                                 bool ui_night, bool map_night);
+
+/* Publish the host's applied gain for phone GET_PARAMETER volume requests.
+ * Call on the owner, including from on_volume after applying the gain.
+ * Accepts finite values in [-144, 0] dB, with -144 representing mute.
+ * The value survives stop/start. The setter does not change host gain or
+ * send an unsolicited message. Until called, volume queries are empty. */
+int rtcp_receiver_set_volume_db(rtcp_receiver_t *, float volume_db);
+
+/* Optional owner-thread callback for Classic AirPlay Now Playing updates.
+ * NULL disables delivery. Registration survives stop/start. The host clears
+ * its metadata on session loss using the Receiver state callback. */
+int rtcp_receiver_set_now_playing_callback(rtcp_receiver_t *, rtcp_now_playing_cb_t, void *context);
 
 /* Owner-thread Type 130 transport, including on_body callbacks. send copies
  * bytes into a bounded queue; success is not phone receipt. EINVAL denotes

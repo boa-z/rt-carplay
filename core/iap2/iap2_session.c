@@ -17,6 +17,7 @@
 
 #include "iap2_carplay.h"
 #include "iap2_parameter.h"
+#include "rtcp/log.h"
 #include "rtcp/rtcp.h"
 
 #define IAP2_SESSION_CERT_CAPACITY           1536U
@@ -42,6 +43,11 @@
 #define IAP2_MSG_TRANSPORT_NOTIFICATION     0x4e0eU
 #define IAP2_MSG_WIFI_CONFIG_REQUEST        0x5702U
 #define IAP2_MSG_WIFI_CONFIGURATION         0x5703U
+#define IAP2_MSG_START_NOW_PLAYING           0x5000U
+#define IAP2_MSG_NOW_PLAYING_UPDATE          0x5001U
+#define IAP2_MSG_ROUTE_GUIDANCE_UPDATE       0x5201U
+#define IAP2_MSG_ROUTE_MANEUVER_UPDATE       0x5202U
+#define IAP2_METADATA_TEXT_MAX               128U
 
 struct iap2_session
 {
@@ -51,6 +57,7 @@ struct iap2_session
 
     uint16_t omitted_message_ids[IAP2_IDENTITY_MAX_OMITTED_MESSAGES];
     size_t omitted_message_count;
+    bool location_component_rejected;
     unsigned identification_retries;
 
     bool link_up;
@@ -70,6 +77,9 @@ struct iap2_session
     unsigned carplay_reinvite_count;
     uint8_t pre_transport_wifi_configs;
     uint8_t post_transport_wifi_configs;
+    uint8_t now_playing_traces;
+    bool now_playing_empty_traced;
+    unsigned location_requested;
 };
 
 static bool session_is_wired(const iap2_session_t *session)
@@ -114,6 +124,7 @@ static bool send_csm(iap2_session_t *session,
 
 static void reset_wireless_negotiation(iap2_session_t *session)
 {
+    session->location_requested = 0;
     session->start_session_sent = false;
     session->wired_reinvite_done = false;
     session->wired_transport_connected = false;
@@ -134,12 +145,15 @@ static void reset_identification(iap2_session_t *session)
 {
     memset(session->omitted_message_ids, 0, sizeof(session->omitted_message_ids));
     session->omitted_message_count = 0U;
+    session->location_component_rejected = false;
     session->identification_retries = 0U;
     session->identification_accepted = false;
 }
 
 static void reset_connection_state(iap2_session_t *session)
 {
+    session->now_playing_traces = 0;
+    session->now_playing_empty_traced = false;
     iap2_mfi_auth_reset(&session->auth);
     session->mfi_response_pending = false;
     reset_identification(session);
@@ -156,16 +170,22 @@ static bool message_is_omitted(const iap2_session_t *session, uint16_t message_i
     return false;
 }
 
+static bool metadata_ready(const iap2_session_t *session)
+{
+    return session->identification_accepted && iap2_mfi_auth_is_authenticated(&session->auth);
+}
+
 static bool send_identification_information(iap2_session_t *session, uint64_t now_ms)
 {
-    const iap2_identity_config_t *identity = &session->config.identity;
+    iap2_identity_config_t identity = session->config.identity;
+    identity.provide_location &= !session->location_component_rejected;
 
     uint8_t body[IAP2_SESSION_IDENTIFICATION_CAPACITY];
     size_t body_len = 0U;
     if (session_is_wired(session))
     {
         if (!iap2_identity_build_wired_omitting(
-                identity, session->config.car_play_interface_number,
+                &identity, session->config.car_play_interface_number,
                 session->omitted_message_ids, session->omitted_message_count,
                 body, sizeof(body), &body_len))
         {
@@ -174,9 +194,9 @@ static bool send_identification_information(iap2_session_t *session, uint64_t no
     }
     else
     {
-        if (identity->wifi_ssid == NULL || identity->wifi_ssid[0] == '\0')
+        if (identity.wifi_ssid == NULL || identity.wifi_ssid[0] == '\0')
             return false;
-        if (!iap2_identity_build_wireless_omitting(identity,
+        if (!iap2_identity_build_wireless_omitting(&identity,
                                                    session->omitted_message_ids,
                                                    session->omitted_message_count,
                                                    body, sizeof(body), &body_len))
@@ -195,6 +215,16 @@ static void handle_identification_rejected(iap2_session_t *session,
 {
     uint16_t rejected[IAP2_IDENTITY_MAX_OMITTED_MESSAGES];
     size_t rejected_count = 0U;
+    static const uint8_t location_component[] = { 0, 4, 0, 22 };
+    if (session->config.identity.provide_location && !session->location_component_rejected &&
+        body_len == sizeof(location_component) && body && memcmp(body, location_component, body_len) == 0 &&
+        session->identification_retries < IAP2_SESSION_IDENTIFICATION_MAX_RETRIES)
+    {
+        session->location_component_rejected = true;
+        ++session->identification_retries;
+        (void)send_identification_information(session, now_ms);
+        return;
+    }
     if (!iap2_identity_parse_unsupported_messages(body, body_len, rejected,
                                                   IAP2_IDENTITY_MAX_OMITTED_MESSAGES,
                                                   &rejected_count))
@@ -349,13 +379,13 @@ static void send_iap2_subscriptions(iap2_session_t *session, uint64_t now_ms)
     }
     (void)iap2_param_append(body, sizeof(body), &body_len, 0, group0, group0_len);
     (void)iap2_param_append(body, sizeof(body), &body_len, 1, group1, group1_len);
-    if (!message_is_omitted(session, 0x5000U))
-    {
-        (void)send_csm(session, 0x5000U, body, body_len, NULL, NULL, now_ms);
-    }
+    bool omitted = message_is_omitted(session, IAP2_MSG_START_NOW_PLAYING);
+    bool queued = !omitted && send_csm(session, IAP2_MSG_START_NOW_PLAYING, body, body_len, NULL, NULL, now_ms);
+    if (session->config.on_now_playing)
+        RTCP_LOGI("iap2", "now_playing tx=0x5000 queued=%u omitted=%u", queued ? 1U : 0U, omitted ? 1U : 0U);
 
     body_len = 0U;
-    static const uint8_t route_id[2] = { 0, 42 };
+    static const uint8_t route_id[2] = { 0, IAP2_ROUTE_DISPLAY_ID };
     (void)iap2_param_append(body, sizeof(body), &body_len, 0, route_id, sizeof(route_id));
     (void)iap2_param_append_void(body, sizeof(body), &body_len, 1);
     (void)iap2_param_append_void(body, sizeof(body), &body_len, 2);
@@ -431,6 +461,175 @@ static void maybe_send_subscriptions(iap2_session_t *session, uint64_t now_ms)
     send_iap2_subscriptions(session, now_ms);
     session->subscriptions_sent = true;
     emit_event(session, IAP2_SESSION_EVENT_SUBSCRIPTIONS_SENT);
+}
+
+static bool metadata_utf8(const uint8_t *text, size_t length)
+{
+    for (size_t index = 0; index < length;)
+    {
+        unsigned lead = text[index++];
+        if (lead < 0x80U)
+            continue;
+        if (lead < 0xc2U || lead > 0xf4U)
+            return false;
+        unsigned tail = lead < 0xe0U ? 1U : lead < 0xf0U ? 2U : 3U;
+        if (tail > length - index)
+            return false;
+        unsigned next = text[index];
+        if ((lead == 0xe0U && next < 0xa0U) || (lead == 0xedU && next >= 0xa0U) ||
+            (lead == 0xf0U && next < 0x90U) || (lead == 0xf4U && next >= 0x90U))
+            return false;
+        for (unsigned byte = 0; byte < tail; ++byte)
+            if ((text[index++] & 0xc0U) != 0x80U)
+                return false;
+    }
+    return true;
+}
+
+static const char *metadata_text(const uint8_t *body, size_t body_len, uint16_t id,
+                                 char out[IAP2_METADATA_TEXT_MAX + 1U])
+{
+    const uint8_t *text;
+    size_t length;
+    if (!iap2_param_find_single(body, body_len, id, &text, &length))
+        return NULL;
+    if (length && text[length - 1] == 0)
+        --length;
+    if (length > IAP2_METADATA_TEXT_MAX || memchr(text, 0, length) || !metadata_utf8(text, length))
+        return NULL;
+    memcpy(out, text, length);
+    out[length] = '\0';
+    return out;
+}
+
+static void handle_now_playing(iap2_session_t *session, const uint8_t *body, size_t body_len)
+{
+    if (!session->config.on_now_playing || !metadata_ready(session))
+        return;
+
+    rtcp_now_playing_t update = { 0 };
+    char title[IAP2_METADATA_TEXT_MAX + 1U];
+    char artist[IAP2_METADATA_TEXT_MAX + 1U];
+    char album[IAP2_METADATA_TEXT_MAX + 1U];
+    const uint8_t *group, *status;
+    size_t group_len, status_len;
+    if (iap2_param_find_single(body, body_len, 0, &group, &group_len))
+    {
+        update.title = metadata_text(group, group_len, 1, title);
+        update.artist = metadata_text(group, group_len, 12, artist);
+        update.album = metadata_text(group, group_len, 6, album);
+    }
+    if (iap2_param_find_single(body, body_len, 1, &group, &group_len) &&
+        iap2_param_find_single(group, group_len, 0, &status, &status_len) &&
+        status_len == 1U && status[0] <= 4U)
+    {
+        update.has_playing = true;
+        update.playing = status[0] == 1U;
+    }
+    bool usable = update.title || update.artist || update.album || update.has_playing;
+    if (usable)
+        session->config.on_now_playing(&update, session->config.context);
+    if (session->now_playing_traces < 16U && (usable || !session->now_playing_empty_traced))
+    {
+        ++session->now_playing_traces;
+        session->now_playing_empty_traced |= !usable;
+        RTCP_LOGI("iap2", "now_playing rx=0x5001 bytes=%u title=%u artist=%u album=%u playback=%u",
+                  (unsigned)body_len, update.title ? 1U : 0U, update.artist ? 1U : 0U,
+                  update.album ? 1U : 0U, update.has_playing ? 1U : 0U);
+    }
+}
+
+static bool metadata_byte(const uint8_t *body, size_t body_len, uint16_t id, uint8_t *out)
+{
+    const uint8_t *data;
+    size_t len;
+    if (!iap2_param_find_single(body, body_len, id, &data, &len) || len != 1U)
+        return false;
+    *out = data[0];
+    return true;
+}
+
+static bool route_display_matches(const uint8_t *body, size_t body_len)
+{
+    size_t offset = 0;
+    bool found = false;
+    while (offset < body_len)
+    {
+        const uint8_t *parameter = body + offset;
+        if (body_len - offset < 4U)
+            return false;
+        size_t length = ((size_t)parameter[0] << 8) | parameter[1];
+        if (length < 4U || length > body_len - offset)
+            return false;
+        if (parameter[2] == 0 && parameter[3] == 0)
+        {
+            if (found || length != 6U || parameter[4] != 0 || parameter[5] != IAP2_ROUTE_DISPLAY_ID)
+                return false;
+            found = true;
+        }
+        offset += length;
+    }
+    return true;
+}
+
+static void handle_route_guidance(iap2_session_t *session, const uint8_t *body, size_t body_len)
+{
+    if (!session->config.on_route_guidance || !metadata_ready(session) ||
+        !body || !route_display_matches(body, body_len))
+        return;
+
+    char road[IAP2_METADATA_TEXT_MAX + 1U], destination[IAP2_METADATA_TEXT_MAX + 1U];
+    char remaining[IAP2_METADATA_TEXT_MAX + 1U], maneuver[IAP2_METADATA_TEXT_MAX + 1U];
+    rtcp_route_guidance_t update = {
+        .road = metadata_text(body, body_len, 3, road),
+        .destination = metadata_text(body, body_len, 4, destination),
+        .distance_remaining = metadata_text(body, body_len, 8, remaining),
+        .distance_to_maneuver = metadata_text(body, body_len, 11, maneuver),
+    };
+    update.has_state = metadata_byte(body, body_len, 1, &update.state);
+    if (update.has_state || update.road || update.destination || update.distance_remaining || update.distance_to_maneuver)
+        session->config.on_route_guidance(&update, session->config.context);
+}
+
+static void handle_route_maneuver(iap2_session_t *session, const uint8_t *body, size_t body_len)
+{
+    const uint8_t *index;
+    size_t index_len;
+    if (!session->config.on_route_maneuver || !metadata_ready(session) ||
+        !iap2_param_find_single(body, body_len, 1, &index, &index_len) || index_len != 2U ||
+        !route_display_matches(body, body_len))
+        return;
+
+    char description[IAP2_METADATA_TEXT_MAX + 1U], road[IAP2_METADATA_TEXT_MAX + 1U];
+    char distance[IAP2_METADATA_TEXT_MAX + 1U];
+    rtcp_route_maneuver_t update = {
+        .index = (uint16_t)(((uint16_t)index[0] << 8) | index[1]),
+        .description = metadata_text(body, body_len, 2, description),
+        .road_after = metadata_text(body, body_len, 4, road),
+        .distance = metadata_text(body, body_len, 6, distance),
+    };
+    update.has_type = metadata_byte(body, body_len, 3, &update.type);
+    if (update.has_type || update.description || update.road_after || update.distance)
+        session->config.on_route_maneuver(&update, session->config.context);
+}
+
+static void handle_start_location(iap2_session_t *session, const uint8_t *body, size_t body_len)
+{
+    if (!session->config.identity.provide_location || session->location_component_rejected ||
+        !metadata_ready(session) ||
+        message_is_omitted(session, IAP2_MSG_START_LOCATION) ||
+        message_is_omitted(session, IAP2_MSG_LOCATION) ||
+        message_is_omitted(session, IAP2_MSG_STOP_LOCATION) || !iap2_param_validate(body, body_len))
+        return;
+
+    const uint8_t *data;
+    size_t len;
+    unsigned requested = 0;
+    if (iap2_param_find_single(body, body_len, 1, &data, &len) && len == 0U)
+        requested |= RTCP_LOCATION_GGA;
+    if (iap2_param_find_single(body, body_len, 2, &data, &len) && len == 0U)
+        requested |= RTCP_LOCATION_RMC;
+    session->location_requested = requested;
 }
 
 static bool get_wifi(iap2_session_t *session, iap2_session_wifi_t *wifi)
@@ -773,6 +972,8 @@ void iap2_session_handle_message(iap2_session_t *session,
         maybe_send_subscriptions(session, now_ms);
         break;
     case IAP2_MSG_IDENTIFICATION_REJECTED:
+        session->identification_accepted = false;
+        session->location_requested = 0;
         handle_identification_rejected(session, body, body_len, now_ms);
         break;
     case IAP2_MSG_MFI_AUTH_REQUEST:
@@ -834,6 +1035,22 @@ void iap2_session_handle_message(iap2_session_t *session,
     case IAP2_MSG_TRANSPORT_NOTIFICATION:
         handle_transport_notification(session, body, body_len, now_ms);
         break;
+    case IAP2_MSG_NOW_PLAYING_UPDATE:
+        handle_now_playing(session, body, body_len);
+        break;
+    case IAP2_MSG_ROUTE_GUIDANCE_UPDATE:
+        handle_route_guidance(session, body, body_len);
+        break;
+    case IAP2_MSG_ROUTE_MANEUVER_UPDATE:
+        handle_route_maneuver(session, body, body_len);
+        break;
+    case IAP2_MSG_START_LOCATION:
+        handle_start_location(session, body, body_len);
+        break;
+    case IAP2_MSG_STOP_LOCATION:
+        if (body_len == 0U)
+            session->location_requested = 0;
+        break;
     default:
         break;
     }
@@ -847,4 +1064,54 @@ bool iap2_session_is_authenticated(const iap2_session_t *session)
 bool iap2_session_identification_accepted(const iap2_session_t *session)
 {
     return session != NULL && session->identification_accepted;
+}
+
+unsigned iap2_session_location_requested(const iap2_session_t *session)
+{
+    return session && session->link_up && metadata_ready(session) ? session->location_requested : 0U;
+}
+
+static int nmea_hex(char digit)
+{
+    if (digit >= '0' && digit <= '9')
+        return digit - '0';
+    if (digit >= 'A' && digit <= 'F')
+        return digit - 'A' + 10;
+    return -1;
+}
+
+bool iap2_session_send_location(iap2_session_t *session, const char *sentence, size_t length, uint64_t now_ms)
+{
+    unsigned requested = iap2_session_location_requested(session);
+    if (!requested || !sentence || length < 10U || length > RTCP_LOCATION_NMEA_MAX ||
+        sentence[0] != '$' || sentence[6] != ',' || sentence[length - 3U] != '*')
+        return false;
+
+    unsigned kind = 0;
+    if (memcmp(sentence + 3, "GGA", 3) == 0)
+        kind = RTCP_LOCATION_GGA;
+    else if (memcmp(sentence + 3, "RMC", 3) == 0)
+        kind = RTCP_LOCATION_RMC;
+    if (!(requested & kind))
+        return false;
+
+    unsigned checksum = 0;
+    for (size_t offset = 1; offset < length - 3U; ++offset)
+    {
+        unsigned char byte = (unsigned char)sentence[offset];
+        if (byte < 0x20U || byte > 0x7eU || byte == '*' || byte == '$')
+            return false;
+        checksum ^= byte;
+    }
+    int high = nmea_hex(sentence[length - 2U]);
+    int low = nmea_hex(sentence[length - 1U]);
+    if (high < 0 || low < 0 || checksum != (unsigned)(16 * high + low))
+        return false;
+
+    uint8_t body[4U + RTCP_LOCATION_NMEA_MAX + 1U];
+    uint8_t text[RTCP_LOCATION_NMEA_MAX + 1U];
+    memcpy(text, sentence, length);
+    text[length] = '\0';
+    size_t body_len = iap2_param_encode(body, sizeof(body), 0, text, length + 1U);
+    return body_len != 0U && send_csm(session, IAP2_MSG_LOCATION, body, body_len, NULL, NULL, now_ms);
 }

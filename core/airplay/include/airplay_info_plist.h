@@ -66,6 +66,8 @@ typedef struct
      * official rendering claim. The host supplies renderer/asset/timing support.
      * NULL preserves existing output bytes. Does not enable SETUP by itself. */
     rtcp_ui_sync_t *ui_sync;
+    bool hid_knob;
+    bool hid_media;
 } airplay_info_plist_config_t;
 
 /*

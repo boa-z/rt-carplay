@@ -15,6 +15,13 @@ typedef struct
     uint16_t x, y, width, height;
 } rtcp_display_rect_t;
 
+typedef enum
+{
+    RTCP_APPEARANCE_AUTOMATIC = 0,
+    RTCP_APPEARANCE_LIGHT = 1,
+    RTCP_APPEARANCE_DARK = 2,
+} rtcp_appearance_setting_t;
+
 /* Optional Main Display profile. Initialize struct_size to sizeof(*profile).
  * Zero rectangles select the entire display/view respectively. Coordinates
  * refer to negotiated pixels, not a host framebuffer or video-layer viewport.

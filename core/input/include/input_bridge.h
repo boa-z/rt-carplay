@@ -3,10 +3,16 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/input.h"
 
 #define INPUT_BRIDGE_HID_UID_TOUCH    0x2a2a2a2aU
-#define INPUT_BRIDGE_TOUCH_CONTACTS   2U
+#define INPUT_BRIDGE_TOUCH_CONTACTS   RTCP_TOUCH_CONTACTS
 #define INPUT_BRIDGE_HID_REPORT_BYTES 12U
+#define INPUT_BRIDGE_HID_UID_KNOB     0x2a2a2a2bU
+#define INPUT_BRIDGE_HID_UID_MEDIA    0x2a2a2a2cU
+
+void input_bridge_encode_touch(const rtcp_touch_contact_t contacts[RTCP_TOUCH_CONTACTS],
+                               uint8_t report[INPUT_BRIDGE_HID_REPORT_BYTES]);
 
 typedef struct input_bridge input_bridge_t;
 

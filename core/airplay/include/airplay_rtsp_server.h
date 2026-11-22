@@ -74,6 +74,10 @@ typedef struct airplay_rtsp_server_config
      * NULL acknowledges the request without changing anything. */
     airplay_rtsp_volume_cb_t on_volume;
     void *volume_context;
+    bool (*get_volume)(float *volume_db, void *context);
+    void *get_volume_context;
+    rtcp_now_playing_cb_t on_now_playing;
+    void *now_playing_context;
 
     /* Event-channel connect/disconnect notifications. */
     airplay_rtsp_event_state_cb_t on_event_state;
@@ -153,6 +157,8 @@ int airplay_rtsp_server_get_data_stream_status(const airplay_rtsp_server_t *,
 
 /* RTSP owner only; sends documented requestSiri down/up actions on event. */
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *);
+int airplay_rtsp_server_set_appearance(airplay_rtsp_server_t *, unsigned setting,
+                                       bool ui_night, bool map_night);
 
 /* Poll-owner snapshot. datagrams precede authentication; sink packet counts
  * separately show accepted payloads. Zero streams means no active SETUP. */

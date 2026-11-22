@@ -6,6 +6,7 @@
  */
 #include "airplay_rtsp_session.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,6 +77,7 @@ struct airplay_rtsp_session
     uint16_t iap_port;
     unsigned modes_changes;
     unsigned unsupported_commands;
+    unsigned now_playing_traces;
     session_data_stream_t data_stream[RTCP_DATA_STREAM_COUNT];
     uint32_t data_stream_offered, last_data_stream_id;
 };
@@ -1375,6 +1377,78 @@ static void handle_set_parameter(airplay_rtsp_session_t *session,
     session->config.on_volume(volume_db, session->config.volume_context);
 }
 
+static airplay_rtsp_session_result_t handle_get_parameter(
+    airplay_rtsp_session_t *session, const airplay_rtsp_request_t *request,
+    uint8_t *response, size_t response_capacity, size_t *response_len)
+{
+    static const char volume[] = "volume";
+    size_t length = request->body_len;
+    while (length && (request->body[length - 1] == '\r' || request->body[length - 1] == '\n'))
+        --length;
+    float db;
+    if (length != sizeof(volume) - 1 || memcmp(request->body, volume, length) != 0 ||
+        !session->config.get_volume || !session->config.get_volume(&db, session->config.get_volume_context) ||
+        !(db >= -144.0f && db <= 0.0f))
+        return status_response(request, 200, "OK", response, response_capacity, response_len);
+
+    unsigned magnitude = (unsigned)(-db * 1000.0f + 0.5f);
+    char body[32];
+    int written = snprintf(body, sizeof(body), "volume: %s%u.%03u\r\n",
+                           magnitude ? "-" : "", magnitude / 1000U, magnitude % 1000U);
+    if (written < 0 || (size_t)written >= sizeof(body))
+        return status_response(request, 500, "Internal Server Error", response, response_capacity, response_len);
+    return build_response(request, 200, "OK", "text/parameters", (const uint8_t *)body,
+                          (size_t)written, response, response_capacity, response_len);
+}
+
+static bool handle_now_playing(airplay_rtsp_session_t *session, const airplay_bplist_doc_t *doc,
+                               airplay_bplist_object_t params, bool playback_state)
+{
+    rtcp_now_playing_t update = { 0 };
+    airplay_bplist_object_t field;
+    char text[3][129];
+    if (playback_state)
+    {
+        uint64_t state;
+        if (airplay_bplist_dict_get_unique(doc, params, "mrPlaybackState", &field) != AIRPLAY_BPLIST_OK ||
+            airplay_bplist_get_uint(doc, field, &state) != AIRPLAY_BPLIST_OK)
+            return false;
+        update.has_playing = true;
+        update.playing = state == 1;
+    }
+    else
+    {
+        airplay_bplist_object_t info;
+        airplay_bplist_type_t type;
+        if (airplay_bplist_dict_get_unique(doc, params, "params", &info) != AIRPLAY_BPLIST_OK ||
+            airplay_bplist_get_type(doc, info, &type, NULL) != AIRPLAY_BPLIST_OK || type != AIRPLAY_BPLIST_DICTIONARY)
+            return false;
+
+        static const char * const keys[] = {
+            "kMRMediaRemoteNowPlayingInfoTitle",
+            "kMRMediaRemoteNowPlayingInfoArtist",
+            "kMRMediaRemoteNowPlayingInfoAlbum",
+        };
+        const char **fields[] = { &update.title, &update.artist, &update.album };
+        for (size_t index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index)
+        {
+            if (airplay_bplist_dict_get_unique(doc, info, keys[index], &field) == AIRPLAY_BPLIST_OK &&
+                airplay_bplist_get_utf8(doc, field, text[index], sizeof(text[index])))
+                *fields[index] = text[index];
+        }
+    }
+    if (session->now_playing_traces < 16U)
+    {
+        ++session->now_playing_traces;
+        RTCP_LOGI(TAG, "now_playing cmd=%s title=%u artist=%u album=%u playback=%u",
+                  playback_state ? "updateMRPlaybackState" : "updateMRNowPlayingInfo", update.title ? 1U : 0U,
+                  update.artist ? 1U : 0U, update.album ? 1U : 0U, update.has_playing ? 1U : 0U);
+    }
+    if (session->config.on_now_playing && (update.has_playing || update.title || update.artist || update.album))
+        session->config.on_now_playing(&update, session->config.now_playing_context);
+    return true;
+}
+
 static uint8_t *copy_info_plist(const uint8_t *info_plist,
                                 size_t info_plist_len,
                                 bool *allocated_in_psram)
@@ -1764,6 +1838,20 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
             return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
         if (!session->initial_setup_complete)
             return status_response(request, 503, "Service Unavailable", response, response_capacity, response_len);
+        bool playback_state = strcmp(command, "updateMRPlaybackState") == 0;
+        if (playback_state || strcmp(command, "updateMRNowPlayingInfo") == 0)
+        {
+            if (!handle_now_playing(session, &doc, params, playback_state))
+            {
+                if (session->now_playing_traces < 16U)
+                {
+                    ++session->now_playing_traces;
+                    RTCP_LOGI(TAG, "now_playing cmd=%s result=invalid", command);
+                }
+                return status_response(request, 400, "Bad Request", response, response_capacity, response_len);
+            }
+            return status_response(request, 200, "OK", response, response_capacity, response_len);
+        }
         if (strcmp(command, "modesChanged") == 0)
         {
             airplay_audio_modes_t modes;
@@ -1867,8 +1955,9 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
         return status_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
                                response, response_capacity, response_len);
     }
-    if (strcmp(request->method, "OPTIONS") == 0 ||
-        strcmp(request->method, "GET_PARAMETER") == 0)
+    if (strcmp(request->method, "GET_PARAMETER") == 0)
+        return handle_get_parameter(session, request, response, response_capacity, response_len);
+    if (strcmp(request->method, "OPTIONS") == 0)
     {
         return status_response(request, AIRPLAY_RTSP_STATUS_OK, "OK",
                                response, response_capacity, response_len);

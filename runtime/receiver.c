@@ -4,6 +4,7 @@
 #include "rtcp/receiver_compat.h"
 #include "receiver_vehicle.h"
 #include "airplay_info_plist.h"
+#include "input_bridge.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,6 +17,10 @@ struct rtcp_receiver
     void *context;
     rtcp_receiver_state_t state;
     bool busy;
+    bool has_volume;
+    float volume_db;
+    rtcp_now_playing_cb_t on_now_playing;
+    void *now_playing_context;
     receiver_vehicle_t *vehicle;
     rtcp_data_stream_backend_t raw_data_stream;
     rtcp_ui_sync_t *ui_sync;
@@ -24,6 +29,22 @@ struct rtcp_receiver
     bool (*host_info)(const uint8_t **, size_t *, void *);
     void *host_info_context;
 };
+
+static bool receiver_volume(float *volume_db, void *context)
+{
+    const rtcp_receiver_t *receiver = context;
+    if (!receiver->has_volume)
+        return false;
+    *volume_db = receiver->volume_db;
+    return true;
+}
+
+static void receiver_now_playing(const rtcp_now_playing_t *update, void *context)
+{
+    const rtcp_receiver_t *receiver = context;
+    if (receiver->on_now_playing)
+        receiver->on_now_playing(update, receiver->now_playing_context);
+}
 
 static bool receiver_info(const uint8_t **bytes, size_t *length, void *context)
 {
@@ -255,6 +276,10 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .on_audio_duck = config->media.on_audio_duck,
         .on_volume = config->media.on_volume,
         .volume_context = config->media.volume_context,
+        .get_volume = receiver_volume,
+        .get_volume_context = r,
+        .on_now_playing = receiver_now_playing,
+        .now_playing_context = r,
         .on_event_state = config->on_event_state,
         .event_state_context = config->event_state_context,
         .on_iap_bytes = config->iap2.on_bytes,
@@ -398,9 +423,67 @@ bool rtcp_receiver_request_siri(rtcp_receiver_t *r)
     return r != NULL && airplay_rtsp_server_request_siri(r->server);
 }
 
+bool rtcp_receiver_send_touch(rtcp_receiver_t *receiver, const rtcp_touch_contact_t contacts[RTCP_TOUCH_CONTACTS])
+{
+    if (!contacts)
+        return false;
+    uint8_t report[INPUT_BRIDGE_HID_REPORT_BYTES];
+    input_bridge_encode_touch(contacts, report);
+    return rtcp_receiver_send_hid_report(receiver, INPUT_BRIDGE_HID_UID_TOUCH, report, sizeof(report));
+}
+
+bool rtcp_receiver_send_knob(rtcp_receiver_t *receiver, const rtcp_knob_report_t *state)
+{
+    if (!state || state->x == INT8_MIN || state->y == INT8_MIN || state->wheel == INT8_MIN)
+        return false;
+    uint8_t report[] = {
+        (uint8_t)(state->select | (state->home << 1) | (state->back << 2)),
+        (uint8_t)state->x,
+        (uint8_t)state->y,
+        (uint8_t)state->wheel,
+    };
+    return rtcp_receiver_send_hid_report(receiver, INPUT_BRIDGE_HID_UID_KNOB, report, sizeof(report));
+}
+
+bool rtcp_receiver_send_media_button(rtcp_receiver_t *receiver, rtcp_media_button_t button)
+{
+    if ((unsigned)button > RTCP_MEDIA_PREVIOUS)
+        return false;
+    uint8_t report = (uint8_t)button;
+    return rtcp_receiver_send_hid_report(receiver, INPUT_BRIDGE_HID_UID_MEDIA, &report, sizeof(report));
+}
+
 bool rtcp_receiver_send_iap(rtcp_receiver_t *r, const uint8_t *bytes, size_t length)
 {
     return r != NULL && airplay_rtsp_server_send_iap(r->server, bytes, length);
+}
+
+int rtcp_receiver_set_appearance(rtcp_receiver_t *r, rtcp_appearance_setting_t setting,
+                                 bool ui_night, bool map_night)
+{
+    if (!r || (unsigned)setting > RTCP_APPEARANCE_DARK)
+        return RTCP_EINVAL;
+    if (setting != RTCP_APPEARANCE_AUTOMATIC)
+        ui_night = map_night = setting == RTCP_APPEARANCE_DARK;
+    return airplay_rtsp_server_set_appearance(r->server, setting, ui_night, map_night);
+}
+
+int rtcp_receiver_set_volume_db(rtcp_receiver_t *receiver, float volume_db)
+{
+    if (!receiver || !(volume_db >= -144.0f && volume_db <= 0.0f))
+        return RTCP_EINVAL;
+    receiver->volume_db = volume_db;
+    receiver->has_volume = true;
+    return RTCP_OK;
+}
+
+int rtcp_receiver_set_now_playing_callback(rtcp_receiver_t *receiver, rtcp_now_playing_cb_t callback, void *context)
+{
+    if (!receiver)
+        return RTCP_EINVAL;
+    receiver->on_now_playing = callback;
+    receiver->now_playing_context = context;
+    return RTCP_OK;
 }
 
 int rtcp_receiver_get_peer(const rtcp_receiver_t *r, rtcp_addr_t *peer)

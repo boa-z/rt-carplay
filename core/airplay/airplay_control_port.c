@@ -485,3 +485,14 @@ bool airplay_control_port_request_siri(airplay_control_port_t *port)
             return false;
     return true;
 }
+
+bool airplay_control_port_set_appearance(airplay_control_port_t *port, const char *uuid,
+                                         unsigned setting, bool ui_night, bool map_night)
+{
+    uint8_t plist[256];
+    size_t length;
+    return airplay_bplist_build_appearance_command(uuid, setting, ui_night, plist, sizeof(plist), &length) == AIRPLAY_BPLIST_OK &&
+           send_command(port, plist, length) &&
+           airplay_bplist_build_appearance_command(NULL, setting, map_night, plist, sizeof(plist), &length) == AIRPLAY_BPLIST_OK &&
+           send_command(port, plist, length);
+}

@@ -76,6 +76,10 @@ typedef struct
     void *media_context;
     airplay_rtsp_volume_cb_t on_volume;
     void *volume_context;
+    bool (*get_volume)(float *volume_db, void *context);
+    void *get_volume_context;
+    rtcp_now_playing_cb_t on_now_playing;
+    void *now_playing_context;
     airplay_rtsp_start_iap_cb_t start_iap;
     airplay_rtsp_stop_media_cb_t stop_iap;
     airplay_rtsp_disable_bt_cb_t disable_bluetooth;

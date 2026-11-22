@@ -42,6 +42,22 @@ if (result == RTCP_OK) result = rtcp_receiver_start(receiver);
 
 `rtcp/input.h` 提供 `rtcp_receiver_send_hid_report()` 与 `rtcp_receiver_request_siri()`。`rtcp_receiver_send_iap()` 提供隧道 iAP2 输出。这些操作在 Receiver Owner 中执行，允许由该 Owner 上的回调调用，同步消耗传入缓冲区。加密事件通道不存在或写入失败时返回 false。触摸设备读取、焦点、坐标转换、HID 描述符及跨线程队列属于宿主。已有可移植输入桥可以生成协商的触摸报告；RT-Thread 包装层现在通过 Receiver 发送，不再直接调用内部 RTSP Server。
 
+## Classic 运行时控制
+
+在 Owner 线程调用 `rtcp_receiver_set_appearance()`，传入 `RTCP_APPEARANCE_AUTOMATIC`、`RTCP_APPEARANCE_LIGHT` 或 `RTCP_APPEARANCE_DARK`。自动模式接受宿主当前的界面与地图日夜状态，可由环境光和车灯状态决定。浅色和深色覆盖这两项状态。更新使用已协商的主显示 UUID 和加密事件通道。`RTCP_OK` 表示两条消息均已写入。重连后重新应用偏好，在 iPhone 上验证渲染后的界面和地图。宿主独立管理本机 HMI 主题。
+
+宿主实际应用增益变化后调用 `rtcp_receiver_set_volume_db()`，包括收到 `on_volume` 请求的情况。这会记录实际增益，供手机后续发起 `GET_PARAMETER volume` 查询。静音使用 `-144` dB。Duck、资源和活动流各自保留独立约定。初始 `streams=0`、缺少 Audio SETUP、完成 SETUP 后播放异常是不同的检查点。
+
+Owner 可用 `rtcp_receiver_send_touch()` 发送完整的触点快照，或用 `rtcp_receiver_send_knob()` 发送旋钮、方向、主页、返回及确认状态。`rtcp_receiver_send_media_button()` 支持播放和切歌。会话建立前声明相应的可选 HID 设备，并在按下后发送释放。宿主负责实体键、触摸映射、焦点和本机音量策略。
+
+通过 `rtcp_receiver_set_now_playing_callback()` 接收增量 `rtcp_now_playing_t`。回调返回前复制非空的曲名、艺人和专辑字符串，仅在 `has_playing` 已设置时更新播放状态。会话结束时清除累计快照。Classic 导航数据、GNSS 转发和运行时分辨率重协商仍需公开线包依据和独立互操作验证。参见[能力审计](classic-capability-audit.md)。
+
+自行管理 iAP2 会话的宿主也可使用 `iap2_session_config_t.on_now_playing`。此可选回调在身份识别和 MFi 验证后由 iAP2 Owner 调用，将 `0x5001` 以同一增量类型上报。空字符串会清除字段。Luban-Lite 在无线 DataStream 隧道接入该回调，与 AirPlay 共用 Owner。诊断会记录 `0x5000` 是否入队，以及 `0x5001`、`updateMRNowPlayingInfo` 或 `updateMRPlaybackState` 解出了哪些字段。日志只记录字段是否存在。
+
+Classic 路线引导可由 iAP2 Owner 注册 `on_route_guidance`（`0x5201`）和 `on_route_maneuver`（`0x5202`）。`rtcp/navigation.h` 定义的增量类型包含限长的 UTF-8 文本和原始路线状态或转向类型，文本仅在回调期间有效。宿主应保留未出现的字段，遇到显式空文本时清除对应字段，状态为 `0` 或断线时清除路线。维护转向列表时可用转向索引关联更新。回调会过滤发给其它显示组件的更新。
+
+有 GNSS 数据源的宿主可在创建 iAP2 会话前设置 `identity.provide_location`。在同一 Owner 上调用 `iap2_session_location_requested()` 查询手机订阅的 GGA/RMC 类型，再用 `iap2_session_send_location()` 传入一条带校验和且不含 CR/LF 的 NMEA 语句。宿主管理数据采集、定位质量、发送节奏和重试。手机停止订阅、链路断开或重新鉴权时，SDK 会清除订阅。这些传输接口定义在 `iap2_session.h`。
+
 ## 诊断与对端地址
 
 `rtcp_receiver_get_diagnostics()` 将屏幕、音频、Timing 计数及 ControlCipher 分帧标志复制到 `rtcp/diagnostics.h` 定义的 `rtcp_receiver_diagnostics_t`。计数保留已有含义、字段类型和顺序，低层 AirPlay 诊断类型名继续作为别名。屏幕耗时包含回调和抢占。音频 Datagram 计数发生在认证之前，活动流计数表示 Audio SETUP 端点数量。Timing 交换计数不代表时钟已经同步。停止的 Receiver 返回零计数。`rtcp_receiver_get_peer()` 复制当前 IPv4、IPv6 RTSP 对端；未连接时清空输出并返回 `RTCP_ENOENT`。参数为 NULL 时返回 `RTCP_EINVAL`。

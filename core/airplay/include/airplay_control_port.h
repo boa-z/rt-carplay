@@ -60,3 +60,5 @@ bool airplay_control_port_request_main_screen_keyframe(
 bool airplay_control_port_send_iap(airplay_control_port_t *, const uint8_t *, size_t);
 
 bool airplay_control_port_request_siri(airplay_control_port_t *);
+bool airplay_control_port_set_appearance(airplay_control_port_t *, const char *uuid,
+                                         unsigned setting, bool ui_night, bool map_night);

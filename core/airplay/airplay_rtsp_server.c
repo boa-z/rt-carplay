@@ -1089,6 +1089,10 @@ static void server_accept(airplay_rtsp_server_t *server)
     session_config.stop_audio_ex = server_stop_audio;
     session_config.media_context = server;
     session_config.on_volume = server_volume;
+    session_config.get_volume = server->config.get_volume;
+    session_config.get_volume_context = server->config.get_volume_context;
+    session_config.on_now_playing = server->config.on_now_playing;
+    session_config.now_playing_context = server->config.now_playing_context;
     session_config.volume_context = server;
     session_config.on_audio_modes = server_audio_modes;
     session_config.on_audio_duck = server_audio_duck;
@@ -1438,9 +1442,12 @@ int airplay_rtsp_server_poll(airplay_rtsp_server_t *server, int timeout_ms)
         timing_index >= 0 && (fds[timing_index].revents & RTCP_POLLIN) != 0;
     airplay_timing_port_poll(server->timing_port, timing_readable);
 
-    if (event_index >= 0 && (fds[event_index].revents & RTCP_POLLIN) != 0)
+    if (event_index >= 0)
     {
-        airplay_event_port_poll(server->event_port);
+        if (fds[event_index].revents & RTCP_POLLERR)
+            airplay_event_port_poll_error(server->event_port);
+        else if (fds[event_index].revents & RTCP_POLLIN)
+            airplay_event_port_poll(server->event_port);
     }
     for (size_t slot = 0U; slot < AIRPLAY_RTSP_SERVER_MAX_AUDIO_STREAMS; ++slot)
     {
@@ -1544,6 +1551,30 @@ void airplay_rtsp_server_stop(airplay_rtsp_server_t *server)
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *s)
 {
     return s && !s->stopping && s->event_connected && airplay_event_port_request_siri(s->event_port);
+}
+
+int airplay_rtsp_server_set_appearance(airplay_rtsp_server_t *s, unsigned setting,
+                                       bool ui_night, bool map_night)
+{
+    if (!s || s->stopping || !s->event_connected)
+        return RTCP_ESTATE;
+
+    airplay_bplist_doc_t doc;
+    airplay_bplist_object_t root, displays, main_display, uuid;
+    char id[37];
+    size_t length;
+    if (airplay_bplist_open(s->info_plist, s->info_plist_len, &doc) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_root(&doc, &root) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_dict_get_unique(&doc, root, "displays", &displays) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_array_get(&doc, displays, 0, &main_display) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_dict_get_unique(&doc, main_display, "uuid", &uuid) != AIRPLAY_BPLIST_OK ||
+        airplay_bplist_get_string(&doc, uuid, id, sizeof(id), &length) != AIRPLAY_BPLIST_OK ||
+        length != sizeof(id) - 1 || strlen(id) != length)
+        return RTCP_ENOTSUP;
+
+    return airplay_event_port_set_appearance(s->event_port, id, setting, ui_night, map_night)
+               ? RTCP_OK
+               : RTCP_EIO;
 }
 
 void airplay_rtsp_server_get_audio_stats(const airplay_rtsp_server_t *server, airplay_rtsp_audio_stats_t *stats)

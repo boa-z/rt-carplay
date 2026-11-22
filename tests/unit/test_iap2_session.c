@@ -29,9 +29,66 @@ typedef struct
     unsigned event_count;
     unsigned observed_rx, observed_tx;
     csm_record_t observed;
+    unsigned now_playing_updates;
+    char title[129], artist[129], album[129];
+    bool playing;
+    unsigned routes, maneuvers;
+    char destination[129], remaining[129], instruction[129];
+    uint8_t route_state;
+    uint16_t maneuver_index;
 } harness_t;
 
 static harness_t g_harness;
+
+static const uint8_t now_playing_fixture[] = {
+    0, 24, 0, 0,
+    0, 8, 0, 1, 0xe6, 0x9b, 0xb2, 0,
+    0, 6, 0, 12, 'B', 0,
+    0, 6, 0, 6, 'A', 0,
+    0, 9, 0, 1, 0, 5, 0, 0, 1,
+};
+
+static const uint8_t route_fixture[] = {
+    0, 6, 0, 0, 0, 42,
+    0, 5, 0, 1, 1,
+    0, 8, 0, 4, 0xe7, 0xab, 0x99, 0,
+    0, 9, 0, 8, '2', ' ', 'k', 'm', 0,
+};
+
+static void capture_route(const rtcp_route_guidance_t *update, void *context)
+{
+    harness_t *h = context;
+    ++h->routes;
+    if (update->destination)
+        snprintf(h->destination, sizeof(h->destination), "%s", update->destination);
+    if (update->distance_remaining)
+        snprintf(h->remaining, sizeof(h->remaining), "%s", update->distance_remaining);
+    if (update->has_state)
+        h->route_state = update->state;
+}
+
+static void capture_maneuver(const rtcp_route_maneuver_t *update, void *context)
+{
+    harness_t *h = context;
+    ++h->maneuvers;
+    h->maneuver_index = update->index;
+    if (update->description)
+        snprintf(h->instruction, sizeof(h->instruction), "%s", update->description);
+}
+
+static void capture_now_playing(const rtcp_now_playing_t *update, void *context)
+{
+    harness_t *h = context;
+    ++h->now_playing_updates;
+    if (update->title)
+        snprintf(h->title, sizeof(h->title), "%s", update->title);
+    if (update->artist)
+        snprintf(h->artist, sizeof(h->artist), "%s", update->artist);
+    if (update->album)
+        snprintf(h->album, sizeof(h->album), "%s", update->album);
+    if (update->has_playing)
+        h->playing = update->playing;
+}
 
 static void observe_message(bool outgoing, uint16_t id, const uint8_t *body,
                             size_t length, void *context)
@@ -357,12 +414,16 @@ int main(void)
             .language = "en",
             .wifi_ssid = "rtcp-test",
             .bluetooth_address = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
+            .provide_location = true,
         },
         .mfi = &mfi,
         .tx = capture_tx,
         .get_wifi = fake_wifi,
         .get_airplay = fake_airplay,
         .on_event = capture_event,
+        .on_now_playing = capture_now_playing,
+        .on_route_guidance = capture_route,
+        .on_route_maneuver = capture_maneuver,
         .context = h,
     };
     iap2_session_t *session = iap2_session_create(&config);
@@ -376,6 +437,11 @@ int main(void)
     drain_tx(session, 11);
     const csm_record_t *identification = last_message(h, 0x1d01);
     assert(identification != NULL && identification->body_len > 0U);
+    const uint8_t *component, *flag;
+    size_t component_len, flag_len;
+    assert(find_body_parameter(identification->body, identification->body_len, 22, &component, &component_len));
+    assert(find_body_parameter(component, component_len, 17, &flag, &flag_len) && flag_len == 0U);
+    assert(find_body_parameter(component, component_len, 18, &flag, &flag_len) && flag_len == 0U);
     assert(!iap2_session_identification_accepted(session));
 
     /* Acceptance alone must not send subscriptions before MFi auth. */
@@ -412,6 +478,14 @@ int main(void)
     assert(response->body[4] == SIG_BYTES);
     assert(!iap2_session_is_authenticated(session));
 
+    feed_peer_csm(session, 0x5001, now_playing_fixture, sizeof(now_playing_fixture), 42);
+    const uint8_t location_request[] = { 0, 4, 0, 1, 0, 4, 0, 3 };
+    feed_peer_csm(session, 0x5201, route_fixture, sizeof(route_fixture), 42);
+    feed_peer_csm(session, IAP2_MSG_START_LOCATION, location_request, sizeof(location_request), 42);
+    drain_tx(session, 43);
+    assert(h->now_playing_updates == 0);
+    assert(h->routes == 0 && iap2_session_location_requested(session) == 0);
+
     /* Success only becomes valid after the response link ACK. */
     feed_peer_csm(session, 0xaa05, NULL, 0, 50);
     drain_tx(session, 51);
@@ -425,6 +499,61 @@ int main(void)
     assert(last_message(h, 0x4157) != NULL);
     assert(last_message(h, 0x4154) != NULL);
     assert(event_seen(h, IAP2_SESSION_EVENT_SUBSCRIPTIONS_SENT));
+
+    feed_peer_csm(session, 0x5001, now_playing_fixture, sizeof(now_playing_fixture), 52);
+    assert(h->now_playing_updates == 1 && h->playing);
+    assert(strcmp(h->title, "\xe6\x9b\xb2") == 0 && strcmp(h->artist, "B") == 0 && strcmp(h->album, "A") == 0);
+    const uint8_t pause[] = { 0, 9, 0, 1, 0, 5, 0, 0, 2 };
+    feed_peer_csm(session, 0x5001, pause, sizeof(pause), 53);
+    assert(h->now_playing_updates == 2 && !h->playing && strcmp(h->title, "\xe6\x9b\xb2") == 0);
+    const uint8_t bad_utf8[] = { 0, 11, 0, 0, 0, 7, 0, 1, 0xc0, 0xaf, 0 };
+    feed_peer_csm(session, 0x5001, bad_utf8, sizeof(bad_utf8), 54);
+    feed_peer_csm(session, 0x5001, now_playing_fixture, sizeof(now_playing_fixture) - 1, 55);
+    assert(h->now_playing_updates == 2);
+    const uint8_t clear_title[] = { 0, 9, 0, 0, 0, 5, 0, 1, 0 };
+    feed_peer_csm(session, 0x5001, clear_title, sizeof(clear_title), 56);
+    assert(h->now_playing_updates == 3 && h->title[0] == '\0' && strcmp(h->artist, "B") == 0);
+    drain_tx(session, 57);
+
+    feed_peer_csm(session, 0x5201, route_fixture, sizeof(route_fixture), 57);
+    assert(h->routes == 1 && h->route_state == 1 && strcmp(h->destination, "\xe7\xab\x99") == 0);
+    assert(strcmp(h->remaining, "2 km") == 0);
+    const uint8_t wrong_display[] = { 0, 6, 0, 0, 0, 43, 0, 5, 0, 1, 0 };
+    feed_peer_csm(session, 0x5201, wrong_display, sizeof(wrong_display), 57);
+    feed_peer_csm(session, 0x5201, route_fixture, sizeof(route_fixture) - 1U, 57);
+    assert(h->routes == 1);
+    const uint8_t route_end[] = { 0, 5, 0, 1, 0 };
+    feed_peer_csm(session, 0x5201, route_end, sizeof(route_end), 57);
+    assert(h->routes == 2 && h->route_state == 0);
+    const uint8_t turn[] = { 0, 6, 0, 1, 1, 2, 0, 9, 0, 2, 'L', 'e', 'f', 't', 0 };
+    feed_peer_csm(session, 0x5202, turn, sizeof(turn), 57);
+    assert(h->maneuvers == 1 && h->maneuver_index == 0x0102 && strcmp(h->instruction, "Left") == 0);
+    feed_peer_csm(session, 0x5202, turn + 6, sizeof(turn) - 6, 57);
+    assert(h->maneuvers == 1);
+
+    static const char gga[] = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47";
+    static const char rmc[] = "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A";
+    assert(!iap2_session_send_location(session, gga, sizeof(gga) - 1U, 57));
+    feed_peer_csm(session, IAP2_MSG_START_LOCATION, location_request, sizeof(location_request), 57);
+    assert(iap2_session_location_requested(session) == RTCP_LOCATION_GGA);
+    assert(!iap2_session_send_location(session, rmc, sizeof(rmc) - 1U, 57));
+    assert(!iap2_session_send_location(session, gga, sizeof(gga) - 2U, 57));
+    char bad_checksum[sizeof(gga)];
+    memcpy(bad_checksum, gga, sizeof(gga));
+    bad_checksum[sizeof(gga) - 2U] = '0';
+    assert(!iap2_session_send_location(session, bad_checksum, sizeof(gga) - 1U, 57));
+    assert(iap2_session_send_location(session, gga, sizeof(gga) - 1U, 57));
+    drain_tx(session, 58);
+    const csm_record_t *location = last_message(h, IAP2_MSG_LOCATION);
+    assert(location && location->body_len == 4U + sizeof(gga));
+    assert(memcmp(location->body + 4, gga, sizeof(gga)) == 0);
+    const uint8_t only_rmc[] = { 0, 4, 0, 2 };
+    feed_peer_csm(session, IAP2_MSG_START_LOCATION, only_rmc, sizeof(only_rmc), 58);
+    assert(iap2_session_location_requested(session) == RTCP_LOCATION_RMC);
+    assert(iap2_session_send_location(session, rmc, sizeof(rmc) - 1U, 58));
+    drain_tx(session, 59);
+    feed_peer_csm(session, IAP2_MSG_STOP_LOCATION, NULL, 0, 59);
+    assert(iap2_session_location_requested(session) == 0);
 
     /* Pre-transport Wi-Fi configuration. */
     feed_peer_csm(session, 0x5702, NULL, 0, 60);
@@ -473,9 +602,11 @@ int main(void)
     drain_tx(session, 40001);
 
     /* MFi failure is terminal for the authentication state. */
+    feed_peer_csm(session, IAP2_MSG_START_LOCATION, location_request, sizeof(location_request), 100);
     feed_peer_csm(session, 0xaa04, NULL, 0, 100);
     drain_tx(session, 101);
     assert(!iap2_session_is_authenticated(session));
+    assert(iap2_session_location_requested(session) == 0);
     assert(event_seen(h, IAP2_SESSION_EVENT_MFI_PHONE_REJECTED));
     assert(event_seen(h, IAP2_SESSION_EVENT_MFI_FAILED));
 

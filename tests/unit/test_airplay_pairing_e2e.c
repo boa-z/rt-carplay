@@ -2627,8 +2627,8 @@ static void run_event_channel(rtcp_receiver_t *server,
 }
 
 static uint32_t run_screen_stream(rtcp_receiver_t *server, client_t *client,
-                              const uint8_t shared_secret[KEY_BYTES],
-                              uint32_t *cseq)
+                                  const uint8_t shared_secret[KEY_BYTES],
+                                  uint32_t *cseq)
 {
     uint8_t request[512];
     uint8_t body[256];

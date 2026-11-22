@@ -1576,7 +1576,8 @@ uint32_t airplay_rtsp_server_screen_entity(const airplay_rtsp_server_t *s)
 uint32_t airplay_rtsp_server_screen_generation(const airplay_rtsp_server_t *s)
 {
     return s && !s->stopping && !s->screen_failed && s->screen_server
-               ? s->screen_generation : 0U;
+               ? s->screen_generation
+               : 0U;
 }
 
 int airplay_rtsp_server_set_appearance(airplay_rtsp_server_t *s, unsigned setting,

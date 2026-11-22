@@ -43,9 +43,29 @@ typedef struct
 static harness_t g_harness;
 
 static const uint8_t device_time_fixture[] = {
-    0, 12, 0, 0, 0, 0, 0, 0, 0x68, 0x82, 0xc2, 0xc0,
-    0, 6, 0, 1, 0xfe, 0x20,
-    0, 5, 0, 2, 60,
+    0,
+    12,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0x68,
+    0x82,
+    0xc2,
+    0xc0,
+    0,
+    6,
+    0,
+    1,
+    0xfe,
+    0x20,
+    0,
+    5,
+    0,
+    2,
+    60,
 };
 
 static void capture_device_time(const rtcp_device_time_t *update, void *context)

@@ -31,8 +31,8 @@ typedef struct
 typedef void (*rtcp_route_guidance_cb_t)(const rtcp_route_guidance_t *, void *context);
 typedef void (*rtcp_route_maneuver_cb_t)(const rtcp_route_maneuver_t *, void *context);
 
-#define RTCP_LOCATION_GGA 1U
-#define RTCP_LOCATION_RMC 2U
+#define RTCP_LOCATION_GGA      1U
+#define RTCP_LOCATION_RMC      2U
 #define RTCP_LOCATION_NMEA_MAX 82U
 
 #ifdef __cplusplus

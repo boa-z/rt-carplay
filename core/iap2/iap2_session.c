@@ -43,11 +43,11 @@
 #define IAP2_MSG_TRANSPORT_NOTIFICATION     0x4e0eU
 #define IAP2_MSG_WIFI_CONFIG_REQUEST        0x5702U
 #define IAP2_MSG_WIFI_CONFIGURATION         0x5703U
-#define IAP2_MSG_START_NOW_PLAYING           0x5000U
-#define IAP2_MSG_NOW_PLAYING_UPDATE          0x5001U
-#define IAP2_MSG_ROUTE_GUIDANCE_UPDATE       0x5201U
-#define IAP2_MSG_ROUTE_MANEUVER_UPDATE       0x5202U
-#define IAP2_METADATA_TEXT_MAX               128U
+#define IAP2_MSG_START_NOW_PLAYING          0x5000U
+#define IAP2_MSG_NOW_PLAYING_UPDATE         0x5001U
+#define IAP2_MSG_ROUTE_GUIDANCE_UPDATE      0x5201U
+#define IAP2_MSG_ROUTE_MANEUVER_UPDATE      0x5202U
+#define IAP2_METADATA_TEXT_MAX              128U
 
 struct iap2_session
 {
@@ -472,7 +472,8 @@ static bool metadata_utf8(const uint8_t *text, size_t length)
             continue;
         if (lead < 0xc2U || lead > 0xf4U)
             return false;
-        unsigned tail = lead < 0xe0U ? 1U : lead < 0xf0U ? 2U : 3U;
+        unsigned tail = lead < 0xe0U ? 1U : lead < 0xf0U ? 2U
+                                                         : 3U;
         if (tail > length - index)
             return false;
         unsigned next = text[index];

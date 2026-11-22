@@ -19,10 +19,10 @@ typedef struct
 } iap2_identity_config_t;
 
 #define IAP2_IDENTITY_MAX_OMITTED_MESSAGES 32U
-#define IAP2_ROUTE_DISPLAY_ID 42U
-#define IAP2_MSG_START_LOCATION 0xfffaU
-#define IAP2_MSG_LOCATION       0xfffbU
-#define IAP2_MSG_STOP_LOCATION  0xfffcU
+#define IAP2_ROUTE_DISPLAY_ID              42U
+#define IAP2_MSG_START_LOCATION            0xfffaU
+#define IAP2_MSG_LOCATION                  0xfffbU
+#define IAP2_MSG_STOP_LOCATION             0xfffcU
 
 /* Builds the bounded parameter body for iAP2 0x1d01 wireless IdentificationInformation. */
 bool iap2_identity_build_wireless(const iap2_identity_config_t *config,

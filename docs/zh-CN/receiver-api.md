@@ -54,6 +54,8 @@ Owner 可用 `rtcp_receiver_send_touch()` 发送完整的触点快照，或用 `
 
 自行管理 iAP2 会话的宿主也可使用 `iap2_session_config_t.on_now_playing`。此可选回调在身份识别和 MFi 验证后由 iAP2 Owner 调用，将 `0x5001` 以同一增量类型上报。空字符串会清除字段。Luban-Lite 在无线 DataStream 隧道接入该回调，与 AirPlay 共用 Owner。诊断会记录 `0x5000` 是否入队，以及 `0x5001`、`updateMRNowPlayingInfo` 或 `updateMRPlaybackState` 解出了哪些字段。日志只记录字段是否存在。
 
+宿主可设置 `iap2_session_config_t.on_device_time`，在有线 USB 或无线 AirPlay DataStream 隧道接收 `DeviceTimeUpdate`（`0x4E0B`）。会话在 `MessagesReceivedFromDevice` 中声明该通知，iPhone 主动推送，无需订阅命令。完成身份识别与 MFi 验证后，回调收到仅在调用期间有效的 `rtcp_device_time_t` 增量，字段为 UTC Unix 秒、时区基础偏移和夏令时偏移，两种偏移均以分钟计。存在标志用于区分缺省字段和零值。宿主负责系统时间及 RTC 策略，AirPlay 媒体时钟沿用原有机制。参考 [LIVI 的消息结构](https://github.com/f-io/LIVI/blob/main/native/crates/iap2-csm/src/messages/device_notifications.rs)和 [OCBM 的解码实现](https://github.com/lvalen91/ocbm/blob/main/crates/vendor/iap2-core/src/metadata.rs)。
+
 Classic 路线引导可由 iAP2 Owner 注册 `on_route_guidance`（`0x5201`）和 `on_route_maneuver`（`0x5202`）。`rtcp/navigation.h` 定义的增量类型包含限长的 UTF-8 文本和原始路线状态或转向类型，文本仅在回调期间有效。宿主应保留未出现的字段，遇到显式空文本时清除对应字段，状态为 `0` 或断线时清除路线。维护转向列表时可用转向索引关联更新。回调会过滤发给其它显示组件的更新。
 
 有 GNSS 数据源的宿主可在创建 iAP2 会话前设置 `identity.provide_location`。在同一 Owner 上调用 `iap2_session_location_requested()` 查询手机订阅的 GGA/RMC 类型，再用 `iap2_session_send_location()` 传入一条带校验和且不含 CR/LF 的 NMEA 语句。宿主管理数据采集、定位质量、发送节奏和重试。手机停止订阅、链路断开或重新鉴权时，SDK 会清除订阅。这些传输接口定义在 `iap2_session.h`。

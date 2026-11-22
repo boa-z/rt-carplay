@@ -78,7 +78,7 @@ static bool append_group(uint8_t *out, size_t capacity, size_t *used, uint16_t i
 static bool append_u16_list(uint8_t *out, size_t capacity, size_t *used,
                             uint16_t id, const uint16_t *values, size_t count)
 {
-    uint8_t encoded[32];
+    uint8_t encoded[34];
     if (count > sizeof(encoded) / 2U)
     {
         return false;
@@ -282,7 +282,7 @@ static bool build_identification(const iap2_identity_config_t *config,
             filtered_sent[filtered_sent_count++] = sent_messages[i];
         }
     }
-    uint16_t filtered_received[16];
+    uint16_t filtered_received[sizeof(wireless_received) / sizeof(wireless_received[0]) + 3U];
     size_t filtered_received_count = 0U;
     for (size_t i = 0U; i < received_count; ++i)
     {
@@ -298,6 +298,9 @@ static bool build_identification(const iap2_identity_config_t *config,
         filtered_received[filtered_received_count++] = IAP2_MSG_START_LOCATION;
         filtered_received[filtered_received_count++] = IAP2_MSG_STOP_LOCATION;
     }
+    if (config->receive_device_time &&
+        !is_message_omitted(IAP2_MSG_DEVICE_TIME_UPDATE, omitted_message_ids, omitted_message_count))
+        filtered_received[filtered_received_count++] = IAP2_MSG_DEVICE_TIME_UPDATE;
 
     if (!append_string(output, output_capacity, &used, 0, config->name) ||
         !append_string(output, output_capacity, &used, 1, config->model_identifier) ||

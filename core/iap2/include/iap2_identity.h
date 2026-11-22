@@ -16,6 +16,7 @@ typedef struct
     const char *wifi_ssid;
     uint8_t bluetooth_address[6];
     bool provide_location; /* Advertise host-provided GGA and RMC. */
+    bool receive_device_time;
 } iap2_identity_config_t;
 
 #define IAP2_IDENTITY_MAX_OMITTED_MESSAGES 32U
@@ -23,6 +24,7 @@ typedef struct
 #define IAP2_MSG_START_LOCATION            0xfffaU
 #define IAP2_MSG_LOCATION                  0xfffbU
 #define IAP2_MSG_STOP_LOCATION             0xfffcU
+#define IAP2_MSG_DEVICE_TIME_UPDATE        0x4e0bU
 
 /* Builds the bounded parameter body for iAP2 0x1d01 wireless IdentificationInformation. */
 bool iap2_identity_build_wireless(const iap2_identity_config_t *config,

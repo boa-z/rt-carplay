@@ -8,6 +8,7 @@
 #include "iap2_core.h"
 #include "iap2_identity.h"
 #include "iap2_mfi_auth.h"
+#include "rtcp/device_time.h"
 #include "rtcp/media.h"
 #include "rtcp/mfi.h"
 #include "rtcp/navigation.h"
@@ -126,6 +127,7 @@ typedef struct
     rtcp_now_playing_cb_t on_now_playing;
     rtcp_route_guidance_cb_t on_route_guidance;
     rtcp_route_maneuver_cb_t on_route_maneuver;
+    rtcp_device_time_cb_t on_device_time;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES       4U

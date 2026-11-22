@@ -179,6 +179,8 @@ static bool send_identification_information(iap2_session_t *session, uint64_t no
 {
     iap2_identity_config_t identity = session->config.identity;
     identity.provide_location &= !session->location_component_rejected;
+    identity.receive_device_time = session->config.on_device_time != NULL &&
+                                   (session_is_wired(session) || session->config.airplay_tunnel);
 
     uint8_t body[IAP2_SESSION_IDENTIFICATION_CAPACITY];
     size_t body_len = 0U;
@@ -501,6 +503,50 @@ static const char *metadata_text(const uint8_t *body, size_t body_len, uint16_t 
     memcpy(out, text, length);
     out[length] = '\0';
     return out;
+}
+
+static void handle_device_time(iap2_session_t *session, const uint8_t *body, size_t body_len)
+{
+    if (!session->config.on_device_time || !metadata_ready(session) ||
+        (!session_is_wired(session) && !session->config.airplay_tunnel) ||
+        message_is_omitted(session, IAP2_MSG_DEVICE_TIME_UPDATE) ||
+        !iap2_param_validate(body, body_len))
+        return;
+
+    rtcp_device_time_t update = { 0 };
+    for (size_t offset = 0; offset < body_len;)
+    {
+        const uint8_t *parameter = body + offset;
+        size_t length = ((size_t)parameter[0] << 8) | parameter[1];
+        uint16_t id = ((uint16_t)parameter[2] << 8) | parameter[3];
+        const uint8_t *value = parameter + 4;
+        offset += length;
+        switch (id)
+        {
+        case 0:
+            if (length != 12U || update.has_unix_seconds || (value[0] & 0x80U))
+                return;
+            for (size_t index = 0; index < 8U; ++index)
+                update.unix_seconds = (update.unix_seconds << 8) | value[index];
+            update.has_unix_seconds = true;
+            break;
+        case 1:
+            if (length != 6U || update.has_time_zone_offset)
+                return;
+            update.time_zone_offset_minutes =
+                (int16_t)(((int)value[0] ^ 0x80) * 256 + value[1] - 32768);
+            update.has_time_zone_offset = true;
+            break;
+        case 2:
+            if (length != 5U || update.has_daylight_saving_offset)
+                return;
+            update.daylight_saving_offset_minutes = (int8_t)(((int)value[0] ^ 0x80) - 128);
+            update.has_daylight_saving_offset = true;
+            break;
+        }
+    }
+    if (update.has_unix_seconds || update.has_time_zone_offset || update.has_daylight_saving_offset)
+        session->config.on_device_time(&update, session->config.context);
 }
 
 static void handle_now_playing(iap2_session_t *session, const uint8_t *body, size_t body_len)
@@ -1038,6 +1084,9 @@ void iap2_session_handle_message(iap2_session_t *session,
         break;
     case IAP2_MSG_NOW_PLAYING_UPDATE:
         handle_now_playing(session, body, body_len);
+        break;
+    case IAP2_MSG_DEVICE_TIME_UPDATE:
+        handle_device_time(session, body, body_len);
         break;
     case IAP2_MSG_ROUTE_GUIDANCE_UPDATE:
         handle_route_guidance(session, body, body_len);

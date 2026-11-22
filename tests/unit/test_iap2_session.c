@@ -36,9 +36,24 @@ typedef struct
     char destination[129], remaining[129], instruction[129];
     uint8_t route_state;
     uint16_t maneuver_index;
+    unsigned device_time_updates;
+    rtcp_device_time_t device_time;
 } harness_t;
 
 static harness_t g_harness;
+
+static const uint8_t device_time_fixture[] = {
+    0, 12, 0, 0, 0, 0, 0, 0, 0x68, 0x82, 0xc2, 0xc0,
+    0, 6, 0, 1, 0xfe, 0x20,
+    0, 5, 0, 2, 60,
+};
+
+static void capture_device_time(const rtcp_device_time_t *update, void *context)
+{
+    harness_t *harness = context;
+    ++harness->device_time_updates;
+    harness->device_time = *update;
+}
 
 static const uint8_t now_playing_fixture[] = {
     0,
@@ -697,6 +712,7 @@ int main(void)
             .battery_should_charge = false,
             .wired_reinvite_delay_ms = wired_case ? 10000U : 0U,
             .observe_message = observe_message,
+            .on_device_time = wired_case == 0 ? capture_device_time : NULL,
         };
         session = iap2_session_create(&wired_config);
         assert(session != NULL);
@@ -717,6 +733,12 @@ int main(void)
                                    wired_identification->body_len, 8, &field,
                                    &field_len));
         assert(field_len == 1U && field[0] == 2U);
+        assert(find_body_parameter(wired_identification->body,
+                                   wired_identification->body_len, 7, &field, &field_len));
+        bool advertises_time = false;
+        for (size_t offset = 0; offset + 1U < field_len; offset += 2U)
+            advertises_time |= (field[offset] == 0x4e && field[offset + 1U] == 0x0b);
+        assert(advertises_time == (wired_case == 0));
         const uint8_t *usb_group = NULL;
         size_t usb_group_len = 0U;
         assert(find_body_parameter(wired_identification->body,
@@ -738,6 +760,13 @@ int main(void)
         drain_tx(session, 21);
         assert(iap2_session_identification_accepted(session));
         assert(last_message(h, 0x5000) == NULL);
+        if (wired_case == 0)
+        {
+            feed_peer_csm(session, IAP2_MSG_DEVICE_TIME_UPDATE,
+                          device_time_fixture, sizeof(device_time_fixture), 22);
+            drain_tx(session, 23);
+            assert(h->device_time_updates == 0);
+        }
 
         feed_peer_csm(session, 0xaa00, NULL, 0, 30);
         drain_tx(session, 31);
@@ -754,6 +783,32 @@ int main(void)
         drain_tx(session, 51);
         assert(iap2_session_is_authenticated(session));
 
+        if (wired_case == 0)
+        {
+            feed_peer_csm(session, IAP2_MSG_DEVICE_TIME_UPDATE,
+                          device_time_fixture, sizeof(device_time_fixture), 52);
+            drain_tx(session, 53);
+            assert(h->device_time_updates == 1);
+            assert(h->device_time.has_unix_seconds && h->device_time.unix_seconds == INT64_C(1753400000));
+            assert(h->device_time.has_time_zone_offset && h->device_time.time_zone_offset_minutes == -480);
+            assert(h->device_time.has_daylight_saving_offset && h->device_time.daylight_saving_offset_minutes == 60);
+
+            const uint8_t offset_only[] = { 0, 6, 0, 1, 1, 74, 0, 5, 0, 2, 0xc4 };
+            feed_peer_csm(session, IAP2_MSG_DEVICE_TIME_UPDATE, offset_only, sizeof(offset_only), 54);
+            drain_tx(session, 55);
+            assert(h->device_time_updates == 2);
+            assert(!h->device_time.has_unix_seconds);
+            assert(h->device_time.has_time_zone_offset && h->device_time.time_zone_offset_minutes == 330);
+            assert(h->device_time.has_daylight_saving_offset && h->device_time.daylight_saving_offset_minutes == -60);
+
+            const uint8_t duplicate[] = { 0, 5, 0, 2, 0, 0, 5, 0, 2, 0 };
+            feed_peer_csm(session, IAP2_MSG_DEVICE_TIME_UPDATE, duplicate, sizeof(duplicate), 56);
+            drain_tx(session, 57);
+            feed_peer_csm(session, IAP2_MSG_DEVICE_TIME_UPDATE,
+                          device_time_fixture, sizeof(device_time_fixture) - 1U, 58);
+            drain_tx(session, 59);
+            assert(h->device_time_updates == 2);
+        }
         /* PowerSourceUpdate (0xAE03) precedes the subscription burst. */
         size_t power_index = SIZE_MAX;
         size_t subscription_index = SIZE_MAX;
@@ -868,6 +923,30 @@ int main(void)
         }
 
         iap2_session_link_down(session);
+        iap2_session_destroy(session);
+    }
+
+    for (unsigned tunnel = 0; tunnel < 2; ++tunnel)
+    {
+        memset(h, 0, sizeof(*h));
+        config.airplay_tunnel = tunnel != 0;
+        config.on_device_time = capture_device_time;
+        session = iap2_session_create(&config);
+        assert(session != NULL);
+        handshake(session);
+        drain_tx(session, 6);
+        feed_peer_csm(session, 0x1d00, NULL, 0, 10);
+        drain_tx(session, 11);
+        const csm_record_t *wireless_identity = last_message(h, 0x1d01);
+        assert(wireless_identity != NULL);
+        const uint8_t *received;
+        size_t received_len;
+        assert(find_body_parameter(wireless_identity->body, wireless_identity->body_len,
+                                   7, &received, &received_len));
+        bool advertises_time = false;
+        for (size_t offset = 0; offset + 1U < received_len; offset += 2U)
+            advertises_time |= (received[offset] == 0x4e && received[offset + 1U] == 0x0b);
+        assert(advertises_time == (tunnel != 0));
         iap2_session_destroy(session);
     }
 

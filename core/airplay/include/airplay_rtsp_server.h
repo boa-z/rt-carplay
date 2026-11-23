@@ -161,6 +161,7 @@ int airplay_rtsp_server_get_data_stream_status(const airplay_rtsp_server_t *,
 
 /* RTSP owner only; sends documented requestSiri down/up actions on event. */
 bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *);
+bool airplay_rtsp_server_request_screen_keyframe(airplay_rtsp_server_t *);
 int airplay_rtsp_server_set_projection_enabled(airplay_rtsp_server_t *, bool);
 uint32_t airplay_rtsp_server_screen_entity(const airplay_rtsp_server_t *);
 uint32_t airplay_rtsp_server_screen_generation(const airplay_rtsp_server_t *);

@@ -145,6 +145,12 @@ rtcp_projection_owner_t rtcp_receiver_get_projection_owner(const rtcp_receiver_t
  * Zero means no active stream. A replacement stream gets a new identity. */
 uint32_t rtcp_receiver_get_projection_stream_generation(const rtcp_receiver_t *);
 
+/** Request a fresh Classic MainScreen keyframe from the Receiver owner thread.
+ * @param receiver Running Receiver. The call requires an active Screen stream and event channel.
+ * @return True when sent or coalesced by the session rate limit. False if unavailable or sending failed.
+ * Confirm recovery by consuming a decodable keyframe. */
+bool rtcp_receiver_request_screen_keyframe(rtcp_receiver_t *receiver);
+
 /** Optional callback for the phone's plain requestUI (for example from the
  * OEM tile). Called on the Receiver owner; true accepts the request. The
  * host owns its local display and calls the projection API as appropriate.

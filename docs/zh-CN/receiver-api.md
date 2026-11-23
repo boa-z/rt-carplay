@@ -50,6 +50,8 @@ if (result == RTCP_OK) result = rtcp_receiver_start(receiver);
 
 调用 `rtcp_receiver_set_projection_enabled(receiver, false)` 请求将 MainScreen 交给宿主，传 `true` 请求 iPhone 恢复 CarPlay 前台。接收端在已有的加密事件通道发送只针对 MainScreen 的 `changeModes`（Take）以及 `requestUI`。`RTCP_OK` 表示消息已写入。使用 `rtcp_receiver_get_projection_owner()` 查看手机返回的 `modesChanged`，等重新收到视频后再显示投屏。音频、iAP2 和 Type 111 各有独立生命周期。Type 110 的生命周期由 iPhone 决定，iPhone 可以保留传输连接。命令依据见 [OCBM 的事件实现](https://github.com/lvalen91/ocbm/blob/main/crates/vendor/receiver/src/events.rs)。
 
+本地 H.264 输入丢失后，在 Owner 线程调用 `rtcp_receiver_request_screen_keyframe()`。Classic MainScreen 和事件通道都活跃时，SDK 在加密事件通道发送 `forceKeyFrame`，合并 250 毫秒内的重复请求。宿主应等待可解码的 IDR，恢复解码后停止重试。
+
 在 Owner 线程调用 `rtcp_receiver_set_appearance()`，传入 `RTCP_APPEARANCE_AUTOMATIC`、`RTCP_APPEARANCE_LIGHT` 或 `RTCP_APPEARANCE_DARK`。自动模式接受宿主当前的界面与地图日夜状态，可由环境光和车灯状态决定。浅色和深色覆盖这两项状态。更新使用已协商的主显示 UUID 和加密事件通道。`RTCP_OK` 表示两条消息均已写入。重连后重新应用偏好，在 iPhone 上验证渲染后的界面和地图。宿主独立管理本机 HMI 主题。
 
 宿主实际应用增益变化后调用 `rtcp_receiver_set_volume_db()`，包括收到 `on_volume` 请求的情况。这会记录实际增益，供手机后续发起 `GET_PARAMETER volume` 查询。静音使用 `-144` dB。Duck、资源和活动流各自保留独立约定。初始 `streams=0`、缺少 Audio SETUP、完成 SETUP 后播放异常是不同的检查点。

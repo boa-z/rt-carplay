@@ -270,6 +270,12 @@ bool airplay_event_port_request_siri(airplay_event_port_t *port)
     return port && !port->failed && port->connected_notified && airplay_control_port_request_siri(port->control);
 }
 
+bool airplay_event_port_request_screen_keyframe(airplay_event_port_t *port)
+{
+    return port && !port->failed && port->connected_notified &&
+           airplay_control_port_request_main_screen_keyframe(port->control);
+}
+
 bool airplay_event_port_set_projection_enabled(airplay_event_port_t *port, bool enabled)
 {
     return port && !port->failed && port->connected_notified &&

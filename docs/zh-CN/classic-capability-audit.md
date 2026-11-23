@@ -7,7 +7,7 @@
 | 能力 | 状态与证据 |
 | --- | --- |
 | 连接和会话所有权 | **Implemented、Host Tested、Hardware Pending。** Receiver 管理 RTSP 会话、建立和拆除。Luban-Lite 管理传输选择、重试、有线与无线恢复以及配对持久化。Host 测试覆盖监听回滚、重连、资源释放和传输回退。 |
-| H.264 和 Classic 音频 | **Implemented、Host Tested。** 保持既有 Screen 与音频契约。D213 此前已验证音乐、通话和 Siri。本版本的播放、麦克风、Direct/Mixer 和资源切换回归为 **Hardware Pending**。 |
+| H.264 和 Classic 音频 | **Implemented、Host Tested。** Classic 事件通道支持在 H.264 输入丢失后请求关键帧。D213 此前已验证音乐、通话和 Siri。进入 Siri 后的关键帧恢复，以及播放、麦克风、Direct/Mixer 和资源切换回归为 **Hardware Pending**。 |
 | HID、外观、OEM 图标和投屏 | **Implemented、Host Tested、Hardware Pending。** SDK 提供双触点、原始 HID、旋钮、方向与媒体控制、Siri、动态外观和投屏命令。能力声明须与实际输入设备匹配。通过手机事件确认 OEM 焦点与投屏请求。 |
 | 显示几何 | 初始几何、视口适配和坐标映射为 **Implemented、Host Tested**。D213 边缘对齐为 **Hardware Pending**。运行时视区选择与编码分辨率重协商是两个不同的协议问题，后者仍待确认。 |
 | 定位和车速 | **Implemented、Host Tested、Hardware Pending。** 可选 GGA/RMC 和 `$PASCD` 根据手机选择器发送，在取消订阅或复位时停止。Luban-Lite 支持无线虚拟 GNSS 和车速注入。有线输入需宿主提供数据源。请求间隔字段和其他传感器仍待确认。 |
@@ -26,6 +26,6 @@
 
 1. 分别建立有线和无线会话。播放音乐、拨打并结束电话，再调用 Siri 并使用麦克风。预期视频稳定、播放和采集可用、原音频路由恢复。用已有 Direct 和 Mixer 选项重复。
 2. 在无线模式启用虚拟 GNSS，开始导航，再停车、停止定位请求并重连。用 `carplay_gnss` 检查当前订阅和 PASCD 计数。预期只发送订阅对应的数据，按请求发送零速 Park 样本，重连后无旧订阅。有线测试使用宿主数据源。
-3. 在有线 USB 或无线隧道连接前执行 `carplay_classic_diag on`。拖动进度、切歌，切换手机电源和蜂窝状态，开始并结束通话。运行含多个转向和车道的导航后取消。预期看到字段存在标志和计数、进度更新、转向及车道记录，并在路线结束或断线时看到失效通知。将 `DeviceTimeUpdate` 与手机时区对照，并确认退役链路中待处理的时间不会被应用。执行 `carplay_classic_diag off` 并重连以恢复默认订阅。
+3. 分别在有线 USB 和无线隧道重复测试。拖动进度、切歌，切换手机电源和蜂窝状态，开始并结束通话。运行含多个转向和车道的导航后取消。预期看到进度更新、转向和车道记录，以及路线结束或断线时的失效通知。使用 `carplay_classic_diag on` 打印字段存在标志和计数，使用 `off` 停止打印。将 `DeviceTimeUpdate` 与手机时区对照，并确认退役链路中待处理的时间不会被应用。
 4. 投屏时拔插 USB，断开 Wi-Fi 后由已配对手机重连，并在会话进行时切换有线与无线。预期只有一个活跃 Owner，旧的媒体和输入资源释放，建立失败后可重试。
 5. 检查屏幕四角及双指触控、已声明的旋钮和媒体键、日夜模式、OEM 图标和投屏焦点。预期坐标映射与焦点变化正确，音频和 iAP2 各自保持独立生命周期。

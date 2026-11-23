@@ -2604,6 +2604,11 @@ static void run_event_channel(rtcp_receiver_t *server,
     verify_appearance(server, event_fd, peer, RTCP_APPEARANCE_LIGHT, true, true, false, false);
     verify_appearance(server, event_fd, peer, RTCP_APPEARANCE_DARK, false, false, true, true);
 
+    assert(rtcp_receiver_request_screen_keyframe(server));
+    plain_len = receive_decrypted(server, event_fd, peer, plain, sizeof(plain));
+    assert(contains(plain, plain_len, "POST /command"));
+    assert(contains(plain, plain_len, "forceKeyFrame"));
+
     if (poll_error)
         fail_poll_port = event_port;
     else
@@ -2620,6 +2625,7 @@ static void run_event_channel(rtcp_receiver_t *server,
         rtcp_net_linux.close(event_fd);
     }
     assert(rtcp_receiver_set_appearance(server, RTCP_APPEARANCE_DARK, false, false) == RTCP_ESTATE);
+    assert(!rtcp_receiver_request_screen_keyframe(server));
 
     airplay_control_cipher_destroy(peer);
     mbedtls_platform_zeroize(peer_read_key, sizeof(peer_read_key));
@@ -2628,7 +2634,7 @@ static void run_event_channel(rtcp_receiver_t *server,
 
 static uint32_t run_screen_stream(rtcp_receiver_t *server, client_t *client,
                                   const uint8_t shared_secret[KEY_BYTES],
-                                  uint32_t *cseq)
+                                  uint32_t *cseq, uint16_t event_port, bool poll_error)
 {
     uint8_t request[512];
     uint8_t body[256];
@@ -2716,6 +2722,7 @@ static uint32_t run_screen_stream(rtcp_receiver_t *server, client_t *client,
     assert(screen_sender_time_ns == expected_ns);
     assert(rtcp_receiver_get_projection_stream_generation(server) == generation);
 
+    run_event_channel(server, shared_secret, event_port, poll_error);
     rtcp_net_linux.close(screen_fd);
     mbedtls_platform_zeroize(output_key, sizeof(output_key));
     return generation;
@@ -3141,7 +3148,6 @@ int main(int argc, char **argv)
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).enabled == ui_mode);
     if (vehicle_mode)
         assert(run_initial_setup(server, &client, &cseq, false) == event_port);
-    run_event_channel(server, shared_secret, event_port, false);
     if (vehicle_mode)
         run_vehicle_processor(&client, shared_secret, &cseq, vehicle, !ui_mode);
     else
@@ -3157,7 +3163,7 @@ int main(int argc, char **argv)
     run_audio_stream(server, &client, shared_secret, &cseq, true);
     /* Reusing the existing default endpoint still works alongside media. */
     run_audio_stream(server, &client, shared_secret, &cseq, false);
-    uint32_t first_screen_generation = run_screen_stream(server, &client, shared_secret, &cseq);
+    uint32_t first_screen_generation = run_screen_stream(server, &client, shared_secret, &cseq, event_port, false);
     mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
     run_tampered_frame(server, &client);
     expect_receiver_state(false, false, false, false, false);
@@ -3220,7 +3226,6 @@ int main(int argc, char **argv)
     request_data(&client2, &guard_cseq, RTCP_DATA_STREAM_UI_SYNC, 8000, 503, &guard_id);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).registered && !data_status(RTCP_DATA_STREAM_UI_SYNC).offered);
     assert(data_status(RTCP_DATA_STREAM_UI_SYNC).state == RTCP_DATA_STREAM_IDLE);
-    run_event_channel(server, shared_secret2, event_port2, true);
     run_set_parameter_volume(server, &client2, &cseq);
     run_now_playing(server, &client2, &cseq);
     run_audio_stream(server, &client2, shared_secret2, &cseq, false);
@@ -3229,7 +3234,7 @@ int main(int argc, char **argv)
         video_request(server, &client2, &cseq, "SETUP", 111, 9010, 200);
         assert(alt_status(server).ready);
     }
-    uint32_t second_screen_generation = run_screen_stream(server, &client2, shared_secret2, &cseq);
+    uint32_t second_screen_generation = run_screen_stream(server, &client2, shared_secret2, &cseq, event_port2, true);
     assert(second_screen_generation != first_screen_generation);
     if (alt_mode)
     {

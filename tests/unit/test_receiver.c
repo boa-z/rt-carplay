@@ -242,6 +242,8 @@ int main(void)
     assert(rtcp_receiver_send_data_stream(receiver, RTCP_DATA_STREAM_VEHICLE, NULL, 0) == RTCP_ESTATE);
     assert(rtcp_receiver_send_data_stream(receiver, RTCP_DATA_STREAM_COUNT, NULL, 0) == RTCP_EINVAL);
     assert(!rtcp_receiver_request_siri(receiver));
+    assert(!rtcp_receiver_request_screen_keyframe(NULL));
+    assert(!rtcp_receiver_request_screen_keyframe(receiver));
     assert(!rtcp_receiver_send_iap(receiver, id, sizeof(id)));
     assert(!rtcp_receiver_send_hid_report(receiver, 1, id, sizeof(id)));
     memset(plist, 0, length); /* create must own its /info copy. */

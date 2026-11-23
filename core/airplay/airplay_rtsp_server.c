@@ -1560,6 +1560,12 @@ bool airplay_rtsp_server_request_siri(airplay_rtsp_server_t *s)
     return s && !s->stopping && s->event_connected && airplay_event_port_request_siri(s->event_port);
 }
 
+bool airplay_rtsp_server_request_screen_keyframe(airplay_rtsp_server_t *server)
+{
+    return airplay_rtsp_server_screen_generation(server) != 0 && server->event_connected &&
+           airplay_event_port_request_screen_keyframe(server->event_port);
+}
+
 int airplay_rtsp_server_set_projection_enabled(airplay_rtsp_server_t *s, bool enabled)
 {
     if (!s || s->stopping || !s->event_connected ||

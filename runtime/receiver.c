@@ -444,6 +444,11 @@ bool rtcp_receiver_request_siri(rtcp_receiver_t *r)
     return r != NULL && airplay_rtsp_server_request_siri(r->server);
 }
 
+bool rtcp_receiver_request_screen_keyframe(rtcp_receiver_t *receiver)
+{
+    return receiver && airplay_rtsp_server_request_screen_keyframe(receiver->server);
+}
+
 bool rtcp_receiver_send_touch(rtcp_receiver_t *receiver, const rtcp_touch_contact_t contacts[RTCP_TOUCH_CONTACTS])
 {
     if (!contacts)

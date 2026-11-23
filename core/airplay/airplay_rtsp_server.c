@@ -959,7 +959,8 @@ static void server_teardown_connection(airplay_rtsp_server_t *server,
               server->connection.tx_frames);
     if (server->session != NULL)
     {
-        /* Session destroy stops the media endpoints it started. */
+        /* Retire negotiated endpoints before discarding the authenticated
+         * connection. The listener remains available for the next peer. */
         airplay_rtsp_session_destroy(server->session);
         server->session = NULL;
     }

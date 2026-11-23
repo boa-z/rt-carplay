@@ -478,7 +478,8 @@ void rtcp_lockdown_session_close(rtcp_lockdown_session_t *session)
     {
         return;
     }
-    /* TLS wrappers borrow their raw USBMUX streams. Release each wrapper first. */
+    /* The TLS wrappers borrow their underlying mux streams. Destroy each
+     * wrapper before returning its raw connection to the transport. */
     if (session->service_tls != NULL)
     {
         rtcp_lockdown_tls_close(session->service_tls);

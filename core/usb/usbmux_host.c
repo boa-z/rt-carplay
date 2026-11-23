@@ -26,6 +26,8 @@ static int send_tcp(rtcp_usbmux_host_t *host,
     {
         return RTCP_EINVAL;
     }
+    /* The mux header acknowledges the last received mux index. The inner
+     * TCP acknowledgment tracks bytes independently for each connection. */
     host->tx_frame[14] = (uint8_t)(host->rx_index >> 8U);
     host->tx_frame[15] = (uint8_t)host->rx_index;
     if (host->tx_index <= 4U)

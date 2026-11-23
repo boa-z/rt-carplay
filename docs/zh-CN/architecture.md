@@ -2,9 +2,22 @@
 
 # Receiver 架构
 
-## 范围与当前迁移阶段
+## 运行结构
 
-rt-carplay 实现 CarPlay 接收器。`core/` 包含可移植的 AirPlay、RTSP、iAP2、USBMUX、Lockdown、发现、MFi 寄存器、音频、媒体与输入代码，不引用 GUI 或 ArtInChip 头文件。`runtime/receiver.c` 在已有 RTSP Server 上提供具有明确所有权、通过轮询推进的 Receiver。Linux simulator 和过渡期 RT-Thread 组合实现均直接使用公共宿主、媒体配置。`receiver.h`、`events.h`、`platform.h`、`media.h` 和 `input.h` 不需要内部协议或平台包含目录即可编译。D213 组合实现和硬件适配现已归属 Luban-Lite 应用。通用 RT-Thread Headless 示例使用相同公共 API，不依赖板级硬件或 GUI。
+宿主负责建立物理链路，并向 SDK 提供传输及身份接口。Receiver 管理 AirPlay 会话。D213 宿主分别运行有线和无线 iAP2，将手机通知交给应用。Receiver 向媒体后端交付编码视频及已协商的音频，应用命令则提交给 Receiver 所属线程。
+
+```mermaid
+flowchart LR
+    Phone <-->|USB or Bluetooth/Wi-Fi| Transport[Host transport]
+    Transport <-->|RTSP and AirPlay| Receiver[SDK Receiver owner]
+    Transport <-->|iAP2| IAP[Host iAP2 owner using SDK session]
+    Receiver -->|Media callbacks| IO[Host media workers]
+    IAP -->|Classic notifications| App[Host application]
+    App -->|Queued commands| Receiver
+    IO --> Devices[Display / audio devices]
+```
+
+Linux 模拟器、通用 RT-Thread 无界面示例和 D213 使用的公共配置见 [Receiver 接入](receiver-api.md)。硬件驱动和 UI 策略由宿主管理。
 
 ## 目录职责
 

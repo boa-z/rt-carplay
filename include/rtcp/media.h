@@ -76,7 +76,8 @@ typedef enum
 } rtcp_video_message_type_t;
 /** Annex-B H.264 configuration or access unit, delivered on the poll owner.
  * Buffer and writable prefix are borrowed only until return. sender_time_ns
- * is the sender timestamp; arrival_time_us is local monotonic receive time.
+ * is the sender timestamp; arrival_time_us is sampled after the complete
+ * Screen message reaches the receiver, in the local monotonic clock domain.
  * An asynchronous sink must copy before returning. Return RTCP_OK on success
  * or a negative error to report sink failure. */
 typedef int (*rtcp_video_packet_cb_t)(rtcp_video_message_type_t type,
@@ -131,15 +132,21 @@ typedef struct
     void *video_context;
     rtcp_audio_packet_cb_t on_audio; /**< Required to accept Audio SETUP. */
     void *audio_context;
+    /** Retire resources for the stopped stream type. The slot-aware
+     * callback takes precedence when both stop callbacks are registered. */
     void (*on_audio_stop)(uint16_t stream_type, void *context);
     /** Preferred stop notification when the sink distinguishes stream slots. */
     void (*on_audio_stop_ex)(unsigned slot, uint16_t stream_type, void *context);
     /** Borrow the negotiated configuration until return. Return true after
      * starting capture, false if the microphone endpoint could not start. */
     bool (*on_audio_input_start)(const rtcp_audio_input_config_t *, void *context);
+    /** Retire capture for the active microphone endpoint. */
     void (*on_audio_input_stop)(void *context);
+    /** Borrow the delta only during the callback. Retain absent fields. */
     void (*on_audio_modes)(const rtcp_audio_modes_t *, void *context);
+    /** Apply a duck/unduck request. Return true when the host accepts it. */
     bool (*on_audio_duck)(bool ducked, float volume_db, uint32_t duration_ms, void *context);
+    /** Handle the phone's requested gain in dB using volume_context. */
     void (*on_volume)(float volume_db, void *context);
     void *volume_context;
     /** Independent experimental Type 111 H.264 sink. NULL deliberately discards

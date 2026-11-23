@@ -8,6 +8,7 @@ No network requests or third-party Python packages are required. Exemptions
 are explicit path/reason entries in docs/documentation-exceptions.json.
 Content checks are mechanical drift indicators, not semantic translation proof.
 """
+import argparse
 import collections
 import json
 import os
@@ -75,12 +76,12 @@ def relative(source, target):
     return Path(os.path.relpath(target, source.parent)).as_posix()
 
 
-def main():
+def main(root=ROOT):
     result = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others',
                              '--exclude-standard', '--', '*.md'],
-                            cwd=ROOT, check=True, capture_output=True)
+                            cwd=root, check=True, capture_output=True)
     documents = {Path(p) for p in result.stdout.decode().split('\0') if p}
-    manifest = ROOT / 'docs/documentation-exceptions.json'
+    manifest = root / 'docs/documentation-exceptions.json'
     exceptions = json.loads(manifest.read_text(encoding='utf-8')) if manifest.exists() else {}
     errors = []
     for name, reason in exceptions.items():
@@ -92,10 +93,10 @@ def main():
     expected = set(primary)
     texts = {}
     for path in documents:
-        if not (ROOT / path).is_file():
+        if not (root / path).is_file():
             errors.append(f'{path}: tracked document is missing from working tree')
         else:
-            texts[path] = (ROOT / path).read_text(encoding='utf-8-sig')
+            texts[path] = (root / path).read_text(encoding='utf-8-sig')
     for en in primary:
         if en.name != 'README.md' and not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*\.md', en.name):
             errors.append(f'{en}: use lowercase kebab-case for formal documents')
@@ -159,7 +160,7 @@ def main():
             parsed = urlsplit(target)
             if parsed.scheme or parsed.netloc:
                 continue  # External sites never block this local CI check.
-            destination = (ROOT / path.parent / unquote(parsed.path)).resolve() if parsed.path else ROOT / path
+            destination = (root / path.parent / unquote(parsed.path)).resolve() if parsed.path else root / path
             if not destination.exists():
                 errors.append(f'{path}: nonexistent local link {target}')
             elif parsed.fragment and destination.is_file() and destination.suffix == '.md':
@@ -175,4 +176,7 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=ROOT,
+                        help='check a repository or application directory')
+    sys.exit(main(parser.parse_args().root.resolve()))

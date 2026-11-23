@@ -40,9 +40,9 @@ typedef struct
     size_t screen_max_body_bytes; /**< 0 selects the protocol default. */
     /** Encrypted event-channel readiness on the poll owner. */
     void (*on_event_state)(bool connected, void *context);
-    void *event_state_context;
-    rtcp_receiver_event_cb_t on_state;
-    void *context;
+    void *event_state_context;         /**< Borrowed until Receiver destruction. */
+    rtcp_receiver_event_cb_t on_state; /**< Synchronous state snapshot notification. */
+    void *context;                     /**< Borrowed context for on_state only. */
     rtcp_data_stream_backend_t data_stream;
     /** Optional borrowed processor; attach to only one Receiver, retain until
      * destroy, use only on owner. start/stop and authentication loss reset
@@ -75,7 +75,7 @@ typedef struct
      * Default false. Does not advertise altScreen or a second display, nor
      * negotiate official Ultra. No board renderer/codec is added. */
     bool experimental_alt_video;
-    uint16_t alt_screen_port; /* 0 requests an independent ephemeral port. */
+    uint16_t alt_screen_port; /**< Zero requests an independent ephemeral port. */
 } rtcp_receiver_config_t;
 
 /** Create a stopped Receiver. Returns RTCP_OK and transfers instance
@@ -86,8 +86,10 @@ typedef struct
  * queues cross-thread commands and joins its poll worker before destroy.
  * No internal thread or GUI is required. start/stop are idempotent. stop
  * closes protocol endpoints synchronously: no protocol callback follows it.
- * A stopped instance can be restarted with the same borrowed providers. */
-int rtcp_receiver_create(const rtcp_receiver_config_t *, rtcp_receiver_t **);
+ * A stopped instance can be restarted with the same borrowed providers.
+ * @param config Source descriptor, copied during creation.
+ * @param out Receiver output slot, owned by the caller on success. */
+int rtcp_receiver_create(const rtcp_receiver_config_t *config, rtcp_receiver_t **out);
 /** Open the listener and initialize the media endpoints. Idempotent when
  * running. Returns RTCP_OK or the negative startup error after rollback. */
 int rtcp_receiver_start(rtcp_receiver_t *);

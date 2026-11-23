@@ -1036,6 +1036,8 @@ static void handle_start_location(iap2_session_t *session, const uint8_t *body, 
         message_is_omitted(session, IAP2_MSG_STOP_LOCATION) || !iap2_param_validate(body, body_len))
         return;
 
+    /* Validate the complete selector list before replacing the active
+     * subscription. Malformed or duplicate selectors leave it intact. */
     unsigned requested = 0;
     for (size_t offset = 0; offset < body_len;)
     {

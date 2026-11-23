@@ -49,16 +49,23 @@ struct rtcp_net
     /** TCP listener bound to INADDR_ANY (RTCP_AF_INET) or in6addr_any
      * (RTCP_AF_INET6).  RTCP_ENOTSUP when the port has no IPv6 support. */
     int (*listen)(uint8_t family, uint16_t port);
+    /** Accept a TCP peer and write its address on success. The caller
+     * owns the returned descriptor and closes it with this provider. */
     int (*accept)(int lfd, rtcp_addr_t *peer);
+    /** Open a connected TCP descriptor or return a negative RTCP error. */
     int (*connect)(const rtcp_addr_t *addr);
     /** Bounded TCP connect: returns a connected fd, or a negative RTCP error
      * (RTCP_ETIMEDOUT when the handshake did not finish in time).  Optional;
      * callers fall back to the blocking connect() when NULL. */
     int (*connect_timeout)(const rtcp_addr_t *addr, int timeout_ms);
+    /** Consume bytes synchronously. A nonnegative count may be short. */
     int (*send)(int fd, const void *buf, size_t len);
+    /** Write into caller storage. Zero means TCP EOF. */
     int (*recv)(int fd, void *buf, size_t len);
     /** Local port of a bound TCP or UDP socket; 0 when unknown. */
     uint16_t (*local_port)(int fd);
+    /** Fill revents for the borrowed array and return its ready count,
+     * zero on timeout, or a negative RTCP error. Zero timeout never blocks. */
     int (*poll)(struct rtcp_pollfd *fds, int n, int timeout_ms);
     void (*close)(int fd);
 

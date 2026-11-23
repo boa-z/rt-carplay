@@ -2,9 +2,22 @@
 
 # Receiver architecture
 
-## Scope and current migration
+## Runtime at a glance
 
-rt-carplay implements a CarPlay receiver. `core/` contains portable AirPlay, RTSP, iAP2, USBMUX, Lockdown, discovery, MFi register, audio, media and input code. It includes no GUI or ArtInChip headers. `runtime/receiver.c` provides an owned, poll-driven receiver over the existing RTSP server. Both the Linux simulator and the transitional RT-Thread composition use its public host/media configuration directly. `receiver.h`, `events.h`, `platform.h`, `media.h` and `input.h` compile without private protocol or platform include paths. The D213 composition and hardware adapters now belong to the Luban-Lite application. The generic RT-Thread Headless example uses the same public API without board or GUI dependencies.
+Bring up the physical link in the host and provide the SDK with transport and identity providers. The Receiver owns the AirPlay session. On D213, separate host owners run wired and wireless iAP2 and pass phone notifications to the application. The Receiver returns encoded video and negotiated audio to media backends. Commands travel back through the Receiver owner.
+
+```mermaid
+flowchart LR
+    Phone <-->|USB or Bluetooth/Wi-Fi| Transport[Host transport]
+    Transport <-->|RTSP and AirPlay| Receiver[SDK Receiver owner]
+    Transport <-->|iAP2| IAP[Host iAP2 owner using SDK session]
+    Receiver -->|Media callbacks| IO[Host media workers]
+    IAP -->|Classic notifications| App[Host application]
+    App -->|Queued commands| Receiver
+    IO --> Devices[Display / audio devices]
+```
+
+The public configuration used by the Linux simulator, generic RT-Thread headless example and D213 is explained in [Receiver integration](receiver-api.md). Only the host supplies hardware drivers and UI policy.
 
 ## Directory responsibilities
 

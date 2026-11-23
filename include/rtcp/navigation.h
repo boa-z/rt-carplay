@@ -43,13 +43,13 @@ typedef void (*rtcp_route_maneuver_cb_t)(const rtcp_route_maneuver_t *, void *co
 typedef struct
 {
     rtcp_route_guidance_t guidance;
-    bool invalidated;
+    bool invalidated; /**< Clear the route and child caches before applying future deltas. */
     bool has_distance_remaining, has_distance_to_maneuver;
     uint32_t distance_remaining, distance_to_maneuver;
     bool has_remaining_units, has_maneuver_units, has_maneuver_count;
     uint8_t remaining_units, maneuver_units;
     uint16_t maneuver_count;
-    const uint16_t *maneuver_indices;
+    const uint16_t *maneuver_indices; /**< NULL omits the list. Non-NULL with zero count clears it. */
     size_t maneuver_index_count;
     bool has_lane_index, has_lane_count, has_lanes_shown, lanes_shown;
     uint16_t lane_index, lane_count;
@@ -77,7 +77,7 @@ typedef struct
 {
     uint16_t index;
     const char *description;
-    const rtcp_lane_t *lanes;
+    const rtcp_lane_t *lanes; /**< NULL omits lanes. Copy entries before returning if retained. */
     size_t lane_count;
 } rtcp_lane_guidance_t;
 

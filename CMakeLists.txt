@@ -191,6 +191,8 @@ if(RTCP_BUILD_TESTS)
     add_test(NAME check_version
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-version.py
             --binary $<TARGET_FILE:test_version>)
+    add_test(NAME check_public_api_docs
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-api-docs.py)
     add_test(NAME test_vehicle_controls_independent_wire
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_vehicle_controls_wire.py $<TARGET_FILE:test_vehicle_controls>)
     add_test(NAME test_vehicle_info_independent_wire

@@ -24,6 +24,7 @@ typedef void (*iap2_core_state_cb_t)(iap2_core_state_t state,
                                      const char *reason,
                                      void *context);
 typedef void (*iap2_core_csm_acked_cb_t)(uint16_t message_id, void *context);
+typedef void (*iap2_core_file_cb_t)(const uint8_t *payload, size_t length, void *context);
 
 iap2_core_t *iap2_core_create(iap2_core_tx_cb_t tx_cb,
                               iap2_core_message_cb_t message_cb,
@@ -55,3 +56,8 @@ uint32_t iap2_core_bad_frames(const iap2_core_t *core);
 /* Before start only. TCP iAP2 uses control session version 2 and zero-ACK
  * synchronization; RFCOMM/USB defaults remain unchanged. */
 void iap2_core_set_tcp_transport(iap2_core_t *core);
+
+/* Before start only. Register the Classic file-transfer session. */
+void iap2_core_set_file_handler(iap2_core_t *core, iap2_core_file_cb_t callback);
+bool iap2_core_send_file_reply(iap2_core_t *core, uint8_t transfer_id,
+                               uint8_t status, uint64_t now_ms);

@@ -41,6 +41,7 @@ typedef struct
     rtcp_device_time_t device_time;
     unsigned status_updates[4];
     unsigned media_details, media_invalidations, route_details, route_invalidations;
+    unsigned artwork_updates, artwork_accepts, artwork_successes;
     unsigned lane_guidance;
 } harness_t;
 
@@ -114,6 +115,15 @@ static void capture_media_details(const rtcp_now_playing_details_t *update, void
     {
         ++harness->media_invalidations;
         return;
+    }
+    if (update->has_artwork)
+    {
+        static const uint8_t jpeg[] = { 0xff, 0xd8, 0xff, 0xd9 };
+        assert(update->has_artwork_transfer_id && update->artwork_transfer_id == 9U);
+        assert(update->artwork_length == sizeof(jpeg) && !memcmp(update->artwork, jpeg, sizeof(jpeg)));
+        ++harness->artwork_updates;
+        if (!update->has_duration)
+            return;
     }
     ++harness->media_details;
     assert(update->has_duration && update->duration_ms == 180000U);
@@ -407,7 +417,13 @@ static void drain_tx(iap2_session_t *session, uint64_t now_ms)
         uint8_t control = h->tx[pos + 4];
         uint8_t seq = h->tx[pos + 5];
         const uint8_t *payload = h->tx + pos + 9;
-        size_t payload_len = frame_len - 10U;
+        size_t payload_len = frame_len > 10U ? frame_len - 10U : 0U;
+        if (control == 0x40U && h->tx[pos + 7] == 2U && payload_len == 2U)
+        {
+            assert(payload[0] == 9U);
+            h->artwork_accepts += payload[1] == 1U;
+            h->artwork_successes += payload[1] == 5U;
+        }
         if ((control & 0x80U) == 0U && payload_len >= 6U &&
             payload[0] == 0x40U && payload[1] == 0x40U)
         {
@@ -428,6 +444,19 @@ static void drain_tx(iap2_session_t *session, uint64_t now_ms)
         }
     }
     h->scanned = pos;
+}
+
+static void feed_artwork(iap2_session_t *session, uint64_t now, bool complete)
+{
+    harness_t *h = &g_harness;
+    const uint8_t setup[] = { 9, 4, 0, 0, 0, 0, 0, 0, 0, 4 };
+    const uint8_t first[] = { 9, 0x80, 0xff, 0xd8 };
+    const uint8_t last[] = { 9, 0x40, 0xff, 0xd9 };
+    feed_peer_frame(session, 0x40, h->peer_seq++, 0, 2, setup, sizeof(setup), now);
+    drain_tx(session, now);
+    feed_peer_frame(session, 0x40, h->peer_seq++, 0, 2, first, sizeof(first), now + 1);
+    feed_peer_frame(session, 0x40, h->peer_seq++, 0, 2, last, sizeof(last) - !complete, now + 2);
+    drain_tx(session, now + 2);
 }
 
 static void handshake(iap2_session_t *session)
@@ -934,10 +963,14 @@ int main(void)
             assert(h->status_updates[RTCP_PHONE_STATUS_CALL] == 1U);
             assert(h->media_details == 1U && h->route_details == 2U && h->route_invalidations == 1U);
             assert(h->lane_guidance == 1U);
+            feed_artwork(session, 52, false);
+            assert(h->artwork_accepts == 1U && h->artwork_successes == 0U && h->artwork_updates == 0U);
+            feed_artwork(session, 55, true);
+            assert(h->artwork_accepts == 2U && h->artwork_successes == 1U && h->artwork_updates == 1U);
 
             feed_peer_csm(session, IAP2_MSG_DEVICE_TIME_UPDATE,
-                          device_time_fixture, sizeof(device_time_fixture), 52);
-            drain_tx(session, 53);
+                          device_time_fixture, sizeof(device_time_fixture), 58);
+            drain_tx(session, 59);
             assert(h->device_time_updates == 1);
             assert(h->device_time.has_unix_seconds && h->device_time.unix_seconds == INT64_C(1753400000));
             assert(h->device_time.has_time_zone_offset && h->device_time.time_zone_offset_minutes == -480);
@@ -1096,6 +1129,7 @@ int main(void)
         memset(h, 0, sizeof(*h));
         config.airplay_tunnel = tunnel != 0;
         config.on_device_time = capture_device_time;
+        config.on_now_playing_details = tunnel ? capture_media_details : NULL;
         session = iap2_session_create(&config);
         assert(session != NULL);
         handshake(session);
@@ -1112,6 +1146,27 @@ int main(void)
         for (size_t offset = 0; offset + 1U < received_len; offset += 2U)
             advertises_time |= (received[offset] == 0x4e && received[offset + 1U] == 0x0b);
         assert(advertises_time == (tunnel != 0));
+        if (tunnel)
+        {
+            feed_peer_csm(session, 0x1d02, NULL, 0, 20);
+            drain_tx(session, 21);
+            feed_peer_csm(session, 0xaa00, NULL, 0, 30);
+            drain_tx(session, 31);
+            feed_peer_csm(session, 0xaa02, challenge_body, sizeof(challenge_body), 40);
+            drain_tx(session, 41);
+            feed_peer_csm(session, 0xaa05, NULL, 0, 50);
+            drain_tx(session, 51);
+            assert(iap2_session_is_authenticated(session));
+
+            feed_artwork(session, 52, true);
+            assert(h->artwork_accepts == 1U && h->artwork_successes == 1U && h->artwork_updates == 0U);
+            const uint8_t media[] = { 0, 17, 0, 0, 0, 8, 0, 4, 0, 2, 0xbf, 0x20,
+                                      0, 5, 0, 26, 9, 0, 12, 0, 1, 0, 8, 0, 1, 0, 0, 0, 0 };
+            feed_peer_csm(session, 0x5001, media, sizeof(media), 55);
+            assert(h->artwork_updates == 1U && h->media_details == 1U);
+            iap2_session_link_down(session);
+            assert(h->media_invalidations == 1U);
+        }
         iap2_session_destroy(session);
     }
 

@@ -60,7 +60,7 @@ Owner 可用 `rtcp_receiver_send_touch()` 发送完整的触点快照，或用 `
 
 通过 `rtcp_receiver_set_now_playing_callback()` 接收增量 `rtcp_now_playing_t`。回调返回前复制非空曲名、艺人和专辑字符串，仅在 `has_playing` 已设置时更新播放状态。可选的 `rtcp_receiver_set_now_playing_details_callback()` 增加以毫秒计的时长和进度，以及借用的内联封面。整个会话退役时，`invalidated` 标志通知宿主清除累计快照。仅使用旧回调的宿主应根据会话状态清除快照。参见[能力矩阵](classic-capability-audit.md)。
 
-自行管理 iAP2 会话的宿主可注册 `iap2_session_config_t.on_now_playing` 和 `on_now_playing_details` 接收 `0x5001`。回调在身份识别及 MFi 验证后调用。空字符串会清除字段。扩展 iAP2 回调提供封面传输 ID，并在链路退役时发出失效通知。封面文件会话的组装由宿主管理。Luban-Lite 无线 DataStream 隧道与 AirPlay 共用 Owner，日志记录字段是否存在。
+自行管理 iAP2 会话的宿主可注册 `iap2_session_config_t.on_now_playing` 和 `on_now_playing_details` 接收 `0x5001`。回调在身份识别及 MFi 验证后调用。空字符串会清除文本字段。有线 iAP2 和无线 AirPlay iAP2 隧道每个会话可组装一个不超过 192 KiB 的封面传输。传输 ID 与正在播放的信息匹配后，扩展回调交付完整编码字节。ID 变化时清除旧封面，链路退役时通知元数据失效。宿主如需保留数据，应在回调返回前复制，并自行决定可显示的编码格式。中途停止的传输在 10 秒后过期。
 
 宿主可设置 `iap2_session_config_t.on_device_time`，在有线 USB 或无线 AirPlay DataStream 隧道接收 `DeviceTimeUpdate`（`0x4E0B`）。会话在 `MessagesReceivedFromDevice` 中声明该通知，iPhone 主动推送，无需订阅命令。完成身份识别与 MFi 验证后，回调收到仅在调用期间有效的 `rtcp_device_time_t` 增量，字段为 UTC Unix 秒、时区基础偏移和夏令时偏移，两种偏移均以分钟计。存在标志用于区分缺省字段和零值。宿主负责系统时间及 RTC 策略，AirPlay 媒体时钟沿用原有机制。参考 [LIVI 的消息结构](https://github.com/f-io/LIVI/blob/main/native/crates/iap2-csm/src/messages/device_notifications.rs)和 [OCBM 的解码实现](https://github.com/lvalen91/ocbm/blob/main/crates/vendor/iap2-core/src/metadata.rs)。
 

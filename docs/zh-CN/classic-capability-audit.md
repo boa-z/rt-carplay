@@ -12,7 +12,7 @@
 | 显示几何 | 初始几何、视口适配和坐标映射为 **Implemented、Host Tested**。D213 边缘对齐为 **Hardware Pending**。运行时视区选择与编码分辨率重协商是两个不同的协议问题，后者仍待确认。 |
 | 定位和车速 | **Implemented、Host Tested、Hardware Pending。** 可选 GGA/RMC 和 `$PASCD` 根据手机选择器发送，在取消订阅或复位时停止。Luban-Lite 支持无线虚拟 GNSS 和车速注入。有线输入需宿主提供数据源。请求间隔字段和其他传感器仍待确认。 |
 | 手机状态和设备时间 | **Implemented、Host Tested、Hardware Pending。** iAP2 提供电量和电源、蜂窝网络、通话状态及 `DeviceTimeUpdate` 增量。RTC 适配器在链路断开时作废待应用时间。D213 可选诊断会输出状态类别。 |
-| Now Playing | **Implemented、Host Tested、Hardware Pending。** 保留原有文本和播放状态。扩展回调提供时长、进度、AirPlay 内联封面和 iAP2 封面传输 ID。iAP2 封面文件会话组装仍待实现。 |
+| Now Playing | **Implemented、Host Tested、Hardware Pending。** 保留原有文本和播放状态。扩展回调提供时长、进度、AirPlay 内联封面，以及通过 USB 和无线 iAP2 隧道组装的文件传输封面。 |
 | 路线引导 | **Implemented、Host Tested、Hardware Pending。** `0x5201`、`0x5202` 和 `0x5204` 提供路线增量、有序索引、转向描述和有界车道角度。路线结束或断线时清理缓存。D213 可选诊断会输出字段存在标志、索引和计数。 |
 | Classic 之外的 Vehicle State 和 UI Sync | **Experimental、Host Tested、Hardware Pending。** Host 测试覆盖有界通道及数据模型。完整 Ultra 渲染和验收不在本轮范围内。 |
 

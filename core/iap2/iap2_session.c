@@ -54,6 +54,8 @@
 #define IAP2_METADATA_TEXT_MAX              128U
 #define IAP2_MANEUVER_LIST_MAX              64U
 #define IAP2_LANES_PER_GUIDANCE_MAX         16U
+#define IAP2_ARTWORK_MAX_BYTES              (192U * 1024U)
+#define IAP2_ARTWORK_TIMEOUT_MS             10000U
 
 struct iap2_session
 {
@@ -90,6 +92,11 @@ struct iap2_session
     bool now_playing_reported;
     bool route_reported;
     bool device_time_reported;
+    uint8_t *artwork;
+    size_t artwork_size, artwork_received;
+    uint64_t artwork_activity_ms;
+    uint8_t artwork_id, track_artwork_id;
+    bool artwork_complete, track_has_artwork_id;
 };
 
 static bool session_is_wired(const iap2_session_t *session)
@@ -132,8 +139,18 @@ static bool send_csm(iap2_session_t *session,
     return queued;
 }
 
+static void clear_artwork(iap2_session_t *session)
+{
+    free(session->artwork);
+    session->artwork = NULL;
+    session->artwork_size = session->artwork_received = 0;
+    session->artwork_complete = false;
+}
+
 static void invalidate_metadata(iap2_session_t *session)
 {
+    clear_artwork(session);
+    session->track_has_artwork_id = false;
     if (session->device_time_reported)
     {
         session->device_time_reported = false;
@@ -601,6 +618,92 @@ static void handle_device_time(iap2_session_t *session, const uint8_t *body, siz
 static bool metadata_byte(const uint8_t *body, size_t body_len, uint16_t id, uint8_t *out);
 static bool metadata_uint(const uint8_t *body, size_t body_len, uint16_t id, size_t width, uint32_t *out);
 
+static bool attach_artwork(iap2_session_t *session, rtcp_now_playing_details_t *details)
+{
+    if (!session->artwork_complete || !session->track_has_artwork_id ||
+        session->track_artwork_id != session->artwork_id)
+        return false;
+    details->has_artwork = details->has_artwork_transfer_id = true;
+    details->artwork_transfer_id = session->artwork_id;
+    details->artwork = session->artwork;
+    details->artwork_length = session->artwork_size;
+    return true;
+}
+
+/* Classic File Transfer session 2. Setup declares a big-endian 64-bit size.
+ * The phone waits for Accept, then marks the first and last data fragments. */
+static void core_file(const uint8_t *payload, size_t length, void *context)
+{
+    iap2_session_t *session = context;
+    if (length < 2U || !metadata_ready(session))
+        return;
+    if (session->artwork && session->now_ms - session->artwork_activity_ms >= IAP2_ARTWORK_TIMEOUT_MS)
+        clear_artwork(session);
+    uint8_t id = payload[0];
+    uint8_t flags = payload[1];
+    unsigned kind = flags & 0x0fU;
+    if (kind == 4U)
+    {
+        if (length < 10U)
+            return;
+        uint64_t size = 0;
+        for (size_t offset = 2; offset < 10; ++offset)
+            size = (size << 8) | payload[offset];
+        if (size == 0 || size > IAP2_ARTWORK_MAX_BYTES)
+            return;
+        clear_artwork(session);
+        session->artwork = malloc((size_t)size);
+        if (!session->artwork)
+            return;
+        session->artwork_id = id;
+        session->artwork_size = (size_t)size;
+        session->artwork_activity_ms = session->now_ms;
+        if (!iap2_core_send_file_reply(session->core, id, 1, session->now_ms))
+            clear_artwork(session);
+        return;
+    }
+    if (!session->artwork || id != session->artwork_id)
+        return;
+    if (kind == 2U)
+    {
+        clear_artwork(session);
+        return;
+    }
+    if (kind != 0U || session->artwork_complete)
+        return;
+    size_t fragment = length - 2U;
+    bool first = (flags & 0x80U) != 0;
+    bool last = (flags & 0x40U) != 0;
+    if (!fragment || first != (session->artwork_received == 0) ||
+        fragment > session->artwork_size - session->artwork_received ||
+        last != (fragment == session->artwork_size - session->artwork_received))
+    {
+        clear_artwork(session);
+        return;
+    }
+    memcpy(session->artwork + session->artwork_received, payload + 2U, fragment);
+    session->artwork_received += fragment;
+    session->artwork_activity_ms = session->now_ms;
+    if (last)
+    {
+        if (!iap2_core_send_file_reply(session->core, id, 5, session->now_ms))
+        {
+            clear_artwork(session);
+            return;
+        }
+        session->artwork_complete = true;
+        RTCP_LOGI("iap2", "artwork complete id=%u bytes=%u", (unsigned)id,
+                  (unsigned)session->artwork_size);
+        rtcp_now_playing_details_t details = { 0 };
+        if (attach_artwork(session, &details))
+        {
+            session->now_playing_reported = true;
+            session->config.on_now_playing_details(&details, session->config.context);
+            clear_artwork(session);
+        }
+    }
+}
+
 static void handle_now_playing(iap2_session_t *session, const uint8_t *body, size_t body_len)
 {
     if ((!session->config.on_now_playing && !session->config.on_now_playing_details) ||
@@ -638,8 +741,18 @@ static void handle_now_playing(iap2_session_t *session, const uint8_t *body, siz
     if (session->config.on_now_playing_details &&
         (usable || details.has_duration || details.has_elapsed || details.has_artwork_transfer_id))
     {
+        if (details.has_artwork_transfer_id)
+        {
+            if (session->track_has_artwork_id && session->track_artwork_id != details.artwork_transfer_id)
+                details.has_artwork = true; /* Clear the old cover while awaiting the new transfer. */
+            session->track_artwork_id = details.artwork_transfer_id;
+            session->track_has_artwork_id = true;
+        }
+        bool completed = attach_artwork(session, &details);
         session->now_playing_reported = true;
         session->config.on_now_playing_details(&details, session->config.context);
+        if (completed)
+            clear_artwork(session);
     }
     if (session->now_playing_traces < 16U && (usable || !session->now_playing_empty_traced))
     {
@@ -1188,6 +1301,8 @@ iap2_session_t *iap2_session_create(const iap2_session_config_t *config)
     }
     if (config->airplay_tunnel)
         iap2_core_set_tcp_transport(session->core);
+    if (config->on_now_playing_details && (config->airplay_tunnel || session_is_wired(session)))
+        iap2_core_set_file_handler(session->core, core_file);
     return session;
 }
 
@@ -1195,6 +1310,7 @@ void iap2_session_destroy(iap2_session_t *session)
 {
     if (session == NULL)
         return;
+    clear_artwork(session);
     iap2_core_destroy(session->core);
     free(session);
 }
@@ -1240,6 +1356,8 @@ void iap2_session_advance(iap2_session_t *session, uint64_t now_ms)
     if (session == NULL || !session->link_up)
         return;
     session->now_ms = now_ms;
+    if (session->artwork && now_ms - session->artwork_activity_ms >= IAP2_ARTWORK_TIMEOUT_MS)
+        clear_artwork(session);
     iap2_core_advance_time(session->core, now_ms);
     /* An availability message can precede the host's valid IPv6 address or
      * MFi completion. Retain this one invitation until prerequisites are

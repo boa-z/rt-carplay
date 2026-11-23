@@ -102,7 +102,8 @@ typedef struct
 typedef void (*rtcp_now_playing_cb_t)(const rtcp_now_playing_t *, void *context);
 
 /** Classic playback metadata delta. Times are milliseconds. The transfer
- * ID is iAP2 metadata. Inline artwork comes from the AirPlay command.
+ * ID is iAP2 metadata. Artwork may come from an AirPlay command or a
+ * completed iAP2 file transfer matching the current Now Playing ID.
  * Text and artwork are borrowed until callback return. An absent field
  * preserves its previous value. Present artwork of length zero clears it. */
 typedef struct

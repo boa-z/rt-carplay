@@ -31,6 +31,7 @@
 #define IAP2_MAX_CSM_FRAME_BYTES              2048U
 #define IAP2_MAX_CSM_BODY_BYTES               (IAP2_MAX_CSM_FRAME_BYTES - 6U)
 #define IAP2_CONTROL_SESSION_ID               10U
+#define IAP2_FILE_SESSION_ID                  2U
 #define IAP2_INITIAL_SEQUENCE                 99U
 #define IAP2_CONTROL_SYNCHRONIZE              0x80U
 #define IAP2_CONTROL_ACKNOWLEDGEMENT          0x40U
@@ -50,6 +51,7 @@ static const uint8_t IAP2_MARKER[] = { 0xff, 0x55, 0x02, 0x00, 0xee, 0x10 };
 
 typedef struct
 {
+    bool file_reply;
     uint16_t message_id;
     uint16_t body_len;
     iap2_core_csm_acked_cb_t acked_callback;
@@ -62,6 +64,7 @@ struct iap2_core
     iap2_core_tx_cb_t tx_cb;
     iap2_core_message_cb_t message_cb;
     iap2_core_state_cb_t state_cb;
+    iap2_core_file_cb_t file_cb;
     void *context;
     iap2_core_state_t state;
     uint8_t rx[IAP2_MAX_LINK_FRAME_BYTES];
@@ -255,6 +258,11 @@ static bool send_sync(iap2_core_t *core)
     {
         memset(payload + 4, 0, 6);
         payload[12] = 2; /* control session version */
+    }
+    if (core->file_cb)
+    {
+        payload[16] = IAP2_FILE_SESSION_ID;
+        payload[18] = 1; /* Classic file transfer version */
     }
     write_be16(payload + 2, IAP2_MAX_LINK_FRAME_BYTES);
     return send_link_frame(core, payload, sizeof(payload), IAP2_CONTROL_SYNCHRONIZE,
@@ -469,6 +477,10 @@ static void handle_frame(iap2_core_t *core,
             if (session_id == IAP2_CONTROL_SESSION_ID)
             {
                 csm_consume(core, payload, payload_len);
+            }
+            else if (session_id == IAP2_FILE_SESSION_ID && core->file_cb)
+            {
+                core->file_cb(payload, payload_len, core->context);
             }
             else
             {
@@ -703,6 +715,68 @@ void iap2_core_advance_time(iap2_core_t *core, uint64_t now_ms)
     }
 }
 
+static bool send_session_payload(iap2_core_t *core, uint8_t session_id,
+                                 const uint8_t *payload, size_t length,
+                                 uint16_t message_id, iap2_core_csm_acked_cb_t acked_callback,
+                                 void *acked_context, uint64_t now_ms)
+{
+    size_t peer_limit = core->peer_max_length - IAP2_LINK_HEADER_BYTES - 1U;
+    if (length > peer_limit || length + IAP2_LINK_HEADER_BYTES + 1U > sizeof(core->retransmit))
+        return false;
+    core->sent_sequence = (uint8_t)(core->sent_sequence + 1U);
+    size_t link_len = 0;
+    if (!write_link_frame(core, payload, length, IAP2_CONTROL_ACKNOWLEDGEMENT,
+                          core->sent_sequence, session_id,
+                          core->retransmit, sizeof(core->retransmit), &link_len))
+        return false;
+    if (!transmit(core, core->retransmit, link_len))
+    {
+        fail(core, "session_send_failed");
+        return false;
+    }
+    if (core->peer_no_retransmissions)
+    {
+        /* TCP already owns reliability in the negotiated zero-ACK mode. */
+        if (acked_callback)
+            acked_callback(message_id, acked_context);
+        return true;
+    }
+    core->retransmit_len = link_len;
+    core->waiting_sequence = core->sent_sequence;
+    core->waiting_message_id = message_id;
+    core->waiting_acked_callback = acked_callback;
+    core->waiting_acked_context = acked_context;
+    core->waiting_ack = true;
+    core->retries = 0;
+    core->tx_deadline_ms = now_ms + IAP2_RETRANSMIT_MS;
+    return true;
+}
+
+void iap2_core_set_file_handler(iap2_core_t *core, iap2_core_file_cb_t callback)
+{
+    if (core && core->state == IAP2_CORE_IDLE)
+        core->file_cb = callback;
+}
+
+bool iap2_core_send_file_reply(iap2_core_t *core, uint8_t transfer_id,
+                               uint8_t status, uint64_t now_ms)
+{
+    if (!core || core->state != IAP2_CORE_READY || !core->file_cb)
+        return false;
+    const uint8_t payload[] = { transfer_id, status };
+    if (!core->waiting_ack)
+        return send_session_payload(core, IAP2_FILE_SESSION_ID, payload, sizeof(payload),
+                                    0, NULL, NULL, now_ms);
+    if (core->pending_count >= IAP2_PENDING_CSM_DEPTH)
+        return false;
+    size_t tail = (core->pending_head + core->pending_count) % IAP2_PENDING_CSM_DEPTH;
+    pending_csm_t *pending = &core->pending[tail];
+    pending->file_reply = true;
+    memcpy(pending->body, payload, sizeof(payload));
+    ++core->pending_count;
+    return true;
+}
+
 bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
                                           uint16_t message_id,
                                           const uint8_t *body,
@@ -725,6 +799,7 @@ bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
         }
         size_t tail = (core->pending_head + core->pending_count) % IAP2_PENDING_CSM_DEPTH;
         pending_csm_t *pending = &core->pending[tail];
+        pending->file_reply = false;
         pending->message_id = message_id;
         pending->body_len = (uint16_t)body_len;
         pending->acked_callback = acked_callback;
@@ -737,11 +812,6 @@ bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
         return true;
     }
     size_t csm_len = body_len + 6U;
-    size_t peer_payload_limit = core->peer_max_length - IAP2_LINK_HEADER_BYTES - 1U;
-    if (csm_len > peer_payload_limit || csm_len + IAP2_LINK_HEADER_BYTES + 1U > sizeof(core->retransmit))
-    {
-        return false;
-    }
     uint8_t csm[IAP2_MAX_CSM_FRAME_BYTES];
     csm[0] = 0x40;
     csm[1] = 0x40;
@@ -751,38 +821,8 @@ bool iap2_core_send_csm_with_ack_callback(iap2_core_t *core,
     {
         memcpy(csm + 6, body, body_len);
     }
-    core->sent_sequence = (uint8_t)(core->sent_sequence + 1U);
-    size_t link_len = 0;
-    if (!write_link_frame(core, csm, csm_len, IAP2_CONTROL_ACKNOWLEDGEMENT,
-                          core->sent_sequence, IAP2_CONTROL_SESSION_ID,
-                          core->retransmit, sizeof(core->retransmit), &link_len))
-    {
-        return false;
-    }
-    if (!transmit(core, core->retransmit, link_len))
-    {
-        fail(core, "csm_send_failed");
-        return false;
-    }
-    if (core->peer_no_retransmissions)
-    {
-        /* Reliable TCP already owns retransmission. There will be no link ACK
-         * in this negotiated mode; completion means transport accepted. */
-        if (acked_callback)
-            acked_callback(message_id, acked_context);
-        return true;
-    }
-    core->retransmit_len = link_len;
-    core->waiting_sequence = core->sent_sequence;
-    core->waiting_message_id = message_id;
-    core->waiting_acked_callback = acked_callback;
-    core->waiting_acked_context = acked_context;
-    core->waiting_ack = true;
-    core->retries = 0;
-    core->tx_deadline_ms = now_ms + IAP2_RETRANSMIT_MS;
-    ESP_LOGD(TAG, "csm_tx id=0x%04x bytes=%u sequence=%u",
-             message_id, (unsigned)body_len, core->sent_sequence);
-    return true;
+    return send_session_payload(core, IAP2_CONTROL_SESSION_ID, csm, csm_len,
+                                message_id, acked_callback, acked_context, now_ms);
 }
 
 bool iap2_core_send_csm(iap2_core_t *core,
@@ -805,6 +845,8 @@ static bool send_pending_csm(iap2_core_t *core, uint64_t now_ms)
     pending_csm_t pending = core->pending[core->pending_head];
     core->pending_head = (core->pending_head + 1U) % IAP2_PENDING_CSM_DEPTH;
     --core->pending_count;
+    if (pending.file_reply)
+        return iap2_core_send_file_reply(core, pending.body[0], pending.body[1], now_ms);
     return iap2_core_send_csm_with_ack_callback(core, pending.message_id, pending.body,
                                                 pending.body_len, pending.acked_callback,
                                                 pending.acked_context, now_ms);

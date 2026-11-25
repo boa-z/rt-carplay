@@ -14,20 +14,26 @@
 struct fake
 {
     uint8_t status;
-    uint8_t challenge[22];
+    uint8_t challenge[32];
     uint8_t sig[128];
     uint8_t cert[908];
     int fail_sign;
     int zero_status;
+    int auth3;
+    int wrong_sig_len;
+    unsigned writes;
+    unsigned signature_reads;
 };
 
 static int fake_write(void *ctx, uint8_t reg, const uint8_t *data, size_t len)
 {
     struct fake *f = ctx;
+    ++f->writes;
 
-    if (reg == 0x20 && len == 22)
+    if ((!f->auth3 && reg == 0x20 && len == 22) ||
+        (f->auth3 && reg == 0x21 && len == sizeof(f->challenge)))
     {
-        memcpy(f->challenge, data, 22);
+        memcpy(f->challenge, data, len);
         return RTCP_OK;
     }
 
@@ -41,7 +47,7 @@ static int fake_write(void *ctx, uint8_t reg, const uint8_t *data, size_t len)
         {
             f->status = f->zero_status ? 0x00 : 0x10;
             f->sig[0] = 0xA5;
-            f->sig[127] = 0x5A;
+            f->sig[f->auth3 ? 63 : 127] = 0x5A;
         }
         return RTCP_OK;
     }
@@ -73,7 +79,7 @@ static int fake_read(void *ctx, uint8_t reg, uint8_t *data, size_t len,
             return RTCP_EIO;
         data[0] = 0x00;
         data[1] = 0x00;
-        data[2] = 0x02;
+        data[2] = f->auth3 ? 0x03 : 0x02;
         data[3] = 0x00;
         return RTCP_OK;
     case 0x05:
@@ -90,12 +96,13 @@ static int fake_read(void *ctx, uint8_t reg, uint8_t *data, size_t len,
         if (len != 2)
             return RTCP_EIO;
         data[0] = 0x00;
-        data[1] = 0x80;
+        data[1] = f->auth3 && !f->wrong_sig_len ? 0x40 : 0x80;
         return RTCP_OK;
     case 0x12:
-        if (len != sizeof(f->sig))
+        ++f->signature_reads;
+        if (len != (f->auth3 ? 64U : sizeof(f->sig)))
             return RTCP_EIO;
-        memcpy(data, f->sig, sizeof(f->sig));
+        memcpy(data, f->sig, len);
         return RTCP_OK;
     case 0x30:
         if (len != 2)
@@ -185,6 +192,36 @@ int main(void)
     f.fail_sign = 1;
     assert(rtcp_mfi2c_sign(&dev, challenge, sizeof(challenge),
                            sig, sizeof(sig), &sig_len) == RTCP_EIO);
+
+    uint8_t auth3_challenge[32];
+    for (i = 0; i < sizeof(auth3_challenge); i++)
+        auth3_challenge[i] = (uint8_t)(0x20 + i);
+    f.auth3 = 1;
+    f.fail_sign = 0;
+    assert(rtcp_mfi2c_probe(&dev, &info) == RTCP_OK);
+    assert(info.id32 == 0x00000300);
+
+    f.writes = 0;
+    assert(rtcp_mfi2c_sign(&dev, challenge, sizeof(challenge),
+                           sig, sizeof(sig), &sig_len) == RTCP_EINVAL);
+    assert(rtcp_mfi2c_sign(&dev, auth3_challenge, sizeof(auth3_challenge),
+                           sig, 63, &sig_len) == RTCP_EINVAL);
+    assert(f.writes == 0 && sig_len == 0);
+    assert(rtcp_mfi2c_sign(&dev, auth3_challenge, sizeof(auth3_challenge),
+                           sig, sizeof(sig), &sig_len) == RTCP_OK);
+    assert(f.writes == 2);
+    assert(memcmp(f.challenge, auth3_challenge, sizeof(auth3_challenge)) == 0);
+    assert(sig_len == 64 && sig[0] == 0xA5 && sig[63] == 0x5A);
+
+    f.signature_reads = 0;
+    f.zero_status = 1;
+    assert(rtcp_mfi2c_sign(&dev, auth3_challenge, sizeof(auth3_challenge),
+                           sig, sizeof(sig), &sig_len) == RTCP_ETIMEDOUT);
+    f.zero_status = 0;
+    f.wrong_sig_len = 1;
+    assert(rtcp_mfi2c_sign(&dev, auth3_challenge, sizeof(auth3_challenge),
+                           sig, sizeof(sig), &sig_len) == RTCP_ETIMEDOUT);
+    assert(f.signature_reads == 0 && sig_len == 0);
 
     puts("test_mfi2c: OK");
     return 0;

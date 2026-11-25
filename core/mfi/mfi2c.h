@@ -33,6 +33,7 @@ typedef struct rtcp_mfi2c
     const struct rtcp_mfi2c_bus *bus;
     void *ctx;
     uint8_t addr;
+    uint8_t auth_major;
 } rtcp_mfi2c_t;
 
 void rtcp_mfi2c_init(rtcp_mfi2c_t *dev, const struct rtcp_mfi2c_bus *bus,

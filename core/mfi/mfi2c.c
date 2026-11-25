@@ -1,5 +1,5 @@
 /*
- * Apple MFi 2.0C register engine.
+ * Apple MFi 2.0C and Auth 3.0 register engine.
  *
  * This is the portable half of the Luban-Lite PoC: it contains no RT-Thread,
  * I2C-device, or shell code.  All bus access goes through rtcp_mfi2c_bus.
@@ -39,7 +39,8 @@
 #define MFI_REG_STATUS       0x10
 #define MFI_REG_SIG_LEN      0x11
 #define MFI_REG_SIG          0x12
-#define MFI_REG_CHALLENGE    0x20
+#define MFI_REG_CHALLENGE_LEN 0x20
+#define MFI_REG_CHALLENGE    0x21
 #define MFI_REG_CERT_LEN     0x30
 #define MFI_REG_CERT         0x31
 #define MFI_REG_VENDOR_PROBE 0x4E
@@ -51,8 +52,9 @@
 #define MFI_REG_RETRIES  3
 #define MFI_REG_DELAY_MS 50
 
-#define MFI_ID_2C    0x00000200u
 #define MFI_ID_AUTH3 0x00000300u
+#define MFI_AUTH3_CHALLENGE_LEN 32U
+#define MFI_AUTH3_SIG_LEN 64U
 
 #define MFI_STATUS_SUCCESS 0x10
 #define MFI_STATUS_ERROR   0x80
@@ -105,6 +107,7 @@ void rtcp_mfi2c_init(rtcp_mfi2c_t *dev, const struct rtcp_mfi2c_bus *bus,
     dev->bus = bus;
     dev->ctx = ctx;
     dev->addr = addr ? addr : RTCP_MFI2C_ADDR_DEFAULT;
+    dev->auth_major = 2U;
 }
 
 int rtcp_mfi2c_probe(rtcp_mfi2c_t *dev, struct rtcp_mfi_info *info)
@@ -139,6 +142,7 @@ int rtcp_mfi2c_probe(rtcp_mfi2c_t *dev, struct rtcp_mfi_info *info)
     {
         info->id32 = ((uint32_t)id4[0] << 24) | ((uint32_t)id4[1] << 16) |
                      ((uint32_t)id4[2] << 8) | (uint32_t)id4[3];
+        dev->auth_major = info->id32 == MFI_ID_AUTH3 ? 3U : 2U;
         present = 1;
     }
 
@@ -167,18 +171,31 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
 
     if (dev == NULL || challenge == NULL || sig == NULL || sig_len == NULL)
         return RTCP_EINVAL;
-    if (len != RTCP_MFI_CHALLENGE_LEN)
+    *sig_len = 0;
+    const int auth3 = dev->auth_major == 3U;
+    const size_t expected = auth3 ? MFI_AUTH3_CHALLENGE_LEN : RTCP_MFI_CHALLENGE_LEN;
+    if (len != expected || (auth3 && sig_cap < MFI_AUTH3_SIG_LEN))
     {
-        RTCP_LOGE(TAG, "sign=challenge_length_unsupported len=%u expected=%u",
-                  (unsigned)len, (unsigned)RTCP_MFI_CHALLENGE_LEN);
+        RTCP_LOGE(TAG, "sign=invalid_input auth=%u len=%u expected=%u capacity=%u",
+                  (unsigned)dev->auth_major, (unsigned)len, (unsigned)expected,
+                  (unsigned)sig_cap);
         return RTCP_EINVAL;
     }
 
-    buf[0] = 0x00;
-    buf[1] = (uint8_t)RTCP_MFI_CHALLENGE_LEN;
-    memcpy(&buf[2], challenge, len);
+    int result;
+    if (auth3)
+    {
+        result = mfi_write(dev, MFI_REG_CHALLENGE, challenge, len);
+    }
+    else
+    {
+        buf[0] = 0x00;
+        buf[1] = RTCP_MFI_CHALLENGE_LEN;
+        memcpy(&buf[2], challenge, len);
+        result = mfi_write(dev, MFI_REG_CHALLENGE_LEN, buf, sizeof(buf));
+    }
 
-    if (mfi_write(dev, MFI_REG_CHALLENGE, buf, sizeof(buf)) != RTCP_OK)
+    if (result != RTCP_OK)
     {
         RTCP_LOGE(TAG, "sign=challenge_write_failed");
         return RTCP_EIO;
@@ -202,21 +219,22 @@ int rtcp_mfi2c_sign(rtcp_mfi2c_t *dev, const uint8_t *challenge, size_t len,
          * the read return the previous register window.
          */
         status = 0;
-        if (mfi_read(dev, MFI_REG_STATUS, &status, 1, 1,
-                     MFI_VENDOR_DELAY_MS) == RTCP_OK &&
-            (status & MFI_STATUS_ERROR))
+        result = mfi_read(dev, MFI_REG_STATUS, &status, 1, 1, MFI_VENDOR_DELAY_MS);
+        if (result == RTCP_OK && (status & MFI_STATUS_ERROR))
         {
             RTCP_LOGE(TAG, "sign=status_error status=0x%02x poll=%d",
                       (unsigned)status, i);
             return RTCP_EIO;
         }
+        if (auth3 && (result != RTCP_OK || status != MFI_STATUS_SUCCESS))
+            continue;
 
         n = 0;
         if (mfi_read(dev, MFI_REG_SIG_LEN, slen, sizeof(slen), 1,
                      MFI_VENDOR_DELAY_MS) == RTCP_OK)
         {
             n = ((size_t)slen[0] << 8) | slen[1];
-            if (n >= MFI_SIG_MIN_LEN && n <= sig_cap)
+            if ((auth3 ? n == MFI_AUTH3_SIG_LEN : n >= MFI_SIG_MIN_LEN) && n <= sig_cap)
             {
                 if (mfi_read(dev, MFI_REG_SIG, sig, n, MFI_REG_RETRIES,
                              MFI_VENDOR_DELAY_MS) == RTCP_OK)

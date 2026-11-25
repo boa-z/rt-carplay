@@ -34,16 +34,16 @@
 
 #define TAG "mfi2c"
 
-#define MFI_REG_DEVICE_ID    0x04
-#define MFI_REG_ERROR        0x05
-#define MFI_REG_STATUS       0x10
-#define MFI_REG_SIG_LEN      0x11
-#define MFI_REG_SIG          0x12
+#define MFI_REG_DEVICE_ID     0x04
+#define MFI_REG_ERROR         0x05
+#define MFI_REG_STATUS        0x10
+#define MFI_REG_SIG_LEN       0x11
+#define MFI_REG_SIG           0x12
 #define MFI_REG_CHALLENGE_LEN 0x20
-#define MFI_REG_CHALLENGE    0x21
-#define MFI_REG_CERT_LEN     0x30
-#define MFI_REG_CERT         0x31
-#define MFI_REG_VENDOR_PROBE 0x4E
+#define MFI_REG_CHALLENGE     0x21
+#define MFI_REG_CERT_LEN      0x30
+#define MFI_REG_CERT          0x31
+#define MFI_REG_VENDOR_PROBE  0x4E
 
 #define MFI_VENDOR_PROBE_LEN 31
 #define MFI_VENDOR_RETRIES   10
@@ -52,9 +52,9 @@
 #define MFI_REG_RETRIES  3
 #define MFI_REG_DELAY_MS 50
 
-#define MFI_ID_AUTH3 0x00000300u
+#define MFI_ID_AUTH3            0x00000300u
 #define MFI_AUTH3_CHALLENGE_LEN 32U
-#define MFI_AUTH3_SIG_LEN 64U
+#define MFI_AUTH3_SIG_LEN       64U
 
 #define MFI_STATUS_SUCCESS 0x10
 #define MFI_STATUS_ERROR   0x80

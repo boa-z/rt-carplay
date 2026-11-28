@@ -25,7 +25,7 @@ static int bound_socket(uint8_t family, uint16_t port, int type, bool reuse,
         return RTCP_EIO;
 
     if (interface && setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, interface,
-                               (socklen_t)(strlen(interface) + 1)) != 0)
+                                (socklen_t)(strlen(interface) + 1)) != 0)
     {
         close(fd);
         return RTCP_EIO;

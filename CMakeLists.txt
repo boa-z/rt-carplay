@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(RTCP_AUDIO_CODECS "Build fixed point AAC-LC and Opus" ON)
 option(RTCP_MFI_SOFTWARE "Build the provisioned classic MFi software backend" ON)
+option(RTCP_LOG_PAIRING "Log AirPlay pairing and MFiSAP outcomes" OFF)
 option(RTCP_BUILD_TESTS "Build host-side unit tests" ON)
 option(RTCP_BUILD_SIMULATOR "Build the Linux protocol simulator" ${RTCP_BUILD_TESTS})
 option(RTCP_SANITIZE "Enable host address/undefined sanitizers" OFF)
@@ -80,6 +81,10 @@ target_include_directories(rtcp_core PUBLIC
 
 set_source_files_properties(${RTCP_ED25519_SOURCES} PROPERTIES COMPILE_OPTIONS "-fno-sanitize=undefined;-fwrapv")
 target_compile_definitions(rtcp_core PRIVATE ED25519_NO_SEED)
+if(RTCP_LOG_PAIRING)
+    set_source_files_properties(core/airplay/airplay_rtsp_pairing.c core/airplay/airplay_mfi_sap.c
+        PROPERTIES COMPILE_DEFINITIONS RTCP_LOG_ENABLE)
+endif()
 if(RTCP_MFI_SOFTWARE)
     target_compile_definitions(rtcp_core PRIVATE RTCP_MFI_SOFTWARE)
 endif()

@@ -31,6 +31,7 @@
 #include "rtcp/stream.h"
 
 #define RTCP_LOCKDOWN_SESSION_ERROR_MAX 40U
+#define RTCP_LOCKDOWN_TIMING            1
 
 typedef enum
 {
@@ -79,9 +80,12 @@ typedef struct
      * retry delay). */
     uint32_t pair_attempts;
 
-    /* Optional monotonic clock for key-generation diagnostics (wrap-safe for
+    /* Optional monotonic clock for diagnostics (wrap-safe for
      * intervals below 2^32 ms). NULL leaves timing unavailable. */
     uint32_t (*now_ms)(void);
+    void (*report_timing)(void *user, const char *stage, uint32_t elapsed_ms, int result);
+    /* Optional transfer of ownership of one unused RSA key set. */
+    rtcp_pair_keys_t *(*take_keys)(void *user);
 } rtcp_lockdown_session_config_t;
 
 typedef struct

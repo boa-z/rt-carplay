@@ -3,9 +3,9 @@
 #include "rtcp_linux.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <sys/random.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -41,25 +41,20 @@ static bool random_bytes(uint8_t *output, size_t len)
 {
     if (output == NULL && len != 0U)
         return false;
-    int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
-        return false;
     size_t offset = 0U;
     while (offset < len)
     {
-        ssize_t got = read(fd, output + offset, len - offset);
+        ssize_t got = getrandom(output + offset, len - offset, GRND_NONBLOCK);
         if (got < 0)
         {
             if (errno == EINTR)
                 continue;
-            close(fd);
             return false;
         }
         if (got == 0)
             break;
         offset += (size_t)got;
     }
-    close(fd);
     return offset == len;
 }
 

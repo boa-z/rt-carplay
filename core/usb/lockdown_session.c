@@ -27,6 +27,17 @@ static uint32_t step_timeout(const rtcp_lockdown_session_t *session)
                : DEFAULT_STEP_TIMEOUT_MS;
 }
 
+static uint32_t now(const rtcp_lockdown_session_config_t *config)
+{
+    return config->report_timing && config->now_ms ? config->now_ms() : 0;
+}
+
+static void report(const rtcp_lockdown_session_config_t *config, const char *stage, uint32_t start, int result)
+{
+    if (config->now_ms && config->report_timing)
+        config->report_timing(config->connection_user, stage, now(config) - start, result);
+}
+
 static uint8_t *reply_buffer(rtcp_lockdown_session_t *session)
 {
     return session->scratch;
@@ -54,12 +65,14 @@ static int exchange(rtcp_lockdown_session_t *session,
     *reply_length = 0U;
     RTCP_LOGI("lockdown", "request=%s bytes=%u timeout=%u", operation,
               (unsigned)request_length, (unsigned)step_timeout(session));
+    uint32_t start = now(&session->config);
     int ret = rtcp_lockdown_exchange(stream, request, request_length,
                                      reply_buffer(session),
                                      RTCP_LOCKDOWN_FRAME_MAX, reply_length,
                                      step_timeout(session));
     session->last_reply_length = *reply_length;
     session->last_exchange_result = ret;
+    report(&session->config, operation, start, ret);
     RTCP_LOGI("lockdown", "reply=%s ret=%d bytes=%u", operation, ret,
               (unsigned)*reply_length);
     return ret;
@@ -181,10 +194,12 @@ static int pair_attempt(rtcp_lockdown_session_t *session,
         session->operation = "GeneratePairRecord";
         RTCP_LOGI("lockdown", "generating pair record");
         uint32_t generation_start = config->now_ms ? config->now_ms() : 0U;
-        ret = rtcp_pair_record_generate(record, device_key, device_key_length,
-                                        wifi_address, config->host_id,
-                                        config->system_buid, config->rng,
-                                        config->rng_context);
+        rtcp_pair_keys_t *keys = config->take_keys ? config->take_keys(config->connection_user) : NULL;
+        const rtcp_pair_profile_t profile = { config->now_ms, config->report_timing, config->connection_user };
+        ret = rtcp_pair_record_generate_profiled(record, device_key, device_key_length,
+                                                 wifi_address, config->host_id, config->system_buid,
+                                                 config->rng, config->rng_context, keys, &profile);
+        report(config, session->operation, generation_start, ret);
         RTCP_LOGI("lockdown", "pair record generation ret=%d", ret);
         if (config->now_ms)
         {
@@ -314,9 +329,11 @@ static int start_service(rtcp_lockdown_session_t *session)
 
     session->stage = RTCP_LOCKDOWN_STAGE_SESSION_TLS;
     session->operation = "SessionTLS";
+    uint32_t start = now(config);
     ret = rtcp_lockdown_tls_open(&session->control_tls, &session->control_raw,
                                  config->record, config->rng,
                                  config->rng_context, step_timeout(session));
+    report(config, session->operation, start, ret);
     if (ret != RTCP_OK)
     {
         return ret;
@@ -370,10 +387,12 @@ static int start_service(rtcp_lockdown_session_t *session)
     if (session->service_ssl)
     {
         session->operation = "ServiceTLS";
+        start = now(config);
         ret = rtcp_lockdown_tls_open(&session->service_tls,
                                      &session->service_raw, config->record,
                                      config->rng, config->rng_context,
                                      step_timeout(session));
+        report(config, session->operation, start, ret);
         if (ret != RTCP_OK)
         {
             return ret;

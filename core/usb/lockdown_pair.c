@@ -3,9 +3,11 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "mbedtls/bignum.h"
+#include "mbedtls/ctr_drbg.h"
 #include "mbedtls/md.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/rsa.h"
@@ -41,6 +43,23 @@ typedef struct
     rtcp_pair_rng_fn function;
     void *context;
 } rng_bridge_t;
+
+struct rtcp_pair_keys
+{
+    mbedtls_pk_context host;
+    mbedtls_pk_context root;
+};
+
+static uint32_t profile_now(const rtcp_pair_profile_t *profile)
+{
+    return profile && profile->report && profile->now_ms ? profile->now_ms() : 0;
+}
+
+static void profile_report(const rtcp_pair_profile_t *profile, const char *stage, uint32_t start, int result)
+{
+    if (profile && profile->now_ms && profile->report)
+        profile->report(profile->context, stage, profile->now_ms() - start, result);
+}
 
 static void arena_reset(der_arena_t *arena)
 {
@@ -445,7 +464,7 @@ static bool build_certificate(der_arena_t *arena, mbedtls_pk_context *signer,
                               const mbedtls_mpi *subject_modulus,
                               const mbedtls_mpi *subject_exponent,
                               bool is_root, bool include_subject_key_id,
-                              der_node_t *certificate)
+                              der_node_t *certificate, rng_bridge_t *rng)
 {
     arena_reset(arena);
 
@@ -519,7 +538,7 @@ static bool build_certificate(der_arena_t *arena, mbedtls_pk_context *signer,
     uint8_t signature[RSA_KEY_BITS / 8];
     size_t signature_length = 0U;
     if (mbedtls_pk_sign(signer, MBEDTLS_MD_SHA256, digest, sizeof(digest),
-                        signature, &signature_length, NULL, NULL) != 0 ||
+                        signature, &signature_length, rng_bridge, rng) != 0 ||
         signature_length != sizeof(signature))
     {
         return false;
@@ -543,6 +562,64 @@ static int generate_key(mbedtls_pk_context *key, rng_bridge_t *rng)
     }
     return mbedtls_rsa_gen_key(mbedtls_pk_rsa(*key), rng_bridge, rng,
                                RSA_KEY_BITS, RSA_PUBLIC_EXPONENT);
+}
+
+void rtcp_pair_keys_free(rtcp_pair_keys_t *keys)
+{
+    if (keys)
+    {
+        mbedtls_pk_free(&keys->root);
+        mbedtls_pk_free(&keys->host);
+        free(keys);
+    }
+}
+
+int rtcp_pair_keys_generate(rtcp_pair_keys_t **output, rtcp_pair_rng_fn rng, void *rng_context,
+                            const rtcp_pair_profile_t *profile)
+{
+    if (!output || !rng)
+        return RTCP_EINVAL;
+    *output = NULL;
+    rtcp_pair_keys_t *keys = malloc(sizeof(*keys));
+    if (!keys)
+        return RTCP_ENOMEM;
+    mbedtls_pk_init(&keys->host);
+    mbedtls_pk_init(&keys->root);
+    rng_bridge_t entropy = { rng, rng_context };
+    rng_bridge_t random = entropy;
+    int result = 0;
+#if defined(MBEDTLS_CTR_DRBG_C)
+    static const unsigned char purpose[] = "rt-carplay lockdown RSA key generation";
+    mbedtls_ctr_drbg_context drbg;
+    mbedtls_ctr_drbg_init(&drbg);
+    mbedtls_ctr_drbg_set_entropy_len(&drbg, 48);
+    uint32_t seed_start = profile_now(profile);
+    result = mbedtls_ctr_drbg_seed(&drbg, rng_bridge, &entropy, purpose, sizeof(purpose) - 1);
+    profile_report(profile, "drbg-seed", seed_start, result);
+    random = (rng_bridge_t){ mbedtls_ctr_drbg_random, &drbg };
+#endif
+    if (!result)
+    {
+        uint32_t start = profile_now(profile);
+        result = generate_key(&keys->host, &random);
+        profile_report(profile, "rsa-host", start, result);
+    }
+    if (!result)
+    {
+        uint32_t start = profile_now(profile);
+        result = generate_key(&keys->root, &random);
+        profile_report(profile, "rsa-root", start, result);
+    }
+#if defined(MBEDTLS_CTR_DRBG_C)
+    mbedtls_ctr_drbg_free(&drbg);
+#endif
+    if (result)
+    {
+        rtcp_pair_keys_free(keys);
+        return RTCP_EIO;
+    }
+    *output = keys;
+    return RTCP_OK;
 }
 
 static int export_public(const mbedtls_pk_context *key, mbedtls_mpi *modulus,
@@ -681,14 +758,14 @@ int rtcp_pair_generate_uuid(char *output, size_t capacity,
     return RTCP_OK;
 }
 
-int rtcp_pair_record_generate(rtcp_pair_record_t *record,
-                              const uint8_t *device_public_key,
-                              size_t device_public_key_length,
-                              const char *wifi_address, const char *host_id,
-                              const char *system_buid, rtcp_pair_rng_fn rng,
-                              void *rng_context)
+int rtcp_pair_record_generate_profiled(rtcp_pair_record_t *record,
+                                       const uint8_t *device_public_key,
+                                       size_t device_public_key_length,
+                                       const char *wifi_address, const char *host_id,
+                                       const char *system_buid, rtcp_pair_rng_fn rng,
+                                       void *rng_context, rtcp_pair_keys_t *keys,
+                                       const rtcp_pair_profile_t *profile)
 {
-    static der_arena_t arena;
     rng_bridge_t rng_bridge_value = { rng, rng_context };
     mbedtls_mpi device_modulus;
     mbedtls_mpi device_exponent;
@@ -696,9 +773,9 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
     mbedtls_mpi host_exponent;
     mbedtls_mpi root_modulus;
     mbedtls_mpi root_exponent;
-    mbedtls_pk_context host_key;
-    mbedtls_pk_context root_key;
     int result = RTCP_EIO;
+    bool building_certificates = false;
+    uint32_t certificate_start = 0;
 
     if (record == NULL || device_public_key == NULL ||
         device_public_key_length == 0U || wifi_address == NULL ||
@@ -706,12 +783,19 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
         strlen(wifi_address) >= sizeof(record->wifi_address) ||
         strlen(host_id) >= sizeof(record->host_id) ||
         strlen(system_buid) >= sizeof(record->system_buid) ||
-        device_public_key_length + 1U > sizeof(record->device_public_key))
+        device_public_key_length >= sizeof(record->device_public_key))
     {
+        rtcp_pair_keys_free(keys);
         return RTCP_EINVAL;
     }
 
     memset(record, 0, sizeof(*record));
+    der_arena_t *arena = malloc(sizeof(*arena));
+    if (!arena)
+    {
+        rtcp_pair_keys_free(keys);
+        return RTCP_ENOMEM;
+    }
     memcpy(record->host_id, host_id, strlen(host_id) + 1U);
     memcpy(record->system_buid, system_buid, strlen(system_buid) + 1U);
     memcpy(record->wifi_address, wifi_address, strlen(wifi_address) + 1U);
@@ -726,8 +810,6 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
     mbedtls_mpi_init(&host_exponent);
     mbedtls_mpi_init(&root_modulus);
     mbedtls_mpi_init(&root_exponent);
-    mbedtls_pk_init(&host_key);
-    mbedtls_pk_init(&root_key);
 
     if (parse_device_public_key(record->device_public_key,
                                 record->device_public_key_length,
@@ -735,23 +817,21 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
     {
         goto cleanup;
     }
-    if (generate_key(&host_key, &rng_bridge_value) != 0)
+    if (!keys && rtcp_pair_keys_generate(&keys, rng, rng_context, profile) != RTCP_OK)
     {
         goto cleanup;
     }
-    if (generate_key(&root_key, &rng_bridge_value) != 0)
-    {
-        goto cleanup;
-    }
-    if (export_public(&host_key, &host_modulus, &host_exponent) != 0 ||
-        export_public(&root_key, &root_modulus, &root_exponent) != 0)
+    if (export_public(&keys->host, &host_modulus, &host_exponent) != 0 ||
+        export_public(&keys->root, &root_modulus, &root_exponent) != 0)
     {
         goto cleanup;
     }
 
+    building_certificates = true;
+    certificate_start = profile_now(profile);
     der_node_t certificate;
-    if (!build_certificate(&arena, &root_key, &root_modulus, &root_exponent,
-                           true, false, &certificate) ||
+    if (!build_certificate(arena, &keys->root, &root_modulus, &root_exponent,
+                           true, false, &certificate, &rng_bridge_value) ||
         encode_pem(record->root_certificate, sizeof(record->root_certificate),
                    "CERTIFICATE", certificate.data,
                    certificate.length) != RTCP_OK)
@@ -761,15 +841,15 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
     record->root_certificate_length =
         strlen((const char *)record->root_certificate);
 
-    if (write_private_key(&root_key, record->root_private_key,
+    if (write_private_key(&keys->root, record->root_private_key,
                           sizeof(record->root_private_key),
                           &record->root_private_key_length) != RTCP_OK)
     {
         goto cleanup;
     }
 
-    if (!build_certificate(&arena, &root_key, &host_modulus, &host_exponent,
-                           false, false, &certificate) ||
+    if (!build_certificate(arena, &keys->root, &host_modulus, &host_exponent,
+                           false, false, &certificate, &rng_bridge_value) ||
         encode_pem(record->host_certificate, sizeof(record->host_certificate),
                    "CERTIFICATE", certificate.data,
                    certificate.length) != RTCP_OK)
@@ -779,15 +859,15 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
     record->host_certificate_length =
         strlen((const char *)record->host_certificate);
 
-    if (write_private_key(&host_key, record->host_private_key,
+    if (write_private_key(&keys->host, record->host_private_key,
                           sizeof(record->host_private_key),
                           &record->host_private_key_length) != RTCP_OK)
     {
         goto cleanup;
     }
 
-    if (!build_certificate(&arena, &root_key, &device_modulus,
-                           &device_exponent, false, true, &certificate) ||
+    if (!build_certificate(arena, &keys->root, &device_modulus,
+                           &device_exponent, false, true, &certificate, &rng_bridge_value) ||
         encode_pem(record->device_certificate,
                    sizeof(record->device_certificate), "CERTIFICATE",
                    certificate.data, certificate.length) != RTCP_OK)
@@ -800,8 +880,10 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
     result = RTCP_OK;
 
 cleanup:
-    mbedtls_pk_free(&root_key);
-    mbedtls_pk_free(&host_key);
+    if (building_certificates)
+        profile_report(profile, "certificates-pem", certificate_start, result);
+    rtcp_pair_keys_free(keys);
+    free(arena);
     mbedtls_mpi_free(&root_exponent);
     mbedtls_mpi_free(&root_modulus);
     mbedtls_mpi_free(&host_exponent);
@@ -813,6 +895,14 @@ cleanup:
         memset(record, 0, sizeof(*record));
     }
     return result;
+}
+
+int rtcp_pair_record_generate(rtcp_pair_record_t *record, const uint8_t *device_public_key,
+                              size_t device_public_key_length, const char *wifi_address, const char *host_id,
+                              const char *system_buid, rtcp_pair_rng_fn rng, void *rng_context)
+{
+    return rtcp_pair_record_generate_profiled(record, device_public_key, device_public_key_length,
+                                              wifi_address, host_id, system_buid, rng, rng_context, NULL, NULL);
 }
 
 /* Validate persisted bounds before any TLS/parser reads. Cryptographic content

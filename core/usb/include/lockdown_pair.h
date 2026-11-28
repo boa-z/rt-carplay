@@ -58,6 +58,21 @@ typedef struct
  * The board passes a wrapper over its TRNG. */
 typedef int (*rtcp_pair_rng_fn)(void *context, uint8_t *output, size_t length);
 
+typedef struct rtcp_pair_keys rtcp_pair_keys_t;
+
+typedef struct
+{
+    uint32_t (*now_ms)(void);
+    void (*report)(void *context, const char *stage, uint32_t elapsed_ms, int result);
+    void *context;
+} rtcp_pair_profile_t;
+
+/* Generate one unused host/root key set. The caller owns it until passed
+ * to record generation or discarded. Never use a set with two phones. */
+int rtcp_pair_keys_generate(rtcp_pair_keys_t **keys, rtcp_pair_rng_fn rng, void *rng_context,
+                            const rtcp_pair_profile_t *profile);
+void rtcp_pair_keys_free(rtcp_pair_keys_t *keys);
+
 /* Generate a random RFC 4122 version 4 UUID string (36 characters plus NUL).
  * Returns RTCP_OK or a negative error. */
 int rtcp_pair_generate_uuid(char *output, size_t capacity,
@@ -76,6 +91,13 @@ int rtcp_pair_record_generate(rtcp_pair_record_t *record,
                               const char *wifi_address, const char *host_id,
                               const char *system_buid, rtcp_pair_rng_fn rng,
                               void *rng_context);
+
+/* Consumes keys on every return. NULL generates a fresh set synchronously. */
+int rtcp_pair_record_generate_profiled(rtcp_pair_record_t *record,
+                                       const uint8_t *device_public_key, size_t device_public_key_length,
+                                       const char *wifi_address, const char *host_id, const char *system_buid,
+                                       rtcp_pair_rng_fn rng, void *rng_context, rtcp_pair_keys_t *keys,
+                                       const rtcp_pair_profile_t *profile);
 
 bool rtcp_pair_record_valid(const rtcp_pair_record_t *record);
 

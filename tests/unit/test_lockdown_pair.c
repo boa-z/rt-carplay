@@ -49,6 +49,19 @@ static int failing_rng(void *context, uint8_t *output, size_t length)
     return -1;
 }
 
+static uint32_t profiling_clock(void)
+{
+    return (uint32_t)(1000.0 * (double)clock() / CLOCKS_PER_SEC);
+}
+
+static void count_profile(void *context, const char *stage, uint32_t elapsed_ms, int result)
+{
+    unsigned *completed = context;
+    assert(result == RTCP_OK);
+    ++*completed;
+    printf("pair generation: %s cpu_ms=%u (host only)\n", stage, (unsigned)elapsed_ms);
+}
+
 static void test_uuid(void)
 {
     char uuid[RTCP_PAIR_UUID_CHARS];
@@ -81,12 +94,19 @@ static void test_generate_and_verify(void)
     memset(&record, 0, sizeof(record));
 
     clock_t started = clock();
-    int ret = rtcp_pair_record_generate(
+    rtcp_pair_keys_t *keys = NULL;
+    unsigned completed = 0;
+    const rtcp_pair_profile_t profile = { profiling_clock, count_profile, &completed };
+    assert(rtcp_pair_keys_generate(&keys, test_rng, NULL, &profile) == RTCP_OK);
+    unsigned key_steps = completed;
+    assert(key_steps >= 2 && keys != NULL);
+    int ret = rtcp_pair_record_generate_profiled(
         &record, (const uint8_t *)device_public_key_pem,
         sizeof(device_public_key_pem) - 1U, "00:11:22:33:44:55",
         "11111111-2222-4333-8444-555555555555",
-        "66666666-7777-4888-8999-AAAAAAAAAAAA", test_rng, NULL);
+        "66666666-7777-4888-8999-AAAAAAAAAAAA", test_rng, NULL, keys, &profile);
     assert(ret == RTCP_OK);
+    assert(completed == key_steps + 1);
     printf("pair generation: limb_bits=%u cpu_ms=%.1f (host only)\n",
            (unsigned)(8U * sizeof(mbedtls_mpi_uint)),
            1000.0 * (double)(clock() - started) / CLOCKS_PER_SEC);

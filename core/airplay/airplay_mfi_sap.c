@@ -2,8 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * CarPlay /auth-setup MFiSAP responder following DiPlay's MfiSapAuthSetup.kt.
- * Certificate and signing operations are injected through
- * airplay_mfi_sap_set_provider().
+ * Certificate and signing operations belong to the Receiver's provider.
  */
 #include "airplay_mfi_sap.h"
 
@@ -14,7 +13,6 @@
 #include "mbedtls/aes.h"
 #include "mbedtls/ecdh.h"
 #include "mbedtls/md.h"
-#include "mbedtls/pk.h"
 #include "mbedtls/platform_util.h"
 
 static airplay_mfi_sap_provider_t s_provider;
@@ -45,16 +43,6 @@ void airplay_mfi_sap_clear_provider(void)
 #define MFI_SAP_CERTIFICATE_CAPACITY AIRPLAY_MFI_SAP_MAX_CERTIFICATE_BYTES
 
 #define TAG "mfi_sap"
-
-static int mfi_sap_rng(void *context, unsigned char *output, size_t output_len)
-{
-    (void)context;
-    if (output == NULL && output_len != 0U)
-        return -1;
-    if (s_provider.random == NULL)
-        return -1;
-    return s_provider.random(output, output_len, s_provider.context);
-}
 
 static bool bytes_are_zero(const uint8_t *bytes, size_t length)
 {
@@ -90,7 +78,8 @@ static void write_be32(uint8_t output[4], uint32_t value)
 static airplay_mfi_sap_result_t mfi_sap_exchange(
     const uint8_t peer_public_key[MFI_SAP_PUBLIC_KEY_BYTES],
     uint8_t accessory_public_key[MFI_SAP_PUBLIC_KEY_BYTES],
-    uint8_t shared_secret[MFI_SAP_PUBLIC_KEY_BYTES])
+    uint8_t shared_secret[MFI_SAP_PUBLIC_KEY_BYTES],
+    int (*random)(void *, unsigned char *, size_t), void *random_context)
 {
     airplay_mfi_sap_result_t result = AIRPLAY_MFI_SAP_CRYPTO_FAILED;
     mbedtls_ecp_group group;
@@ -107,7 +96,7 @@ static airplay_mfi_sap_result_t mfi_sap_exchange(
     size_t public_len = 0U;
     if (mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_CURVE25519) != 0 ||
         mbedtls_ecp_gen_keypair(&group, &private_key, &accessory_public,
-                                mfi_sap_rng, NULL) != 0 ||
+                                random, random_context) != 0 ||
         mbedtls_ecp_point_write_binary(&group, &accessory_public,
                                        MBEDTLS_ECP_PF_UNCOMPRESSED, &public_len,
                                        accessory_public_key,
@@ -116,7 +105,7 @@ static airplay_mfi_sap_result_t mfi_sap_exchange(
         mbedtls_ecp_point_read_binary(&group, &peer_point, peer_public_key,
                                       MFI_SAP_PUBLIC_KEY_BYTES) != 0 ||
         mbedtls_ecdh_compute_shared(&group, &shared, &peer_point, &private_key,
-                                    mfi_sap_rng, NULL) != 0 ||
+                                    random, random_context) != 0 ||
         mbedtls_mpi_write_binary_le(&shared, shared_secret,
                                     MFI_SAP_PUBLIC_KEY_BYTES) != 0 ||
         bytes_are_zero(shared_secret, MFI_SAP_PUBLIC_KEY_BYTES))
@@ -158,78 +147,6 @@ failed:
     mbedtls_platform_zeroize(input, sizeof(input));
     mbedtls_platform_zeroize(digest, sizeof(digest));
     return -1;
-}
-
-/*
- * Bring-up self-check: verify the coprocessor signature against the public
- * key inside the certificate we are about to send.  iOS performs exactly this
- * check (plus chain validation) and silently closes the RTSP connection when
- * it fails, so the accessory itself should catch a corrupted certificate or
- * signature read before blaming the protocol.
- *
- * The PKCS#7 blob carries the certificate chain; this build has no X.509
- * parser linked (MBEDTLS_PK_PARSE_C is available, MBEDTLS_X509_CRT_PARSE_C is
- * not), so scan for SubjectPublicKeyInfo structures and let pk_verify pick the
- * one whose key actually produced the signature.  A corrupted certificate
- * almost always fails to yield a usable key at all.
- */
-static int mfi_verify_signature(const uint8_t *certificate,
-                                size_t certificate_len,
-                                mbedtls_md_type_t md_alg,
-                                const uint8_t *digest, size_t digest_len,
-                                const uint8_t *signature,
-                                size_t signature_len)
-{
-    mbedtls_pk_context pk;
-    int verified = 0;
-
-    mbedtls_pk_init(&pk);
-    for (size_t offset = 0U;
-         offset + 8U < certificate_len && verified == 0; ++offset)
-    {
-        if (certificate[offset] != 0x30U)
-            continue;
-        unsigned char *cursor = (unsigned char *)(certificate + offset);
-        const unsigned char *end = certificate + certificate_len;
-        if (mbedtls_pk_parse_subpubkey(&cursor, end, &pk) == 0 &&
-            mbedtls_pk_get_type(&pk) == MBEDTLS_PK_RSA &&
-            mbedtls_pk_verify(&pk, md_alg, digest, digest_len, signature,
-                              signature_len) == 0)
-        {
-            verified = 1;
-        }
-        mbedtls_pk_free(&pk);
-        mbedtls_pk_init(&pk);
-    }
-    mbedtls_pk_free(&pk);
-    return verified;
-}
-
-static uint32_t mfi_sap_fnv1a32(const uint8_t *data, size_t len)
-{
-    uint32_t hash = 2166136261u;
-    for (size_t i = 0; i < len; ++i)
-    {
-        hash ^= data[i];
-        hash *= 16777619u;
-    }
-    return hash;
-}
-
-static void format_hex(char *out, size_t out_size, const uint8_t *bytes,
-                       size_t len)
-{
-    static const char digits[] = "0123456789ABCDEF";
-    size_t pos = 0U;
-    for (size_t i = 0; i < len && pos + 3U <= out_size; ++i)
-    {
-        out[pos++] = digits[bytes[i] >> 4];
-        out[pos++] = digits[bytes[i] & 0x0fU];
-        out[pos++] = ' ';
-    }
-    if (pos != 0U)
-        pos -= 1U;
-    out[pos] = '\0';
 }
 
 static int encrypt_signature(const uint8_t key[16], const uint8_t iv[16],
@@ -283,7 +200,9 @@ static bool aes_ctr_known_answer(void)
     return valid;
 }
 
-airplay_mfi_sap_result_t airplay_mfi_sap_respond(
+static airplay_mfi_sap_result_t respond(
+    const rtcp_mfi_provider_t *provider, bool legacy,
+    int (*random)(void *, unsigned char *, size_t), void *random_context,
     const uint8_t *request,
     size_t request_len,
     uint8_t *response,
@@ -297,21 +216,32 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     {
         return AIRPLAY_MFI_SAP_INVALID_ARGUMENT;
     }
-    if (!s_provider_set)
+    if (provider == NULL || provider->get_info == NULL ||
+        provider->read_cert == NULL || provider->sign == NULL)
         return AIRPLAY_MFI_SAP_UNAVAILABLE;
 
-    const uint8_t protocol_major = s_provider.protocol_major;
+    rtcp_mfi_provider_info_t info = { 0 };
+    int err = provider->get_info(provider->context, &info);
+    if (err != RTCP_OK)
+    {
+        RTCP_LOGE(TAG, "auth_setup=provider_unavailable error=%d", err);
+        return AIRPLAY_MFI_SAP_UNAVAILABLE;
+    }
+    const uint8_t protocol_major = info.protocol_major;
+    if ((info.capabilities & RTCP_MFI_CAP_SAP) == 0U)
+        return AIRPLAY_MFI_SAP_UNAVAILABLE;
     if (protocol_major != 2U && protocol_major != 3U)
     {
         return AIRPLAY_MFI_SAP_UNSUPPORTED_PROTOCOL;
     }
 
     uint8_t certificate[MFI_SAP_CERTIFICATE_CAPACITY];
-    size_t certificate_len = sizeof(certificate);
-    int err = s_provider.mfi->read_cert(certificate, sizeof(certificate),
-                                        &certificate_len);
+    size_t certificate_len = 0U;
+    err = provider->read_cert(provider->context, certificate, sizeof(certificate),
+                              &certificate_len);
     if (err != RTCP_OK || certificate_len == 0U ||
-        certificate_len > sizeof(certificate))
+        certificate_len > sizeof(certificate) ||
+        (info.certificate_len != 0U && certificate_len != info.certificate_len))
     {
         RTCP_LOGE(TAG, "auth_setup=certificate_unavailable error=%d", err);
         mbedtls_platform_zeroize(certificate, sizeof(certificate));
@@ -341,10 +271,10 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     uint8_t digest[32] = { 0 };
     uint8_t signature[MFI_SAP_SIGNATURE_MAX_BYTES] = { 0 };
     uint8_t encrypted_signature[MFI_SAP_SIGNATURE_MAX_BYTES] = { 0 };
-    size_t signature_len = sizeof(signature);
+    size_t signature_len = 0U;
 
     airplay_mfi_sap_result_t result = mfi_sap_exchange(
-        request + 1U, accessory_public_key, shared_secret);
+        request + 1U, accessory_public_key, shared_secret, random, random_context);
     if (result != AIRPLAY_MFI_SAP_OK ||
         derive_aes_material(shared_secret, derivation_key, derivation_iv) != 0)
     {
@@ -364,25 +294,16 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
         result = AIRPLAY_MFI_SAP_CRYPTO_FAILED;
         goto cleanup;
     }
-    err = s_provider.mfi->sign(digest, digest_len, signature, sizeof(signature),
-                               &signature_len);
+    err = provider->sign(provider->context, digest, digest_len, signature,
+                         sizeof(signature), &signature_len);
     if (err != RTCP_OK || signature_len == 0U ||
-        signature_len > MFI_SAP_SIGNATURE_MAX_BYTES)
+        signature_len > MFI_SAP_SIGNATURE_MAX_BYTES ||
+        (!legacy && protocol_major == 3U && signature_len != 64U))
     {
         RTCP_LOGE(TAG, "auth_setup=sign_failed protocol_major=%u error=%d signature_bytes=%u",
                   (unsigned)protocol_major, err, (unsigned)signature_len);
         result = AIRPLAY_MFI_SAP_SIGN_FAILED;
         goto cleanup;
-    }
-    {
-        char digest_hex[3U * sizeof(digest)];
-        format_hex(digest_hex, sizeof(digest_hex), digest, digest_len);
-        int verified = mfi_verify_signature(
-            certificate, certificate_len,
-            protocol_major == 2U ? MBEDTLS_MD_SHA1 : MBEDTLS_MD_SHA256,
-            digest, digest_len, signature, signature_len);
-        RTCP_LOGI(TAG, "auth_setup=signature_check verified=%d digest=%s",
-                  verified, digest_hex);
     }
     if (encrypt_signature(derivation_key, derivation_iv, signature,
                           signature_len, encrypted_signature) != 0)
@@ -404,10 +325,9 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     offset += signature_len;
     *response_len = offset;
     RTCP_LOGI(TAG, "auth_setup=completed protocol_major=%u certificate_bytes=%u "
-                   "response_bytes=%u checksum=%08X",
+                   "response_bytes=%u",
               (unsigned)protocol_major,
-              (unsigned)certificate_len, (unsigned)offset,
-              (unsigned)mfi_sap_fnv1a32(response, offset));
+              (unsigned)certificate_len, (unsigned)offset);
     result = AIRPLAY_MFI_SAP_OK;
 
 cleanup:
@@ -421,4 +341,69 @@ cleanup:
     mbedtls_platform_zeroize(signature, sizeof(signature));
     mbedtls_platform_zeroize(encrypted_signature, sizeof(encrypted_signature));
     return result;
+}
+
+struct sap_random
+{
+    rtcp_identity_random_cb_t callback;
+    void *context;
+};
+
+static int instance_random(void *context, unsigned char *output, size_t len)
+{
+    const struct sap_random *random = context;
+    return random->callback && random->callback(output, len, random->context) ? 0 : -1;
+}
+
+airplay_mfi_sap_result_t airplay_mfi_sap_respond_with_provider(
+    const rtcp_mfi_provider_t *provider,
+    rtcp_identity_random_cb_t random, void *random_context,
+    const uint8_t *request, size_t request_len,
+    uint8_t *response, size_t response_capacity, size_t *response_len)
+{
+    struct sap_random source = { random, random_context };
+    return respond(provider, false, instance_random, &source, request, request_len,
+                   response, response_capacity, response_len);
+}
+
+static int legacy_info(void *context, rtcp_mfi_provider_info_t *out)
+{
+    const airplay_mfi_sap_provider_t *legacy = context;
+    out->protocol_major = legacy->protocol_major;
+    out->capabilities = RTCP_MFI_CAP_SAP;
+    return RTCP_OK;
+}
+
+static int legacy_certificate(void *context, uint8_t *der, size_t cap, size_t *len)
+{
+    const airplay_mfi_sap_provider_t *legacy = context;
+    return legacy->mfi->read_cert(der, cap, len);
+}
+
+static int legacy_sign(void *context, const uint8_t *challenge, size_t len,
+                       uint8_t *sig, size_t cap, size_t *sig_len)
+{
+    const airplay_mfi_sap_provider_t *legacy = context;
+    return legacy->mfi->sign(challenge, len, sig, cap, sig_len);
+}
+
+static int legacy_random(void *context, unsigned char *output, size_t len)
+{
+    const airplay_mfi_sap_provider_t *legacy = context;
+    return legacy->random ? legacy->random(output, len, legacy->context) : -1;
+}
+
+airplay_mfi_sap_result_t airplay_mfi_sap_respond(
+    const uint8_t *request, size_t request_len,
+    uint8_t *response, size_t response_capacity, size_t *response_len)
+{
+    airplay_mfi_sap_provider_t legacy = s_provider;
+    const rtcp_mfi_provider_t provider = {
+        .context = &legacy,
+        .get_info = legacy_info,
+        .sign = legacy_sign,
+        .read_cert = legacy_certificate,
+    };
+    return respond(s_provider_set ? &provider : NULL, true, legacy_random, &legacy,
+                   request, request_len, response, response_capacity, response_len);
 }

@@ -5,9 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "rtcp/mfi.h"
+#include "rtcp/platform.h"
 
-#define AIRPLAY_MFI_SAP_MAX_CERTIFICATE_BYTES 1536U
+#define AIRPLAY_MFI_SAP_MAX_CERTIFICATE_BYTES RTCP_MFI_WIRE_CERT_MAX
 #define AIRPLAY_MFI_SAP_MAX_SIGNATURE_BYTES   256U
 #define AIRPLAY_MFI_SAP_MAX_RESPONSE_BYTES                   \
     (32U + 4U + AIRPLAY_MFI_SAP_MAX_CERTIFICATE_BYTES + 4U + \
@@ -27,8 +27,8 @@ typedef enum
 /*
  * Certificate and challenge-signing operations are injected.  protocol_major
  * is the MFi version reported by the coprocessor: 2 = MFi 2.0C (SHA-1
- * digest), 3 = Auth 3.0 (SHA-256 digest).  random may be NULL only for host
- * tests that provide deterministic bytes through the coprocessor itself.
+ * digest), 3 = Auth 3.0 (SHA-256 digest). Random supplies the ephemeral
+ * key exchange independently of the coprocessor.
  */
 typedef struct
 {
@@ -38,7 +38,7 @@ typedef struct
     void *context;
 } airplay_mfi_sap_provider_t;
 
-/* Registers the process-wide MFi provider.  Returns false on invalid input. */
+/* Legacy process-wide registration. Set or clear only while all users are stopped. */
 bool airplay_mfi_sap_set_provider(const airplay_mfi_sap_provider_t *provider);
 void airplay_mfi_sap_clear_provider(void);
 
@@ -49,3 +49,9 @@ airplay_mfi_sap_result_t airplay_mfi_sap_respond(
     uint8_t *response,
     size_t response_capacity,
     size_t *response_len);
+
+airplay_mfi_sap_result_t airplay_mfi_sap_respond_with_provider(
+    const rtcp_mfi_provider_t *provider,
+    rtcp_identity_random_cb_t random, void *random_context,
+    const uint8_t *request, size_t request_len,
+    uint8_t *response, size_t response_capacity, size_t *response_len);

@@ -32,6 +32,14 @@ The capability document must be nonempty and at most `RTCP_CAPABILITIES_MAX_BYTE
 
 `port` defaults to 7000; `screen_port` zero requests an ephemeral Screen endpoint. `family` accepts zero/`RTCP_AF_INET` or `RTCP_AF_INET6`; invalid values are rejected at create. `screen_max_body_bytes` zero retains the existing 512 KiB protocol default. Discovery, USB selection, Bluetooth activation, Wi-Fi handover policy and connection arbitration belong to the host. Optional `iap2` callbacks register the authenticated tunnel; they do not start radio hardware. A false tunnel tick retires that tunnel while preserving media.
 
+## Classic MFi authentication
+
+Assign the same `rtcp_mfi_provider_t` to `rtcp_platform_t.mfi_provider` and every `iap2_session_config_t.mfi_provider` used by a connection, including Bluetooth, USB and the AirPlay iAP2 tunnel. The provider reports its kind, supported protocol paths, major version and certificate length. It supplies the wire certificate bytes and signs the protocol challenge. Keep the provider and its identity stable until all owners have retired. Calls are synchronous on each protocol owner and may run concurrently across owners. A hardware or external provider must serialize shared transactions and bound I/O waits. The SDK software provider serializes use of its private key.
+
+For a provisioned software identity, include `rtcp/mfi_software.h` and call `rtcp_mfi_software_create()` with the certificate, private key, platform allocator and mutex operations. The software provider uses `rtcp_os.random` or an explicit cryptographically secure random callback. Supply the credential bytes through the host's authorized provisioning mechanism. The SDK accepts an unencrypted DER key or NUL-terminated PEM and a DER X.509 certificate or DER certificates-only PKCS#7 containing a matching signing leaf. The original certificate bytes stay on the wire. The software algorithms are Classic MFi 2.0C RSA (1024 to 2048 bits) with SHA-1 and MFi 3.0 P-256 ECDSA with SHA-256. The peer evaluates certificate-chain trust and authorization. Release the software provider after stopping the Receiver and all iAP2 sessions. The build controls are CMake `RTCP_MFI_SOFTWARE`, Make `RTCP_MFI_SOFTWARE` (0 or 1) and RT-Thread `LPKG_RT_CARPLAY_MFI_SOFTWARE` (default off).
+
+The Receiver uses `pair_setup.random` for SAP ephemeral key exchange. The MFi certificate and signer are independent of the AirPlay Ed25519 accessory identity and Pair-Setup/Pair-Verify controller store. USB Lockdown trust and Bluetooth bonds have their own stores. A provider error fails the authentication operation. The legacy iAP2 callback table and the process-wide SAP setter remain compatible for callers leaving the corresponding instance field NULL. A configured instance takes precedence.
+
 ## Media and input registration
 
 `rtcp/media.h` defines the actual `rtcp_media_backend_t` accepted by Receiver. `on_video` receives configuration or access-unit Annex-B H.264 with writable prefix capacity, sender nanoseconds and local arrival microseconds. The bytes are encoded video, not decoded pixels. The buffer is borrowed until return; asynchronous backends copy it before returning. A NULL video callback selects an intentional discard sink for Headless operation. Display/HMI visibility remains host policy.
@@ -82,7 +90,7 @@ For optional speed assistance, set `identity.provide_vehicle_speed` together wit
 
 ## Compatibility
 
-Existing Receiver configuration and metadata callback layouts are unchanged. The low-level `iap2_session_config_t` and its identity descriptor have new opt-in fields. Rebuild the SDK and any direct iAP2 consumers together, initialize the full descriptor to zero, and set new callbacks or declarations explicitly.
+The Receiver platform configuration and low-level `iap2_session_config_t` have optional fields for the instance authentication provider. Rebuild the host with the SDK, zero-initialize the complete configuration, and explicitly enable the callbacks and capabilities the host supports.
 
 The early `.airplay` configuration bridge has been replaced by public `platform`, `media` and `iap2` descriptors. Include `rtcp/receiver_compat.h` and call `rtcp_receiver_config_from_airplay(&legacy, &config)` when migrating an existing `airplay_rtsp_server_config_t`. This copies every descriptor/provider reference, clears the destination first and returns `RTCP_EINVAL` for NULL arguments. Set `on_state` and its context after conversion. Existing provider lifetimes still apply; the helper does not allocate or open resources. New integrations should populate the public configuration directly.
 

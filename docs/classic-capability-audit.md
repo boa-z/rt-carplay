@@ -7,6 +7,9 @@
 | Capability | Status and evidence |
 | --- | --- |
 | Connection and session ownership | **Implemented, Host Tested, Hardware Pending.** Receiver owns the RTSP session, setup and teardown. Luban-Lite owns transport selection, retry, USB and wireless recovery and pairing persistence. Host tests cover listener rollback, reconnect, resource release and transport fallback. |
+| Classic MFi hardware | **Implemented, Host Tested, Hardware Pending.** Linux and RT-Thread use the same instance interface for the 2.0C and 3.0 coprocessors. Host tests exercise the I²C register engine and failure handling, and both D213 builds link the hardware provider. |
+| Classic MFi software | **Implemented, Host Tested, Hardware Pending.** Linux and RT-Thread build the provisioned RSA/SHA-1 and P-256/SHA-256 backend. Generated identities cover certificate and key matching, concurrency, iAP2 and MFiSAP with an independent OpenSSL peer. |
+| External device | **Implemented for host adapters, Hardware Pending.** Applications can inject an instance with an external signer. The transport and device lifecycle belong to the adapter. |
 | H.264 projection and recovery | **Implemented, Host Tested.** The Classic event channel supports requesting a keyframe after H.264 loss. D213 logs from earlier firmware show recovery from queue overflow after starting Siri. **Hardware Pending** for display cadence and receive-to-latch latency on the current 60 FPS build. |
 | Classic audio | **Implemented, Host Tested.** D213 previously exercised music, phone calls and Siri. **Hardware Pending** for playback, microphone, Direct/Mixer and audio route restoration on the current build. |
 | HID, appearance, OEM tile and projection | **Implemented, Host Tested, Hardware Pending.** SDK provides two-contact touch, raw HID, knob, directional and media controls, Siri, live appearance and projection commands. Advertisement must match the actual input device. OEM focus and projection requests are confirmed through phone events. |
@@ -22,6 +25,18 @@
 The `$PASCD` sentence layout and selector follow DiPlay's `VehicleSpeedNmea.kt` and `Iap2LocationClient.kt`. The observed fixed fields retain their reference values. Their broader semantics and location interval handling still need evidence. LIVI's iAP2 message definitions and event dispatch establish the layouts for power, communications, Now Playing, clock and route guidance. OCBM separates declared view-area capabilities from the coded Screen stream in its configuration and AV documentation.
 
 Reference revisions are [DiPlay](https://github.com/shihabal3amri/DiPlay/tree/615b32ce0b40cd0b99ce94ba23a512001553684f), [LIVI](https://github.com/f-io/LIVI/tree/64a05b68358db52ed887169143afd5944fd6f1f7) and [OCBM](https://github.com/lvalen91/ocbm/tree/45f5a637d2c59c7b779d47c9ccefa8138764dbf4). See the [Receiver API](receiver-api.md) for contracts, [lifecycle and ownership](lifecycle-and-ownership.md) for shutdown order, and [audio debugging](audio-debug-handoff.md) for media checkpoints.
+
+## Accessory authentication references
+
+| Reference revision | Design and interoperability evidence |
+| --- | --- |
+| DiPlay `32f00ff21790a4a57315f02714932d5d59fdfe54` | A connection owns one authentication session for iAP2 and MFiSAP. The local software backend verifies the certificate and P-256 key by signing a random challenge. The project's upstream notes report BAA tests without a per-device test matrix. [Source and notes](https://github.com/shihabal3amri/DiPlay/tree/32f00ff21790a4a57315f02714932d5d59fdfe54) |
+| LIVI `83f80d558cc83fb11cbbf21f68ae89f981830d0c` | The `AuthCoprocessor` interface covers I²C, a file identity and a device reached via TCP. The async bridge serializes operations on the same backend. MFi4 has a session handler and tunneled pairing. The reviewed revision still uses the v3 signer during setup and provides no per-phone MFi4 results. [Source](https://github.com/f-io/LIVI/tree/83f80d558cc83fb11cbbf21f68ae89f981830d0c/native/crates) |
+| OCBM `893d1efc6aba29ffe2378d5ec70959aaf596926d` | The project documents cross-process locking and its external authentication transport. It reports wireless AuthV3 through the first frame on a bench using a provisioned matching identity. [Bench notes](https://github.com/lvalen91/ocbm/blob/893d1efc6aba29ffe2378d5ec70959aaf596926d/docs/ocbm/01_ROLES_AND_MFI_SOURCE.md) |
+
+These observations are based on source and upstream reports. D213 and iPhone interoperability for this SDK revision requires its own test results and an authorized accessory identity. BAA and MFi4 remain research items for this SDK. Confirm the protocol and provisioning requirements before adding distinct capabilities for them.
+
+In a Release build on an EPYC 7402 development VM, the median of three process-CPU measurements with a generated P-256 identity was 2.28 ms for provider creation, including certificate and key verification, and 0.73 ms per signature across 100 calls per run. A RISC-V `-Os` build under QEMU C906 measured 27.65 ms and 7.36 ms using the same procedure. The Linux allocator retained 2528 bytes for the active identity after 100 signatures with the allocator thread cache disabled, and returned to baseline on destruction. These measurements exclude file I/O and the phone's response. Measure board CPU, peak heap, stack and latency separately.
 
 ## D213 acceptance
 

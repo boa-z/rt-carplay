@@ -148,6 +148,8 @@ typedef struct
     rtcp_lane_guidance_cb_t on_lane_guidance;
     /** Opt in to a NULL on_device_time update when link clock data expires. */
     bool notify_device_time_invalidation;
+    /** When set, takes precedence over the legacy mfi field. */
+    const rtcp_mfi_provider_t *mfi_provider;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES       4U

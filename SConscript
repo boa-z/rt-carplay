@@ -49,6 +49,9 @@ if GetDepend('LPKG_RT_CARPLAY_AUDIO_CODECS'):
     # Group-local definition: do not change the SDK's unrelated audio packages.
     ccflags = (ccflags or '') + ' -DRTCP_AUDIO_CODECS'
 
+if GetDepend('LPKG_RT_CARPLAY_MFI_SOFTWARE'):
+    ccflags = (ccflags or '') + ' -DRTCP_MFI_SOFTWARE'
+
 # RT-Thread OS and socket seams.
 src += Glob('port/rtthread/*.c')
 cpppath.append(cwd + '/port/rtthread/include')

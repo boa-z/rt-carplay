@@ -6,6 +6,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(RTCP_AUDIO_CODECS "Build fixed point AAC-LC and Opus" ON)
+option(RTCP_MFI_SOFTWARE "Build the provisioned classic MFi software backend" ON)
 option(RTCP_BUILD_TESTS "Build host-side unit tests" ON)
 option(RTCP_BUILD_SIMULATOR "Build the Linux protocol simulator" ${RTCP_BUILD_TESTS})
 option(RTCP_SANITIZE "Enable host address/undefined sanitizers" OFF)
@@ -79,6 +80,9 @@ target_include_directories(rtcp_core PUBLIC
 
 set_source_files_properties(${RTCP_ED25519_SOURCES} PROPERTIES COMPILE_OPTIONS "-fno-sanitize=undefined;-fwrapv")
 target_compile_definitions(rtcp_core PRIVATE ED25519_NO_SEED)
+if(RTCP_MFI_SOFTWARE)
+    target_compile_definitions(rtcp_core PRIVATE RTCP_MFI_SOFTWARE)
+endif()
 target_compile_options(rtcp_core PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(rtcp_core PUBLIC rtcp_mbedcrypto m)
 if(RTCP_AUDIO_CODECS)
@@ -152,6 +156,11 @@ if(RTCP_BUILD_TESTS)
         test_airplay_event_port test_airplay_screen_server
         test_airplay_rtsp_server test_airplay_audio_stream
         test_airplay_pairing_e2e)
+
+    if(RTCP_MFI_SOFTWARE)
+        list(APPEND RTCP_TESTS test_mfi_software)
+        list(APPEND RTCP_PORT_TESTS test_mfi_software)
+    endif()
 
     foreach(name ${RTCP_TESTS})
         if(name STREQUAL "test_mfi2c")

@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/mfi.h"
 #include "rtcp/os.h"
 #include "rtcp/net.h"
 
@@ -78,6 +79,9 @@ typedef struct
      * immediately after the callback. False rejects that connection. */
     bool (*get_info_plist)(const uint8_t **bytes, size_t *length, void *context);
     void *info_context;
+    /** Classic MFiSAP identity. Retain until Receiver destruction. A NULL
+     * pointer keeps compatibility with the process-wide legacy SAP setter. */
+    const rtcp_mfi_provider_t *mfi_provider;
 } rtcp_platform_t;
 
 /** Optional authenticated iAP2 tunnel. The host owns radio/Wi-Fi policy.

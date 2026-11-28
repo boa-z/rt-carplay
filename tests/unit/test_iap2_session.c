@@ -530,6 +530,26 @@ static int fake_read_cert(uint8_t *der, size_t cap, size_t *der_len)
     return RTCP_OK;
 }
 
+static int provider_info(void *context, rtcp_mfi_provider_info_t *out)
+{
+    assert(context == &g_harness);
+    *out = (rtcp_mfi_provider_info_t){ RTCP_MFI_PROVIDER_TEST, RTCP_MFI_CAP_IAP2, 2U, 908U };
+    return RTCP_OK;
+}
+
+static int provider_sign(void *context, const uint8_t *challenge, size_t len,
+                         uint8_t *sig, size_t cap, size_t *sig_len)
+{
+    assert(context == &g_harness);
+    return fake_sign(challenge, len, sig, cap, sig_len);
+}
+
+static int provider_cert(void *context, uint8_t *der, size_t cap, size_t *len)
+{
+    assert(context == &g_harness);
+    return fake_read_cert(der, cap, len);
+}
+
 static bool fake_wifi(iap2_session_wifi_t *out, void *context)
 {
     (void)context;
@@ -594,6 +614,12 @@ int main(void)
         .sign = fake_sign,
         .read_cert = fake_read_cert,
     };
+    static const rtcp_mfi_provider_t provider = {
+        .context = &g_harness,
+        .get_info = provider_info,
+        .sign = provider_sign,
+        .read_cert = provider_cert,
+    };
     iap2_session_config_t config = {
         .identity = {
             .name = "rt-carplay test",
@@ -607,7 +633,7 @@ int main(void)
             .bluetooth_address = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
             .provide_location = true,
         },
-        .mfi = &mfi,
+        .mfi_provider = &provider,
         .tx = capture_tx,
         .get_wifi = fake_wifi,
         .get_airplay = fake_airplay,
@@ -827,6 +853,7 @@ int main(void)
                 .provide_vehicle_speed = wired_case == 0,
             },
             .mfi = &mfi,
+            .mfi_provider = wired_case == 0 ? &provider : NULL,
             .tx = capture_tx,
             .get_wifi = NULL,
             .get_airplay = fake_wired_airplay,

@@ -7,6 +7,9 @@
 | 能力 | 状态与证据 |
 | --- | --- |
 | 连接和会话所有权 | **Implemented、Host Tested、Hardware Pending。** Receiver 管理 RTSP 会话、建立和拆除。Luban-Lite 管理传输选择、重试、有线与无线恢复以及配对持久化。Host 测试覆盖监听回滚、重连、资源释放和传输回退。 |
+| Classic MFi 硬件认证 | **Implemented、Host Tested、Hardware Pending。** Linux 和 RT-Thread 通过同一实例接口支持 2.0C 与 3.0 芯片。Host 测试覆盖 I²C 寄存器操作和失败路径，两种 D213 构建均已链接硬件 Provider。 |
+| Classic MFi 软件认证 | **Implemented、Host Tested、Hardware Pending。** Linux 和 RT-Thread 已构建使用外部配置身份的 RSA/SHA-1 及 P-256/SHA-256 后端。合成身份测试覆盖证书与私钥匹配、并发、iAP2，以及与独立 OpenSSL 对端的 MFiSAP。 |
+| 外部认证设备 | **宿主适配接口已实现，Hardware Pending。** 应用可以注入调用外部签名设备的 Provider 实例，适配层负责传输和设备生命周期。 |
 | H.264 投屏和恢复 | **Implemented、Host Tested。** Classic 事件通道支持在 H.264 输入丢失后请求关键帧。早期 D213 固件日志记录了 Siri 启动后从队列溢出恢复。本版本 60 FPS 的显示节奏和从接收到锁存的延迟为 **Hardware Pending**。 |
 | Classic 音频 | **Implemented、Host Tested。** D213 此前已测试音乐、通话和 Siri。本版本的播放、麦克风、Direct/Mixer 和音频路由恢复为 **Hardware Pending**。 |
 | HID、外观、OEM 图标和投屏 | **Implemented、Host Tested、Hardware Pending。** SDK 提供双触点、原始 HID、旋钮、方向与媒体控制、Siri、动态外观和投屏命令。能力声明须与实际输入设备匹配。通过手机事件确认 OEM 焦点与投屏请求。 |
@@ -22,6 +25,18 @@
 `$PASCD` 语句格式和选择器依据 DiPlay 的 `VehicleSpeedNmea.kt` 和 `Iap2LocationClient.kt`。已观察到的固定字段沿用参考值，其通用语义和定位间隔的处理仍需证据。LIVI 的 iAP2 消息定义和事件分发提供了电源、通信、Now Playing、时钟和路线引导的数据布局。OCBM 的配置与音视频文档区分已声明的视区能力和编码后的 Screen 流。
 
 参考版本为 [DiPlay](https://github.com/shihabal3amri/DiPlay/tree/615b32ce0b40cd0b99ce94ba23a512001553684f)、[LIVI](https://github.com/f-io/LIVI/tree/64a05b68358db52ed887169143afd5944fd6f1f7) 和 [OCBM](https://github.com/lvalen91/ocbm/tree/45f5a637d2c59c7b779d47c9ccefa8138764dbf4)。回调契约参见 [Receiver API](receiver-api.md)，关闭顺序参见[生命周期与所有权](lifecycle-and-ownership.md)，媒体检查点参见[音频调试](audio-debug-handoff.md)。
+
+## 配件认证参考
+
+| 参考版本 | 架构及互操作证据 |
+| --- | --- |
+| DiPlay `32f00ff21790a4a57315f02714932d5d59fdfe54` | 一次连接持有一个认证会话，供 iAP2 和 MFiSAP 共用。软件后端用随机挑战验证证书与 P-256 密钥匹配。项目上游说明报告过 BAA 测试，缺少逐设备结果。[源码和说明](https://github.com/shihabal3amri/DiPlay/tree/32f00ff21790a4a57315f02714932d5d59fdfe54) |
+| LIVI `83f80d558cc83fb11cbbf21f68ae89f981830d0c` | `AuthCoprocessor` 接口覆盖 I²C、文件身份和经 TCP 访问的外部设备，异步适配层串行访问同一后端。MFi4 已接入会话处理和隧道配对。该版本仍在建立阶段使用 v3 签名后端，缺少逐机型的 MFi4 验证结果。[源码](https://github.com/f-io/LIVI/tree/83f80d558cc83fb11cbbf21f68ae89f981830d0c/native/crates) |
+| OCBM `893d1efc6aba29ffe2378d5ec70959aaf596926d` | 项目文档描述了跨进程互斥和外设认证传输，并记录了使用预配置的匹配身份完成无线 AuthV3 并显示首帧的台架测试。[台架记录](https://github.com/lvalen91/ocbm/blob/893d1efc6aba29ffe2378d5ec70959aaf596926d/docs/ocbm/01_ROLES_AND_MFI_SOURCE.md) |
+
+上述结论来自源码和上游报告。本版本 SDK 的 D213 与 iPhone 互操作需要单独的实测结果及获得授权的配件身份。本 SDK 对 BAA 和 MFi4 仍处于研究阶段，增加相应能力前需确认协议和身份配置要求。
+
+在 EPYC 7402 开发虚拟机上使用 Release 构建和合成 P-256 身份，取三次进程 CPU 时间的中位数，创建 Provider（含证书和密钥校验）用时 2.28 ms，每次签名 0.73 ms，每组签名 100 次。RISC-V `-Os` 构建在 QEMU C906 中按相同方法测得 27.65 ms 和 7.36 ms。关闭线程分配缓存后，Linux 在 100 次签名后为活跃身份保留 2528 字节堆内存，销毁后回到基线。统计范围不含文件读取和手机响应，板端 CPU、峰值堆栈占用及连接延迟须另测。
 
 ## D213 验收
 

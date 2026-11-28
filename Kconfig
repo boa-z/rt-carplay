@@ -36,6 +36,14 @@ config LPKG_RT_CARPLAY_AUDIO_CODECS
         (BSD-3-Clause) sources. Does not use the SDK binary codec archives.
         Disable for a PCM-only receiver; compressed formats are then refused.
 
+config LPKG_RT_CARPLAY_MFI_SOFTWARE
+    bool "Provisioned software backend for classic MFi authentication"
+    default n
+    help
+        Build the RSA/SHA-1 and P-256/SHA-256 software signer for an identity
+        provisioned by the application. Requires mbedTLS 2.x X.509 parsing,
+        PK key parsing, RSA PKCS#1 v1.5 and P-256 ECDSA.
+
 config LPKG_RT_CARPLAY_HEADLESS_EXAMPLE
     bool "Build the standalone filesystem-backed Headless example"
     default n

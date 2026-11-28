@@ -1073,6 +1073,7 @@ static void server_accept(airplay_rtsp_server_t *server)
 
     airplay_rtsp_session_config_t session_config = { 0 };
     session_config.pairing = server->config.pairing;
+    session_config.mfi_provider = server->config.mfi_provider;
     session_config.info_plist = server->info_plist;
     session_config.info_plist_len = server->info_plist_len;
     session_config.screen_requested_port = server->config.screen_port;

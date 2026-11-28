@@ -25,6 +25,10 @@ MBEDTLS_CPPFLAGS := -I$(MBEDTLS_DIR)/include -Iconfig \
                     -DMBEDTLS_CONFIG_FILE='"mbedtls_rtcp_host.h"'
 MBEDTLS_LIB := $(BUILD)/mbedtls/libmbedcrypto.a
 CPPFLAGS += $(MBEDTLS_CPPFLAGS)
+RTCP_MFI_SOFTWARE ?= 1
+ifeq ($(RTCP_MFI_SOFTWARE),1)
+CPPFLAGS += -DRTCP_MFI_SOFTWARE
+endif
 
 CORE_SRCS := $(wildcard core/*/*.c runtime/*.c)
 CORE_OBJS := $(CORE_SRCS:%.c=$(BUILD)/%.o)
@@ -62,6 +66,10 @@ PORT_TESTS := test_receiver test_airplay_control_port test_airplay_timing_port \
               test_airplay_event_port test_airplay_screen_server \
               test_airplay_audio_stream test_airplay_rtsp_server \
               test_airplay_pairing_e2e
+ifeq ($(RTCP_MFI_SOFTWARE),1)
+TESTS += test_mfi_software
+PORT_TESTS += test_mfi_software
+endif
 BINS := $(addprefix $(BUILD)/,$(TESTS))
 TEST_SUPPORT_OBJ := $(BUILD)/tests/support/airplay_srp6a_test_client.o
 
@@ -128,6 +136,8 @@ $(foreach t,$(PORT_TESTS),$(eval $(call PORT_TEST_RULE,$(t))))
 
 $(BUILD)/test_port_linux: tests/unit/test_port_linux.c $(PORT_LINUX_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(PORT_LINUX_LIB) -lpthread
+
+$(BUILD)/test_mfi_software: LDLIBS += -lpthread
 
 # The TLS and session tests run an in-process mbedTLS server on other
 # threads.

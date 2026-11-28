@@ -184,6 +184,7 @@ static airplay_rtsp_session_result_t streams_setup_response(
 }
 
 static airplay_rtsp_session_result_t handle_mfi_auth_setup(
+    const airplay_rtsp_session_t *session,
     const airplay_rtsp_request_t *request,
     uint8_t *response,
     size_t response_capacity,
@@ -198,8 +199,13 @@ static airplay_rtsp_session_result_t handle_mfi_auth_setup(
 
     uint8_t body[AIRPLAY_MFI_SAP_MAX_RESPONSE_BYTES];
     size_t body_len = 0U;
-    airplay_mfi_sap_result_t result = airplay_mfi_sap_respond(
-        request->body, request->body_len, body, sizeof(body), &body_len);
+    const rtcp_pair_setup_provider_t *pair_setup = &session->config.pairing.pair_setup;
+    airplay_mfi_sap_result_t result = session->config.mfi_provider
+                                          ? airplay_mfi_sap_respond_with_provider(
+                                                session->config.mfi_provider, pair_setup->random, pair_setup->provider_context,
+                                                request->body, request->body_len, body, sizeof(body), &body_len)
+                                          : airplay_mfi_sap_respond(request->body, request->body_len, body,
+                                                                    sizeof(body), &body_len);
     RTCP_LOGI(TAG, "auth_setup result=%d request=%u response=%u",
               (int)result, (unsigned)request->body_len,
               (unsigned)body_len);
@@ -1809,7 +1815,7 @@ airplay_rtsp_session_result_t airplay_rtsp_session_handle(
 
     if (path_has_suffix(request->path, "/auth-setup"))
     {
-        return handle_mfi_auth_setup(request, response, response_capacity,
+        return handle_mfi_auth_setup(session, request, response, response_capacity,
                                      response_len);
     }
 

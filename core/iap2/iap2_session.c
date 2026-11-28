@@ -21,7 +21,7 @@
 #include "rtcp/log.h"
 #include "rtcp/rtcp.h"
 
-#define IAP2_SESSION_CERT_CAPACITY           1536U
+#define IAP2_SESSION_CERT_CAPACITY           RTCP_MFI_WIRE_CERT_MAX
 #define IAP2_SESSION_SIGNATURE_CAPACITY      512U
 #define IAP2_SESSION_IDENTIFICATION_CAPACITY 1024U
 #define IAP2_SESSION_WIFI_BODY_CAPACITY      256U
@@ -318,17 +318,50 @@ static void handle_identification_rejected(iap2_session_t *session,
     (void)send_identification_information(session, now_ms);
 }
 
+static int iap2_provider_info(const rtcp_mfi_provider_t *provider,
+                              rtcp_mfi_provider_info_t *info)
+{
+    if (provider->get_info == NULL || provider->read_cert == NULL || provider->sign == NULL)
+        return RTCP_EINVAL;
+    int result = provider->get_info(provider->context, info);
+    if (result != RTCP_OK)
+        return result;
+    if ((info->capabilities & RTCP_MFI_CAP_IAP2) == 0U ||
+        (info->protocol_major != 2U && info->protocol_major != 3U))
+        return RTCP_ENOTSUP;
+    return RTCP_OK;
+}
+
 static bool read_certificate(iap2_session_t *session,
                              uint8_t *certificate,
                              size_t *certificate_len)
 {
+    const rtcp_mfi_provider_t *provider = session->config.mfi_provider;
     const struct rtcp_mfi *mfi = session->config.mfi;
-    if (mfi == NULL || mfi->read_cert == NULL)
+    rtcp_mfi_provider_info_t info = { 0 };
+    int result = RTCP_ENOTSUP;
+    *certificate_len = 0U;
+    if (provider != NULL)
+    {
+        result = iap2_provider_info(provider, &info);
+        if (result == RTCP_OK)
+            result = provider->read_cert(provider->context, certificate,
+                                         IAP2_SESSION_CERT_CAPACITY, certificate_len);
+    }
+    else if (mfi != NULL && mfi->read_cert != NULL)
+    {
+        result = mfi->read_cert(certificate, IAP2_SESSION_CERT_CAPACITY, certificate_len);
+    }
+    if (result == RTCP_OK && (*certificate_len == 0U ||
+                              *certificate_len > IAP2_SESSION_CERT_CAPACITY ||
+                              (info.certificate_len != 0U && info.certificate_len != *certificate_len)))
+        result = RTCP_EIO;
+    if (result != RTCP_OK)
+    {
+        RTCP_LOGW("iap2", "auth=certificate_failed error=%d", result);
         return false;
-    *certificate_len = IAP2_SESSION_CERT_CAPACITY;
-    return mfi->read_cert(certificate, IAP2_SESSION_CERT_CAPACITY, certificate_len) ==
-               RTCP_OK &&
-           *certificate_len != 0U && *certificate_len <= IAP2_SESSION_CERT_CAPACITY;
+    }
+    return true;
 }
 
 static void handle_authentication_certificate(iap2_session_t *session,
@@ -383,10 +416,11 @@ static bool handle_authentication_challenge(iap2_session_t *session,
                                             size_t body_len,
                                             uint64_t now_ms)
 {
+    const rtcp_mfi_provider_t *provider = session->config.mfi_provider;
     const struct rtcp_mfi *mfi = session->config.mfi;
     const uint8_t *challenge = NULL;
     size_t challenge_len = 0U;
-    if (mfi == NULL || mfi->sign == NULL ||
+    if ((provider == NULL && (mfi == NULL || mfi->sign == NULL)) ||
         !iap2_param_find_single(body, body_len, 0, &challenge, &challenge_len) ||
         challenge_len == 0U || challenge_len > IAP2_SESSION_MAX_CHALLENGE_BYTES)
     {
@@ -395,11 +429,32 @@ static bool handle_authentication_challenge(iap2_session_t *session,
     }
 
     uint8_t signature[IAP2_SESSION_SIGNATURE_CAPACITY];
-    size_t signature_len = sizeof(signature);
-    if (mfi->sign(challenge, challenge_len, signature, sizeof(signature),
-                  &signature_len) != RTCP_OK ||
-        signature_len == 0U || signature_len > sizeof(signature))
+    size_t signature_len = 0U;
+    uint8_t protocol_major = 0U;
+    int result;
+    if (provider != NULL)
     {
+        rtcp_mfi_provider_info_t info = { 0 };
+        result = iap2_provider_info(provider, &info);
+        protocol_major = info.protocol_major;
+        if (result == RTCP_OK &&
+            challenge_len != (protocol_major == 3U ? 32U : RTCP_MFI_CHALLENGE_LEN))
+            result = RTCP_EINVAL;
+        if (result == RTCP_OK)
+            result = provider->sign(provider->context, challenge, challenge_len,
+                                    signature, sizeof(signature), &signature_len);
+    }
+    else
+    {
+        result = mfi->sign(challenge, challenge_len, signature, sizeof(signature),
+                           &signature_len);
+    }
+    if (result == RTCP_OK && (signature_len == 0U || signature_len > sizeof(signature) ||
+                              (protocol_major == 3U && signature_len != 64U)))
+        result = RTCP_EIO;
+    if (result != RTCP_OK)
+    {
+        RTCP_LOGW("iap2", "auth=sign_failed error=%d", result);
         emit_event(session, IAP2_SESSION_EVENT_MFI_SIGN_FAILED);
         return false;
     }

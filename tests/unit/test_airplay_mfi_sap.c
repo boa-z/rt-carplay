@@ -76,6 +76,36 @@ static int fake_sign(const uint8_t *challenge, size_t len,
     return RTCP_OK;
 }
 
+static int timed_out(void *context, rtcp_mfi_provider_info_t *out)
+{
+    assert(context == &g_random_calls);
+    (void)out;
+    return RTCP_ETIMEDOUT;
+}
+
+static int unreachable_cert(void *context, uint8_t *der, size_t cap, size_t *len)
+{
+    (void)context;
+    (void)der;
+    (void)cap;
+    (void)len;
+    assert(!"provider certificate requested after failed info");
+    return RTCP_EIO;
+}
+
+static int unreachable_sign(void *context, const uint8_t *digest, size_t len,
+                            uint8_t *signature, size_t cap, size_t *written)
+{
+    (void)context;
+    (void)digest;
+    (void)len;
+    (void)signature;
+    (void)cap;
+    (void)written;
+    assert(!"provider signature requested after failed info");
+    return RTCP_EIO;
+}
+
 int main(void)
 {
     static const struct rtcp_mfi mfi = {
@@ -143,6 +173,17 @@ int main(void)
             raw_signature_visible = false;
     }
     assert(!raw_signature_visible);
+
+    const rtcp_mfi_provider_t unavailable = {
+        .context = &g_random_calls,
+        .get_info = timed_out,
+        .read_cert = unreachable_cert,
+        .sign = unreachable_sign,
+    };
+    size_t unavailable_len = 1U;
+    assert(airplay_mfi_sap_respond_with_provider(&unavailable, NULL, NULL, request,
+                                                 sizeof(request), response, sizeof(response), &unavailable_len) == AIRPLAY_MFI_SAP_UNAVAILABLE);
+    assert(unavailable_len == 0U);
 
     /* Buffer sizing is checked before any crypto work. */
     assert(airplay_mfi_sap_respond(request, sizeof(request), response,

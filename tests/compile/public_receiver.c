@@ -4,6 +4,7 @@
 #include "rtcp/receiver.h"
 #include "rtcp/receiver_compat.h"
 #include "rtcp/input.h"
+#include "rtcp/mfi_software.h"
 #include "rtcp/display.h"
 #include "rtcp/opack.h"
 #include "rtcp/vehicle.h"

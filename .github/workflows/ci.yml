@@ -48,3 +48,7 @@ jobs:
         run: ./scripts/fetch-mbedtls.sh
       - name: Build and run the host suite
         run: make -j"$(nproc)" check
+      - name: Verify both MFiSAP versions against OpenSSL
+        run: |
+          sudo apt-get install -y python3-cryptography
+          /usr/bin/python3 tests/interop/test_auth_crypto.py

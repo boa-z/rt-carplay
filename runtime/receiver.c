@@ -198,6 +198,7 @@ int rtcp_receiver_config_from_airplay(const struct airplay_rtsp_server_config *a
     config->platform.info_plist_len = a->info_plist_len;
     config->platform.get_info_plist = a->get_info_plist;
     config->platform.info_context = a->info_context;
+    config->platform.mfi_provider = a->mfi_provider;
     config->port = a->port;
     config->screen_port = a->screen_port;
     config->family = a->family;
@@ -277,6 +278,7 @@ int rtcp_receiver_create(const rtcp_receiver_config_t *config,
         .info_plist_len = config->platform.info_plist_len,
         .get_info_plist = config->platform.get_info_plist,
         .info_context = config->platform.info_context,
+        .mfi_provider = config->platform.mfi_provider,
         .port = config->port,
         .screen_port = config->screen_port,
         .family = config->family,

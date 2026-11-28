@@ -107,6 +107,7 @@ typedef struct airplay_rtsp_server_config
     void *alt_screen_message_context;
     rtcp_now_playing_details_cb_t on_now_playing_details;
     void *now_playing_details_context;
+    const rtcp_mfi_provider_t *mfi_provider;
 } airplay_rtsp_server_config_t;
 
 int airplay_rtsp_server_start(const airplay_rtsp_server_config_t *config,

@@ -32,6 +32,14 @@ if (result == RTCP_OK) result = rtcp_receiver_start(receiver);
 
 `port` 默认 7000；`screen_port` 为零时申请临时 Screen 端点。`family` 接受零、`RTCP_AF_INET` 或 `RTCP_AF_INET6`，非法值在 Create 时拒绝。`screen_max_body_bytes` 为零时保留已有的 512 KiB 协议默认值。发现、USB 选择、蓝牙启用、Wi-Fi Handover 策略及连接仲裁由宿主负责。可选 `iap2` 回调用于注册认证后的隧道，不会启动无线硬件。隧道 Tick 返回 false 时仅关闭隧道，保留媒体。
 
+## Classic MFi 认证
+
+将同一个 `rtcp_mfi_provider_t` 传给 `rtcp_platform_t.mfi_provider` 和整条连接上的各个 `iap2_session_config_t.mfi_provider`，包括蓝牙、USB 和 AirPlay iAP2 隧道。Provider 报告后端类型、协议能力、主版本和证书长度，提供线协议证书并为挑战签名。所有 Owner 退出前，须保持实例及其身份有效且稳定。单个 Owner 同步调用 Provider，多个 Owner 之间可并发。硬件或外部后端负责串行化共享事务并限制 I/O 等待时间。SDK 软件后端串行访问私钥。
+
+软件身份通过 `rtcp/mfi_software.h` 的 `rtcp_mfi_software_create()` 接入。宿主用授权配置机制提供证书、私钥及平台分配和互斥接口，并通过 `rtcp_os.random` 或显式回调提供密码学安全随机源。SDK 接受未加密的 DER 私钥或带 NUL 终止符的 PEM。证书可为 DER X.509 或只包含证书的 DER PKCS#7，且须包含对应私钥的签名叶证书。线协议使用原始证书字节。支持 Classic MFi 2.0C RSA（1024 至 2048 位）与 SHA-1，以及 MFi 3.0 P-256 ECDSA 与 SHA-256。证书链的信任和授权由对端判定。停止 Receiver 和所有 iAP2 会话后释放软件 Provider。构建选项为 CMake `RTCP_MFI_SOFTWARE`、Make `RTCP_MFI_SOFTWARE`（0 或 1）和 RT-Thread `LPKG_RT_CARPLAY_MFI_SOFTWARE`（默认关闭）。
+
+Receiver 使用 `pair_setup.random` 完成 SAP 临时密钥交换。MFi 证书与签名身份、AirPlay Ed25519 身份及 Pair-Setup/Pair-Verify 控制器记录分别管理。USB Lockdown 信任记录和蓝牙 Bond 也独立持久化。Provider 返回错误时，当前认证操作失败。实例字段为 NULL 的旧调用方仍可使用旧版 iAP2 回调和进程级 SAP 配置。显式实例优先。
+
 ## 媒体与输入注册
 
 `rtcp/media.h` 定义 Receiver 实际接收的 `rtcp_media_backend_t`。`on_video` 接收配置或访问单元形式的 Annex-B H.264、可写前缀容量、发送端纳秒时间戳及本地到达微秒时间戳。这是编码视频，并非解码像素。缓冲区只借用到回调返回，异步后端须在返回前复制。视频回调为 NULL 时使用明确的丢弃 Sink，支持 Headless 运行。显示和 HMI 可见性仍由宿主决定。
@@ -82,7 +90,7 @@ Classic 路线引导可由 iAP2 Owner 注册 `on_route_guidance`（`0x5201`）�
 
 ## 兼容迁移
 
-既有 Receiver 配置和元数据回调的结构布局保持原样。底层 `iap2_session_config_t` 及其身份描述符增加了可选字段。直接使用 iAP2 的宿主需与 SDK 一起重新编译，将完整描述符初始化为零，再显式设置所需回调或能力声明。
+Receiver 平台配置和底层 `iap2_session_config_t` 增加了可选的实例认证 Provider。宿主需与 SDK 一起重新编译，将完整配置初始化为零，再显式设置所需回调和能力。
 
 早期 `.airplay` 配置过渡字段已由公共 `platform`、`media` 和 `iap2` 描述取代。迁移已有 `airplay_rtsp_server_config_t` 时，包含 `rtcp/receiver_compat.h` 并调用 `rtcp_receiver_config_from_airplay(&legacy, &config)`。该函数先清空目标，再复制所有描述与 Provider 引用，参数为 NULL 时返回 `RTCP_EINVAL`。转换后再设置 `on_state` 和上下文。已有 Provider 生命周期要求仍然适用，辅助函数不分配或打开资源。新集成应直接填写公共配置。
 

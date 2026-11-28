@@ -561,6 +561,7 @@ static bool fake_wifi(iap2_session_wifi_t *out, void *context)
     return true;
 }
 
+static bool wireless_tcp_connected;
 static bool fake_airplay(iap2_session_airplay_t *out, void *context)
 {
     (void)context;
@@ -571,6 +572,7 @@ static bool fake_airplay(iap2_session_airplay_t *out, void *context)
     out->source_version = "rt-carplay/0.1";
     out->mdns_ready = true;
     out->event_connected = false;
+    out->transport_connected = wireless_tcp_connected;
     return true;
 }
 
@@ -637,6 +639,7 @@ int main(void)
         .tx = capture_tx,
         .get_wifi = fake_wifi,
         .get_airplay = fake_airplay,
+        .wireless_invite_delay_ms = 1500U,
         .on_event = capture_event,
         .on_now_playing = capture_now_playing,
         .on_route_guidance = capture_route,
@@ -778,11 +781,16 @@ int main(void)
     assert(last_message(h, 0x5703) != NULL);
     assert(event_seen(h, IAP2_SESSION_EVENT_WIFI_CONFIG_SENT));
 
-    /* CarPlay availability -> start session invitation. */
-    feed_peer_csm(session, 0x4300, NULL, 0, 70);
-    assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED));
+    iap2_session_advance(session, 1559);
+    assert(last_message(h, 0x4301) == NULL);
+    wireless_tcp_connected = true;
+    iap2_session_advance(session, 1560);
+    assert(last_message(h, 0x4301) == NULL);
+    wireless_tcp_connected = false;
+    iap2_session_advance(session, 3060);
+    assert(!event_seen(h, IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED));
     assert(!event_seen(h, IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED));
-    drain_tx(session, 71);
+    drain_tx(session, 3061);
     const csm_record_t *start = last_message(h, 0x4301);
     assert(start != NULL && start->body_len > 0U);
     assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT));
@@ -795,8 +803,12 @@ int main(void)
         if (h->messages[i].id == 0x4301U)
             ++invites;
     }
-    feed_peer_csm(session, 0x4300, NULL, 0, 80);
-    drain_tx(session, 81);
+    const uint64_t retry_due = 3060U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS;
+    wireless_tcp_connected = true;
+    iap2_session_advance(session, retry_due);
+    wireless_tcp_connected = false;
+    feed_peer_csm(session, 0x4300, NULL, 0, retry_due + 1U);
+    drain_tx(session, retry_due + 2U);
     size_t invites_after = 0U;
     for (size_t i = 0; i < h->message_count; ++i)
     {
@@ -807,8 +819,8 @@ int main(void)
     assert(!event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
 
     /* The invite is re-sent once the pacing interval expires. */
-    iap2_session_advance(session, 81U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS + 1U);
-    drain_tx(session, 81U + IAP2_SESSION_CARPLAY_REINVITE_INTERVAL_MS + 2U);
+    iap2_session_advance(session, retry_due + 3U);
+    drain_tx(session, retry_due + 4U);
     assert(event_seen(h, IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT));
 
     /* An active AirPlay event stream suppresses further invites. */

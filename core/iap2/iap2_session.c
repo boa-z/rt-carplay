@@ -76,6 +76,8 @@ struct iap2_session
     bool wired_reinvite_done;
     bool wired_transport_connected;
     bool wired_invite_pending;
+    bool wireless_invite_pending;
+    uint64_t wireless_invite_due_ms;
     bool transport_notification_seen;
     bool mfi_response_pending;
     bool airplay_event_connected;
@@ -184,6 +186,7 @@ static void reset_wireless_negotiation(iap2_session_t *session)
     session->wired_reinvite_done = false;
     session->wired_transport_connected = false;
     session->wired_invite_pending = false;
+    session->wireless_invite_pending = false;
     session->subscriptions_sent = false;
     session->wired_power_sent = false;
     session->transport_notification_seen = false;
@@ -1176,6 +1179,13 @@ static bool send_wifi_configuration(iap2_session_t *session,
         return false;
     }
     ++*count;
+    if (session->config.wireless_invite_delay_ms && !session->config.airplay_tunnel &&
+        !session->airplay_event_connected && !session->carplay_invite_active &&
+        !session->wireless_invite_pending)
+    {
+        session->wireless_invite_pending = true;
+        session->wireless_invite_due_ms = now_ms + session->config.wireless_invite_delay_ms;
+    }
     emit_event(session, IAP2_SESSION_EVENT_WIFI_CONFIG_SENT);
     return true;
 }
@@ -1189,9 +1199,9 @@ static void carplay_invite_acked(uint16_t message_id, void *context)
 static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
                                        bool reinvite)
 {
-    if (!iap2_mfi_auth_is_authenticated(&session->auth))
+    if (session->config.airplay_tunnel || !iap2_mfi_auth_is_authenticated(&session->auth))
         return false;
-    if (session->start_session_sent)
+    if (session->start_session_sent && !reinvite)
         return false;
 
     const bool wired = session_is_wired(session);
@@ -1215,6 +1225,8 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
         session->wired_invite_pending = false;
         return false;
     }
+    if (!wired && (airplay.transport_connected || airplay.event_connected))
+        return false;
 
     iap2_session_wifi_t wifi;
     memset(&wifi, 0, sizeof(wifi));
@@ -1249,6 +1261,7 @@ static bool send_carplay_start_session(iap2_session_t *session, uint64_t now_ms,
         return false;
     }
     session->start_session_sent = true;
+    session->wireless_invite_pending = false;
     session->carplay_invite_active = true;
     session->carplay_invite_at_ms = now_ms;
     emit_event(session, reinvite ? IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT
@@ -1288,10 +1301,8 @@ static void maybe_reinvite_carplay(iap2_session_t *session, uint64_t now_ms)
     {
         return;
     }
-    ++session->carplay_reinvite_count;
-    session->carplay_invite_at_ms = now_ms;
-    session->start_session_sent = false;
-    (void)send_carplay_start_session(session, now_ms, true);
+    if (send_carplay_start_session(session, now_ms, true))
+        ++session->carplay_reinvite_count;
 }
 
 static void handle_transport_notification(iap2_session_t *session,
@@ -1425,6 +1436,13 @@ void iap2_session_advance(iap2_session_t *session, uint64_t now_ms)
     {
         session->wired_invite_pending = false;
     }
+    if (session->wireless_invite_pending && session->link_up &&
+        session->identification_accepted && !session->airplay_event_connected &&
+        now_ms >= session->wireless_invite_due_ms)
+    {
+        session->wireless_invite_due_ms = now_ms + session->config.wireless_invite_delay_ms;
+        (void)send_carplay_start_session(session, now_ms, false);
+    }
     maybe_reinvite_carplay(session, now_ms);
 }
 
@@ -1442,6 +1460,7 @@ void iap2_session_notify_airplay_event(iap2_session_t *session, bool connected,
     }
     if (connected)
     {
+        session->wireless_invite_pending = false;
         session->carplay_invite_active = false;
         session->carplay_reinvite_count = 0U;
         return;

@@ -150,6 +150,8 @@ typedef struct
     bool notify_device_time_invalidation;
     /** When set, takes precedence over the legacy mfi field. */
     const rtcp_mfi_provider_t *mfi_provider;
+    /** RFCOMM fallback after sending Wi-Fi configuration. Zero disables it. */
+    uint32_t wireless_invite_delay_ms;
 } iap2_session_config_t;
 
 #define IAP2_SESSION_IDENTIFICATION_MAX_RETRIES       4U

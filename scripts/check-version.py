@@ -9,6 +9,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--tag')
     parser.add_argument('--binary', type=Path)
+    parser.add_argument('--revision', default='')
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -29,7 +30,7 @@ def main():
 
     if args.binary is not None:
         metadata = runpy.run_path(str(root / 'scripts' / 'build-git-sha.py'))
-        sha = metadata['build_git_sha'](str(root))
+        sha = args.revision or metadata['build_git_sha'](str(root))
         actual = subprocess.check_output([str(args.binary.resolve())], text=True).splitlines()
         if actual != [version, sha]:
             parser.error('expected %r, got %r from the SDK version API' % ([version, sha], actual))

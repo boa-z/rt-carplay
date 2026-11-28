@@ -7,7 +7,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 option(RTCP_AUDIO_CODECS "Build fixed point AAC-LC and Opus" ON)
 option(RTCP_BUILD_TESTS "Build host-side unit tests" ON)
+option(RTCP_BUILD_SIMULATOR "Build the Linux protocol simulator" ${RTCP_BUILD_TESTS})
 option(RTCP_SANITIZE "Enable host address/undefined sanitizers" OFF)
+if(CMAKE_CROSSCOMPILING AND (RTCP_BUILD_TESTS OR RTCP_SANITIZE))
+    message(FATAL_ERROR "Disable RTCP_BUILD_TESTS and RTCP_SANITIZE for target builds")
+endif()
 if(RTCP_SANITIZE)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
@@ -17,32 +21,39 @@ endif()
 # by scripts/fetch-mbedtls.sh; can be overridden with -DRTCP_MBEDTLS_DIR=...
 set(RTCP_MBEDTLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls"
     CACHE PATH "mbedTLS 2.28 source tree")
-set(RTCP_MBEDTLS_LIB "${CMAKE_CURRENT_BINARY_DIR}/mbedtls/libmbedcrypto.a")
-add_custom_command(
-    OUTPUT "${RTCP_MBEDTLS_LIB}"
-    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-mbedtls-host.sh"
-            "${RTCP_MBEDTLS_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/mbedtls"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-mbedtls-host.sh"
-            "${CMAKE_CURRENT_SOURCE_DIR}/config/mbedtls_rtcp_host.h"
-    COMMENT "Building host libmbedcrypto"
-    VERBATIM)
-add_custom_target(rtcp_mbedtls DEPENDS "${RTCP_MBEDTLS_LIB}")
-
-add_library(rtcp_mbedcrypto STATIC IMPORTED GLOBAL)
-set_target_properties(rtcp_mbedcrypto PROPERTIES
-    IMPORTED_LOCATION "${RTCP_MBEDTLS_LIB}"
-    INTERFACE_INCLUDE_DIRECTORIES "${RTCP_MBEDTLS_DIR}/include")
-add_dependencies(rtcp_mbedcrypto rtcp_mbedtls)
+if(NOT EXISTS "${RTCP_MBEDTLS_DIR}/include/mbedtls/chachapoly.h")
+    message(FATAL_ERROR "Set RTCP_MBEDTLS_DIR to a pinned mbedTLS 2.28 source tree")
+endif()
+file(STRINGS "${RTCP_MBEDTLS_DIR}/include/mbedtls/version.h" RTCP_MBEDTLS_VERSION
+     REGEX "^#define MBEDTLS_VERSION_STRING +\"2\\.28\\.[0-9]+\"")
+if(NOT RTCP_MBEDTLS_VERSION)
+    message(FATAL_ERROR "rt-carplay requires mbedTLS 2.28.x")
+endif()
+file(GLOB RTCP_MBEDTLS_SOURCES CONFIGURE_DEPENDS "${RTCP_MBEDTLS_DIR}/library/*.c")
+add_library(rtcp_mbedcrypto STATIC ${RTCP_MBEDTLS_SOURCES})
+target_include_directories(rtcp_mbedcrypto PUBLIC "${RTCP_MBEDTLS_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/config")
+target_compile_definitions(rtcp_mbedcrypto PUBLIC MBEDTLS_CONFIG_FILE="mbedtls_rtcp_host.h")
 
 file(GLOB_RECURSE RTCP_CORE_SOURCES CONFIGURE_DEPENDS core/*.c)
 file(GLOB RTCP_ED25519_SOURCES CONFIGURE_DEPENDS third_party/ed25519/*.c)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(RTCP_GIT_HEADER "${CMAKE_CURRENT_BINARY_DIR}/rtcp_build_git_sha.h")
-add_custom_target(rtcp_git_metadata
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-git-sha.py"
-            "${CMAKE_CURRENT_SOURCE_DIR}" --header "${RTCP_GIT_HEADER}"
-    BYPRODUCTS "${RTCP_GIT_HEADER}"
-    VERBATIM)
+set(RTCP_SOURCE_REVISION "" CACHE STRING "Pinned revision when building an exported source tree")
+if(RTCP_SOURCE_REVISION)
+    string(LENGTH "${RTCP_SOURCE_REVISION}" revision_length)
+    if(NOT RTCP_SOURCE_REVISION MATCHES "^[0-9a-f]+$" OR NOT revision_length EQUAL 40)
+        message(FATAL_ERROR "RTCP_SOURCE_REVISION must be a 40-character Git commit")
+    endif()
+    file(GENERATE OUTPUT "${RTCP_GIT_HEADER}" CONTENT "#define RTCP_BUILD_GIT_SHA ${RTCP_SOURCE_REVISION}\n")
+    add_custom_target(rtcp_git_metadata)
+else()
+    add_custom_target(rtcp_git_metadata
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-git-sha.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}" --header "${RTCP_GIT_HEADER}"
+        BYPRODUCTS "${RTCP_GIT_HEADER}"
+        VERBATIM)
+endif()
 add_library(rtcp_core STATIC runtime/receiver.c runtime/receiver_vehicle.c runtime/version.c
     ${RTCP_CORE_SOURCES} ${RTCP_ED25519_SOURCES})
 add_dependencies(rtcp_core rtcp_git_metadata)
@@ -64,14 +75,10 @@ target_include_directories(rtcp_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/input/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/usb/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core/discovery/include
-    ${RTCP_MBEDTLS_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/config
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/support
 )
 
-target_compile_definitions(rtcp_core PUBLIC
-    MBEDTLS_CONFIG_FILE="mbedtls_rtcp_host.h")
 set_source_files_properties(${RTCP_ED25519_SOURCES} PROPERTIES COMPILE_OPTIONS "-fno-sanitize=undefined;-fwrapv")
+target_compile_definitions(rtcp_core PRIVATE ED25519_NO_SEED)
 target_compile_options(rtcp_core PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(rtcp_core PUBLIC rtcp_mbedcrypto m)
 if(RTCP_AUDIO_CODECS)
@@ -89,10 +96,12 @@ find_package(Threads REQUIRED)
 target_link_libraries(rtcp_port_linux PUBLIC Threads::Threads)
 
 # Host simulator: mDNS + RTSP AirPlay receiver, no video sink.
-file(GLOB RTCP_SIM_SOURCES CONFIGURE_DEPENDS examples/linux_sim/*.c)
-add_executable(rt-carplay-sim ${RTCP_SIM_SOURCES})
-target_link_libraries(rt-carplay-sim PRIVATE rtcp_core rtcp_port_linux)
-target_compile_options(rt-carplay-sim PRIVATE -Wall -Wextra -Werror)
+if(RTCP_BUILD_SIMULATOR)
+    file(GLOB RTCP_SIM_SOURCES CONFIGURE_DEPENDS examples/linux_sim/*.c)
+    add_executable(rt-carplay-sim ${RTCP_SIM_SOURCES})
+    target_link_libraries(rt-carplay-sim PRIVATE rtcp_core rtcp_port_linux)
+    target_compile_options(rt-carplay-sim PRIVATE -Wall -Wextra -Werror)
+endif()
 
 if(RTCP_BUILD_TESTS)
     enable_testing()
@@ -104,6 +113,7 @@ if(RTCP_BUILD_TESTS)
 
     add_library(rtcp_test_support STATIC
         tests/support/airplay_srp6a_test_client.c)
+    target_compile_options(rtcp_test_support PRIVATE -UNDEBUG)
     target_include_directories(rtcp_test_support PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/core
@@ -190,7 +200,7 @@ if(RTCP_BUILD_TESTS)
         COMMAND test_airplay_pairing_e2e --ultra-apps)
     add_test(NAME check_version
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-version.py
-            --binary $<TARGET_FILE:test_version>)
+            --binary $<TARGET_FILE:test_version> "--revision=${RTCP_SOURCE_REVISION}")
     add_test(NAME check_public_api_docs
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-api-docs.py)
     add_test(NAME test_vehicle_controls_independent_wire
@@ -210,7 +220,7 @@ if(RTCP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
-if(RTCP_AUDIO_CODECS)
+if(RTCP_BUILD_TESTS AND RTCP_AUDIO_CODECS)
     add_executable(audio_bench tests/bench/audio_bench.c)
     target_link_libraries(audio_bench PRIVATE rtcp_core)
     target_compile_options(audio_bench PRIVATE -UNDEBUG -Wall -Wextra -Werror)

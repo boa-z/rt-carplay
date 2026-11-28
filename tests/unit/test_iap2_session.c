@@ -390,7 +390,8 @@ static void feed_peer_csm(iap2_session_t *session, uint16_t message_id,
     csm[3] = (uint8_t)csm_len;
     csm[4] = (uint8_t)(message_id >> 8);
     csm[5] = (uint8_t)message_id;
-    if (body_len != 0U)
+    assert(body != NULL || body_len == 0U);
+    if (body != NULL && body_len != 0U)
         memcpy(csm + 6, body, body_len);
     feed_peer_frame(session, 0x40, g_harness.peer_seq++, 0, 10, csm, csm_len, now_ms);
 }

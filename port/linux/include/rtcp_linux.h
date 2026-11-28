@@ -15,6 +15,9 @@ extern const struct rtcp_net rtcp_net_linux;
 extern const struct rtcp_bt rtcp_bt_linux;
 extern const struct rtcp_wifi rtcp_wifi_linux;
 
+int rtcp_net_linux_listen_on(uint8_t family, uint16_t port, const char *interface);
+int rtcp_net_linux_udp_open_on(uint8_t family, uint16_t port, bool reuse, const char *interface);
+
 /* Test/simulator helper: local port bound by a listener created with
  * rtcp_net_linux.listen(0).  Returns 0 on failure. */
 uint16_t rtcp_net_linux_local_port(int fd);

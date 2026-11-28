@@ -356,6 +356,8 @@ static uint32_t ip_emit_array(ip_writer_t *w, const uint32_t *refs, size_t count
 static uint32_t ip_emit_dict(ip_writer_t *w, const uint32_t *keys,
                              const uint32_t *values, size_t count)
 {
+    if (count == 0U)
+        return ip_emit_container(w, IP_MARKER_DICT, 0U, NULL, 0U);
     uint32_t refs[2U * IP_MAX_DICT_ENTRIES];
     if (count > IP_MAX_DICT_ENTRIES)
     {

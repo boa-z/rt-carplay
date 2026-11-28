@@ -13,19 +13,32 @@
 
 #include "rtcp/rtcp.h"
 
-static int listen_socket(uint8_t family, uint16_t port)
+static int bound_socket(uint8_t family, uint16_t port, int type, bool reuse,
+                        const char *interface)
 {
     if (family != RTCP_AF_INET && family != RTCP_AF_INET6)
     {
         return RTCP_EINVAL;
     }
-    int fd = socket(family == RTCP_AF_INET6 ? AF_INET6 : AF_INET,
-                    SOCK_STREAM, 0);
+    int fd = socket(family == RTCP_AF_INET6 ? AF_INET6 : AF_INET, type | SOCK_CLOEXEC, 0);
     if (fd < 0)
         return RTCP_EIO;
 
+    if (interface && setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, interface,
+                               (socklen_t)(strlen(interface) + 1)) != 0)
+    {
+        close(fd);
+        return RTCP_EIO;
+    }
     int one = 1;
-    (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    if (reuse)
+    {
+        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+#ifdef SO_REUSEPORT
+        if (type == SOCK_DGRAM)
+            (void)setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+#endif
+    }
 
     int rc;
     if (family == RTCP_AF_INET6)
@@ -48,12 +61,22 @@ static int listen_socket(uint8_t family, uint16_t port)
         addr.sin_port = htons(port);
         rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
     }
-    if (rc != 0 || listen(fd, 4) != 0)
+    if (rc != 0 || (type == SOCK_STREAM && listen(fd, 4) != 0))
     {
         close(fd);
         return RTCP_EIO;
     }
     return fd;
+}
+
+int rtcp_net_linux_listen_on(uint8_t family, uint16_t port, const char *interface)
+{
+    return bound_socket(family, port, SOCK_STREAM, true, interface);
+}
+
+static int listen_socket(uint8_t family, uint16_t port)
+{
+    return rtcp_net_linux_listen_on(family, port, NULL);
 }
 
 static int accept_socket(int lfd, rtcp_addr_t *peer)
@@ -186,54 +209,14 @@ static void close_fd(int fd)
         close(fd);
 }
 
+int rtcp_net_linux_udp_open_on(uint8_t family, uint16_t port, bool reuse, const char *interface)
+{
+    return bound_socket(family, port, SOCK_DGRAM, reuse, interface);
+}
+
 static int udp_open(uint8_t family, uint16_t port, bool reuse)
 {
-    if (family != RTCP_AF_INET && family != RTCP_AF_INET6)
-    {
-        return RTCP_EINVAL;
-    }
-    int fd = socket(family == RTCP_AF_INET6 ? AF_INET6 : AF_INET,
-                    SOCK_DGRAM, 0);
-    if (fd < 0)
-        return RTCP_EIO;
-
-    if (reuse)
-    {
-        int one = 1;
-        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-#ifdef SO_REUSEPORT
-        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
-#endif
-    }
-
-    int rc;
-    if (family == RTCP_AF_INET6)
-    {
-#ifdef IPV6_V6ONLY
-        int one = 1;
-        (void)setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one));
-#endif
-        struct sockaddr_in6 addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin6_family = AF_INET6;
-        addr.sin6_port = htons(port);
-        rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-    }
-    else
-    {
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        addr.sin_port = htons(port);
-        rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-    }
-    if (rc != 0)
-    {
-        close(fd);
-        return RTCP_EIO;
-    }
-    return fd;
+    return rtcp_net_linux_udp_open_on(family, port, reuse, NULL);
 }
 
 static int udp_join(int fd, const uint8_t group[4])
